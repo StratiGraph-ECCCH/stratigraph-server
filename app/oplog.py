@@ -329,8 +329,16 @@ def journal_for(store: Any, room_id: str) -> Optional[Journal]:
     memoria — su un portatile senza `EM_SNAPSHOT_DIR` non c'è niente che
     sopravviva al processo, e un registro che finge di durare sarebbe peggio di
     nessun registro. `/health` dice quale dei due.
+
+    `journal_root` PRIMA di `root`, e non è una preferenza: uno store che tiene i
+    documenti altrove — `PostgresSnapshotStore` — non ha un `root`, e senza
+    questa riga il registro sarebbe sparito in silenzio il giorno del trasloco,
+    lasciando una stanza senza riproduzione dopo un riavvio e nessuna frase a
+    dirlo. Il registro è un log in coda, non un documento versionato: la sua casa
+    è una domanda a parte, e lo store la risponde per nome invece di lasciarla
+    dedurre da un attributo che significa un'altra cosa.
     """
-    root = getattr(store, "root", None)
+    root = getattr(store, "journal_root", None) or getattr(store, "root", None)
     if root is None:
         return None
     safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in room_id)

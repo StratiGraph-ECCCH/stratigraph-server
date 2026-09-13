@@ -60,7 +60,14 @@ all = ["s3dgraphy[rdf,geo]==1.6.0.dev12"]
 # a missing client must fail at construction with a sentence, which is only
 # possible if it is allowed to be missing.
 s3 = ["minio>=7.2"]
-dev = ["pytest>=7", "httpx>=0.27"]
+# La casa dei documenti (`app/documents.py`). Opzionale per la stessa ragione per
+# cui lo è il client MinIO: un nodo che tiene le sue stanze in una directory —
+# un portatile, una prova — non ha nessun database da aprire, e una dipendenza
+# che può mancare è l'unica che può fallire alla costruzione con una frase.
+# `[pool]` e non solo il driver: `rooms()` sta sul percorso del gate IIIF, e una
+# connessione nuova per ogni tile sarebbe una stretta di mano per pixel.
+pg = ["psycopg[binary,pool]>=3.1"]
+dev = ["pytest>=7", "httpx>=0.27", "psycopg[binary,pool]>=3.1"]
 
 [tool.setuptools]
 packages = ["app"]

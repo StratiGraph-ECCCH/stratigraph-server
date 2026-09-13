@@ -349,8 +349,8 @@ docker-compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 
 That builds StratiGraph Server and StratiGraph Catalog from their own `Dockerfile`s and starts the
 rest: MinIO, a one-shot that **creates the bucket**, Keycloak with the **dev
-realm imported**, Cantaloupe for IIIF, and the two services pointed at all of
-them. First run takes a few minutes (the image builds); after that it is seconds
+realm imported**, Cantaloupe for IIIF, **Postgres for the room documents**, and
+the two services pointed at all of them. First run takes a few minutes (the image builds); after that it is seconds
 — **~15 s** for a full `up -d`, measured.
 
 | what | where | credentials |
@@ -361,6 +361,45 @@ them. First run takes a few minutes (the image builds); after that it is seconds
 | MinIO API | <http://localhost:9000> | idem |
 | Keycloak | <http://localhost:8085> | `admin` / `admin` |
 | Cantaloupe (IIIF) | <http://localhost:8182/iiif/3> | none — public by design |
+| Postgres (the room documents) | `localhost:5433` | `em` / `em`, database `em_documents` |
+
+Postgres is **the house of the documents** (`app/documents.py`): one row per
+`(project_id, revision)`, so a room's history is a set of addressable states and
+not only a sequence of operations in the oplog. `raw bytea` is the only column
+written; `doc jsonb` and `sha256` are `GENERATED ALWAYS … STORED`, because `jsonb`
+normalises — it reorders keys and drops duplicates — and a digest computed on the
+normalised form would not be the digest of the file that came in. Look inside it
+with:
+
+```bash
+docker exec -it em-dev-postgres psql -U em -d em_documents -c "SELECT project_id, revision, sha256, octet_length(raw) FROM documents ORDER BY project_id, revision"
+```
+
+### Moving in — the documents that were already there
+
+A stack that ran before tonight has its rooms as `<room>.em.json` files in the
+`em_data` volume, and the new store has never seen them: **those rooms would open
+empty.** One command moves them in, and it is safe to run twice — a project that
+already has rows is not touched:
+
+```bash
+docker exec em-dev-server python -m app.documents --dry-run   # says what it would do
+docker exec em-dev-server python -m app.documents             # does it
+```
+
+It inserts **the bytes of the file**, not a re-serialisation, so the digest of a
+document that moves in is the digest it always had. Nothing is deleted: the same
+directory also holds the ACLs, the invites and the oplog, and a move that carries
+one thing out is not entitled to tidy up around it.
+
+Measured on this machine: 122 documents in, 122 rows out, every one of them byte
+for byte and digest for digest identical to its file.
+
+What does **not** live there, and the split is the point: the **bodies** (glb,
+pdf, tilesets, images) stay in MinIO, addressed by their digest; the **oplog**
+stays in the `em_data` volume beside the ACLs and the invites, because a replay
+log is a different question from a versioned document. `EM_SNAPSHOT_DIR` is
+therefore still set, and the server passes it to the store as `journal_root`.
 
 Two more behind profiles: **Caddy** on <https://em.localhost:8443> (`--profile
 https`) and **CouchDB** on <http://localhost:5985> (`--profile couchdb`).

@@ -67,12 +67,18 @@ COPY pyproject.toml README.md ./
 # `minio` is here and not behind a build arg for the same reason PyJWT is: an
 # image that cannot reach the object store would come up serving assets from a
 # container filesystem that disappears with the container. 400 KB.
+# `psycopg[binary,pool]` is here for the THIRD time the same reason: da quando i
+# documenti hanno una casa (`app/documents.py`) un'immagine senza il driver non
+# potrebbe aprirla, e `EM_DOCUMENTS_*` configurato senza il client fallirebbe
+# all'avvio — che è il modo giusto di fallire, ma solo se l'alternativa esiste.
+# `[binary]` perché il wheel porta libpq dentro: niente `libpq-dev` da
+# installare e niente compilatore in un'immagine che non ne ha uno.
 RUN set -eu; \
     : "${S3DGRAPHY_VERSION:?required — dev-stack/.env.dev holds it}"; \
     spec="s3dgraphy${S3DGRAPHY_EXTRAS:+[${S3DGRAPHY_EXTRAS}]}==${S3DGRAPHY_VERSION}"; \
     pip install --upgrade pip && \
     pip install "$spec" "fastapi>=0.110" "uvicorn[standard]>=0.27" \
-                "PyJWT[crypto]>=2.8" "minio>=7.2"
+                "PyJWT[crypto]>=2.8" "minio>=7.2" "psycopg[binary,pool]>=3.1"
 
 COPY app ./app
 

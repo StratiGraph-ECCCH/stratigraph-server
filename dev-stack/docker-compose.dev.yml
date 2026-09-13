@@ -505,6 +505,68 @@ services:
     restart: unless-stopped
 
   # =======================================================================
+  # LA CASA DEI DOCUMENTI — Postgres, e ogni revisione e' una riga
+  #
+  # PERCHE' C'E'. Fino a stanotte un documento di stanza viveva come UN file
+  # `<stanza>.em.json` nel volume `em_data`, e `store.py` lo diceva con la parola
+  # che contava: «Replace this room's snapshot». Esisteva cioe' solo l'ultimo
+  # stato — la storia stava nell'oplog come sequenza di operazioni, non come
+  # stati indirizzabili — e due moduli esistevano solo perche' quei file non si
+  # possono interrogare: `digest_index.py`, che ammette di essere un indice a
+  # mano, e la parte di `corpus.py` che risponde «chi cita questo file».
+  #
+  # Qui invece la chiave e' `(project_id, revision)` e ogni scrittura e' una
+  # riga nuova. Cosa ci va e cosa NON ci va, che e' la meta' importante:
+  #
+  #   · ci va IL RECORD  — il documento em.json della stanza, versionato;
+  #   · restano in MinIO I CORPI — glb, pdf, tileset, immagini: byte indirizzati
+  #     dal loro digest, che in un database sarebbero una colonna `bytea` grande
+  #     e nient'altro (vedi `app/assets.py`, che li serve gia' bene);
+  #   · resta nel volume `em_data` L'OPLOG — `<stanza>.oplog.jsonl`, che e' un
+  #     log in coda e non un documento versionato. E' una domanda a parte, e lo
+  #     store lo dice per nome (`journal_root`) invece di lasciarla indovinare.
+  postgres:
+    image: postgres:16-alpine
+    container_name: em-dev-postgres
+    environment:
+      # La convenzione degli altri servizi: nome e parola d'ordine in `.env.dev`,
+      # con un default che va bene su un portatile e che il template di
+      # produzione NON eredita.
+      POSTGRES_DB: "${EM_DOCUMENTS_DB:-em_documents}"
+      POSTGRES_USER: "${EM_DOCUMENTS_USER:-em}"
+      POSTGRES_PASSWORD: "${EM_DOCUMENTS_PASSWORD:-em}"
+      # UTF8 DICHIARATO, e non e' pignoleria: la colonna `doc` e' generata da una
+      # funzione dichiarata IMMUTABLE che converte da UTF8, e su un database con
+      # un'altra codifica quella dichiarazione sarebbe FALSA — dentro un indice,
+      # in silenzio. `app/documents.ensure_schema` lo verifica e si rifiuta di
+      # creare la tabella; questa riga fa si' che non debba mai rifiutarsi.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      # `127.0.0.1:` come tutte le altre, e per la ragione scritta sul servizio
+      # del server: questo nodo fa da hotspot ai tablet del cantiere, e una porta
+      # su `0.0.0.0` qui e' un database raggiungibile da ogni dispositivo
+      # attaccato — con le credenziali che stanno in `.env.dev`.
+      #
+      # 5433 e non 5432: la stessa cortesia che `COUCHDB_PORT` paga al CouchDB di
+      # qualcun altro e `KEYCLOAK_PORT` al Moodle sull'8080. Su una macchina da
+      # archeologi un Postgres locale c'e' quasi sempre (PyArchInit), ed e' suo
+      # il 5432.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - em_documents_data:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` con il database E l'utente veri, non solo la porta: un
+      # socket in ascolto non e' un database che accetta una connessione — e'
+      # la stessa distinzione che il healthcheck di MinIO fa qui sopra
+      # («a listening socket is not a store that will accept an object»).
+      # Durante l'inizializzazione Postgres ascolta gia' e rifiuta ancora.
+      test: ["CMD-SHELL", "pg_isready -U \"${EM_DOCUMENTS_USER:-em}\" -d \"${EM_DOCUMENTS_DB:-em_documents}\" -q"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # =======================================================================
   # THE ROOM — built from em-server's own Dockerfile, unchanged
   # =======================================================================
   stratigraph-server:
@@ -522,6 +584,13 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      # …e la casa dei documenti PRONTA, non solo accesa: `store_from_env`
+      # apre il pool e crea lo schema durante l'import di `app.ws`, cioe' prima
+      # che uvicorn serva la prima richiesta. Un `service_started` qui vorrebbe
+      # dire un server che parte contro un Postgres ancora in inizializzazione e
+      # muore all'import — con uno stack trace invece di un'attesa.
+      postgres:
+        condition: service_healthy
     environment:
       # --- identity: the realm this dev stack seeds --------------------------
       # The issuer is what the TOKEN says it is. Inside the compose network
@@ -546,7 +615,21 @@ services:
       MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD}"
       MINIO_BUCKET: "${MINIO_BUCKET}"
       MINIO_SECURE: "false"
-      # --- room documents ----------------------------------------------------
+      # --- room documents: LA CASA, e la directory che resta accanto ---------
+      # I documenti vanno in Postgres (`app/documents.py`), uno per riga per
+      # revisione. Mezza configurazione qui SOLLEVA invece di ripiegare sulla
+      # directory: un ripiego silenzioso sarebbe un nodo che crede di avere la
+      # storia e ha una cartella.
+      EM_DOCUMENTS_HOST: "postgres"
+      EM_DOCUMENTS_DB: "${EM_DOCUMENTS_DB:-em_documents}"
+      EM_DOCUMENTS_USER: "${EM_DOCUMENTS_USER:-em}"
+      EM_DOCUMENTS_PASSWORD: "${EM_DOCUMENTS_PASSWORD:-em}"
+      # …e la directory NON se ne va, perche' non teneva solo i documenti:
+      # accanto ai `<stanza>.em.json` ci stanno gli ACL, gli inviti, il registro
+      # dei gruppi e — quello che conta di piu' — l'OPLOG di ogni stanza, che e'
+      # il buffer di riproduzione di chi rientra. `store_from_env` la passa allo
+      # store come `journal_root`, cosi' `oplog.journal_for` continua a trovarlo
+      # invece di restituire `None` in silenzio dopo il trasloco.
       EM_SNAPSHOT_DIR: "/srv/em-data/snapshots"
       # --- the resident DTC corpus ------------------------------------------
       # The register rides in the MinIO bucket above (no setting needed for that).
@@ -1153,3 +1236,9 @@ volumes:
   cantaloupe_cache:   # derivatives: a cache, recomputable — not study data
   nodeodm_data:       # the engine's tasks and the archives it still serves
   chatbot_data:       # what the field assistant recorded — study data
+  em_documents_data:  # i documenti delle stanze, una riga per revisione — DATI DI
+                      # STUDIO, non un derivato: qui non c'e' niente da cui
+                      # ricostruirli. Confronta con `em_catalog_data` qui sopra,
+                      # che e' un indice e costa un reindex; questo costa gli
+                      # studi. `fcn-down.sh --wipe` lo cancella, e la domanda che
+                      # quel comando fa prima di farlo e' per cose come questa.

@@ -38,6 +38,7 @@ cp .env.dev.example .env.dev                    # once
 | **MinIO** | API `:9000`, console `:9001` | bucket `em-assets` auto-created |
 | **Keycloak** | `:8085` and `…:8443/auth` | realm `em-dev`; ONE public issuer (https, through Caddy) whichever door you use — see `keycloak/README.md` |
 | **Cantaloupe / IIIF** | `:8182` | reads the SAME bucket, key = asset sha256 |
+| **Postgres** | `:5433` (`em`/`em`, db `em_documents`) | the room documents — one row per `(project_id, revision)`. Bodies stay in MinIO; the oplog stays in `em_data` |
 | **StratiGraph Server** | via Caddy `/em/v1` | the room API |
 | **StratiGraph Catalog** | `:8010` | the register (published studies) |
 | **NodeODM** | `:3010` (its own dashboard) | **not started by `fcn-up.sh`** — opt-in, see §1-bis |
