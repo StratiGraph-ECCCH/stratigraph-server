@@ -19,8 +19,20 @@ byte sono esattamente quelle, quindi ci vuole un em.json vero — e ce n'è uno 
 Non c'è un finto Postgres in questo file. Un doppio di una tabella con due
 colonne **generate** dovrebbe reimplementare la normalizzazione di `jsonb` per
 poterla contraddire, cioè dovrebbe sapere già la risposta che qui si sta
-misurando. `EM_TEST_DOCUMENTS_DSN` punta a un Postgres vero; senza, le prove
-saltano dicendo perché — un salto dichiarato vale più di un verde inventato.
+misurando. Senza un server, le prove saltano dicendo perché — e **dicendo come
+farle girare**: un salto dichiarato vale più di un verde inventato, ma un salto
+che non spiega come rimediare è una prova che marcisce.
+
+## E su QUALE database girano
+
+Su uno **loro**, creato dal giro di prove e cancellato alla fine
+(`documents_dsn` in `conftest.py`). Non su `em_documents`: le prove non scrivono
+mai nel database vivo. La forma di prima leggeva `EM_TEST_DOCUMENTS_DSN`
+dall'ambiente e scriveva dove quella variabile diceva — e la fixture si portava
+via i suoi dati con un `DELETE ... WHERE project_id LIKE 'prova-%'`, che su
+`em_documents` è a un carattere di distanza dal cancellare gli studi di
+qualcuno. Il database di prova, invece, alla fine non esiste più: non c'è niente
+da ripulire e niente da sbagliare.
 """
 
 from __future__ import annotations
@@ -37,13 +49,13 @@ from app import documents as docs
 from app.store import (DirectorySnapshotStore, PostgresSnapshotStore,
                        describe, store_from_env)
 
-DSN = os.environ.get("EM_TEST_DOCUMENTS_DSN", "")
-
-pytestmark = pytest.mark.skipif(
-    not DSN,
-    reason="serve un Postgres vero: EM_TEST_DOCUMENTS_DSN='host=… dbname=… "
-           "user=… password=…'. Un doppio in memoria non può misurare una "
-           "colonna generata.")
+#: Il DSN non si legge più dall'ambiente: lo dà la fixture di sessione, che si
+#: crea un database suo. Questo alias esiste perché le prove scritte in PG1
+#: nominano `DSN` in due punti (`store_from_env`) e cambiare venti firme per
+#: cambiare un nome sarebbe rumore.
+@pytest.fixture(scope="session")
+def DSN(documents_dsn):                         # noqa: N802 — è un nome, non una classe
+    return documents_dsn
 
 
 # ── i documenti su cui si misura ─────────────────────────────────────────────
@@ -75,14 +87,17 @@ def documento() -> pathlib.Path:
 
 
 @pytest.fixture()
-def store(tmp_path):
-    """Uno store vero su un database vero, che si porta via quello che scrive."""
+def store(tmp_path, DSN):
+    """Uno store vero su un database **di prova**, che alla fine non esiste più.
+
+    Non c'è nessun `DELETE ... LIKE 'prova-%'` qui: quella riga serviva a
+    rimettere a posto un database condiviso, ed è la riga che su `em_documents`
+    avrebbe cancellato il lavoro di qualcuno. Con un database per giro non c'è
+    niente da rimettere a posto.
+    """
     created = PostgresSnapshotStore(DSN, journal_root=str(tmp_path))
     yield created
-    with created.pool.connection() as conn:
-        conn.execute(f"DELETE FROM {docs.TABLE} WHERE project_id LIKE %s",
-                     ("prova-%",))
-        conn.commit()
+    created.pool.close()
 
 
 def _id() -> str:
@@ -371,8 +386,16 @@ def _un_digest_qualsiasi(documento: dict):
 
 
 # ── la configurazione, e la mezza configurazione ─────────────────────────────
+#
+# Quattro di queste prove **non vogliono un database**, e da stanotte non
+# saltano più con le altre: leggevano `pytestmark = skipif` in testa al modulo e
+# sparivano insieme a tutte, pur misurando solo `dsn_from_env` e `redact_dsn`.
+# Il salto adesso è per fixture — chiede il database chi lo usa — e quelle
+# quattro girano sempre. Una prova che salta senza averne bisogno è una prova
+# che non copre niente proprio quando servirebbe di più: su una macchina senza
+# Postgres.
 
-def test_store_from_env_sceglie_postgres_e_tiene_la_directory_per_loplog(tmp_path):
+def test_store_from_env_sceglie_postgres_e_tiene_la_directory_per_loplog(tmp_path, DSN):
     scelto = store_from_env({"EM_DOCUMENTS_DSN": DSN,
                              "EM_SNAPSHOT_DIR": str(tmp_path)})
     assert isinstance(scelto, PostgresSnapshotStore)
@@ -388,7 +411,7 @@ def test_senza_postgres_resta_la_directory(tmp_path):
     assert isinstance(scelto, DirectorySnapshotStore)
 
 
-def test_loplog_trova_casa_anche_con_postgres(tmp_path):
+def test_loplog_trova_casa_anche_con_postgres(tmp_path, DSN):
     """La riga di `oplog.journal_for` che non c'era, misurata da fuori."""
     from app.oplog import journal_for
 
@@ -416,3 +439,143 @@ def test_la_parola_dordine_non_finisce_su_health():
     assert docs.redact_dsn("postgresql://em:segreto@db:5432/em") == (
         "postgresql://em:***@db:5432/em")
     assert "segreto" not in docs.redact_dsn("postgresql://em:segreto@db/em")
+
+
+# ── il database delle prove è SUO, e non è quello vivo ───────────────────────
+
+def test_le_prove_non_girano_sul_database_VIVO(DSN):
+    """**La regola non negoziabile, asserita invece che raccomandata.**
+
+    Puntare le prove su `em_documents` sarebbe la comodità che prima o poi
+    cancella i documenti di qualcuno. Questa prova guarda il DSN che le altre
+    diciannove stanno usando e pretende che non sia quello: se un giorno
+    qualcuno «per comodità» ricollega la fixture al database vivo, questa riga
+    è ciò che glielo dice.
+    """
+    from tests.conftest import DATABASE_VIVO
+
+    assert f"dbname={DATABASE_VIVO}" not in DSN, (
+        f"le prove stanno scrivendo nel database vivo ({DATABASE_VIVO})")
+    assert "dbname=em_test_" in DSN, (
+        "il database di prova deve essere creato dal giro, non trovato: "
+        f"DSN = {docs.redact_dsn(DSN)}")
+
+
+def test_il_database_di_prova_esiste_DAVVERO_ed_e_utf8(DSN):
+    """Che sia suo non basta: dev'essere anche UTF8, perché `ensure_schema` si
+    rifiuta altrimenti — e un database di prova creato da `template1` su una
+    macchina con un'altra codifica farebbe fallire le venti prove con un
+    messaggio che sembra un difetto del codice."""
+    pool = docs.open_pool(DSN)
+    try:
+        with pool.connection() as conn:
+            encoding = conn.execute("SHOW server_encoding").fetchone()[0]
+            corrente = conn.execute("SELECT current_database()").fetchone()[0]
+            conn.rollback()
+    finally:
+        pool.close()
+    assert str(encoding).upper().replace("-", "") == "UTF8"
+    assert corrente.startswith("em_test_")
+
+
+# ── P1 · i residui: verificare prima di togliere ─────────────────────────────
+
+def _scrivi(directory, nome, contenuto: bytes):
+    percorso = directory / f"{nome}.em.json"
+    percorso.write_bytes(contenuto)
+    return percorso
+
+
+def test_verifica_i_tre_esiti_e_non_cancella_niente(store, tmp_path):
+    """**I tre esiti sono tre, e non un booleano.**
+
+    `assente` e `diverso` sono due guasti diversi con due cure diverse:
+    il primo vuol dire che il trasloco ha saltato qualcosa, il secondo che il
+    documento è cambiato dopo (o che il file è una revisione più vecchia).
+    Appiattirli su «non si può cancellare» toglierebbe proprio l'informazione
+    per cui questo strumento esiste.
+    """
+    directory = tmp_path / "snapshots"
+    directory.mkdir()
+
+    dentro = _id()
+    byte = json.dumps({"graphs": {"g": {"nodes": []}}}).encode("utf-8")
+    store.put(dentro, json.loads(byte))
+    #: si riprendono i byte COME LI HA SCRITTI LO STORE: `put` riserializza, e
+    #: confrontare i byte del file con una serializzazione diversa misurerebbe
+    #: la libreria json invece della tabella
+    _scrivi(directory, dentro, store.raw_at(dentro, 0)[0])
+
+    fuori = _id()
+    _scrivi(directory, fuori, b'{"mai": "traslocato"}')
+
+    cambiato = _id()
+    store.put(cambiato, {"versione": 1})
+    _scrivi(directory, cambiato, b'{"versione": 99}')
+
+    esito = docs.verify_directory(store.pool, str(directory))
+    assert [v["project"] for v in esito["verificati"]] == [dentro]
+    assert [v["project"] for v in esito["assenti"]] == [fuori]
+    assert [v["project"] for v in esito["diversi"]] == [cambiato]
+
+    #: e il diverso dice QUALI byte ci sono invece, perché «diverso da cosa» è
+    #: la domanda successiva di chiunque legga quella riga
+    assert esito["diversi"][0]["in_tabella"][0]["revisione"] == 0
+
+    #: NESSUN file è stato toccato: verificare non cancella, mai
+    assert len(list(directory.glob("*.em.json"))) == 3
+
+
+def test_la_verifica_confronta_i_BYTE_e_non_il_nome(store, tmp_path):
+    """Un nome dice quale progetto, non quale contenuto. Due file con lo stesso
+    nome e byte diversi devono dare due esiti diversi."""
+    directory = tmp_path / "snapshots"
+    directory.mkdir()
+    project = _id()
+    store.put(project, {"a": 1})
+    _scrivi(directory, project, store.raw_at(project, 0)[0])
+    assert len(docs.verify_directory(store.pool, str(directory))["verificati"]) == 1
+
+    #: stesso nome, un byte di differenza
+    _scrivi(directory, project, store.raw_at(project, 0)[0] + b" ")
+    esito = docs.verify_directory(store.pool, str(directory))
+    assert not esito["verificati"] and len(esito["diversi"]) == 1
+
+
+def test_la_verifica_guarda_SOLO_gli_em_json(store, tmp_path):
+    """In quella directory vivono altri sei registri — `.room.json`, `.acl.json`,
+    `.oplog.jsonl`, `.invites.json`, un `.room.tmp` orfano, `groups.json` e
+    `blend-backup-register/` — e l'oplog ci sta tuttora. Uno strumento che
+    traslocava i documenti non è autorizzato a fare pulizia intorno."""
+    directory = tmp_path / "snapshots"
+    directory.mkdir()
+    for nome in ("una.room.json", "una.acl.json", "una.oplog.jsonl",
+                 "una.invites.json", "una.room.tmp", "groups.json"):
+        (directory / nome).write_bytes(b"{}")
+    (directory / "blend-backup-register").mkdir()
+
+    esito = docs.verify_directory(store.pool, str(directory))
+    assert esito["verificati"] == [] and esito["assenti"] == []
+    assert esito["diversi"] == []
+
+
+def test_togliere_i_verificati_toglie_SOLO_quelli(store, tmp_path):
+    directory = tmp_path / "snapshots"
+    directory.mkdir()
+    buono, cattivo = _id(), _id()
+    store.put(buono, {"a": 1})
+    _scrivi(directory, buono, store.raw_at(buono, 0)[0])
+    _scrivi(directory, cattivo, b'{"mai": "traslocato"}')
+    (directory / "una.room.json").write_bytes(b"{}")
+
+    esito = docs.verify_directory(store.pool, str(directory))
+    tolti = docs.remove_verified(esito)
+
+    assert tolti["tolti"] == [f"{buono}.em.json"] and not tolti["falliti"]
+    rimasti = sorted(p.name for p in directory.iterdir())
+    assert rimasti == [f"{cattivo}.em.json", "una.room.json"]
+
+
+def test_una_directory_che_non_esiste_lo_dice(store, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        docs.verify_directory(store.pool, str(tmp_path / "non-c-e"))

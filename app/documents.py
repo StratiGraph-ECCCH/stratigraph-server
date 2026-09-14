@@ -464,33 +464,179 @@ def migrate_directory(pool: Any, directory: str, *, dry_run: bool = False
     return esito
 
 
+# ── i residui del trasloco ───────────────────────────────────────────────────
+
+#: I tre esiti di una verifica, e **tre comportamenti diversi**. Non è un
+#: booleano «si può cancellare o no»: `assente` e `diverso` sono due guasti
+#: differenti, con due cure differenti, e appiattirli su «no» toglierebbe
+#: proprio l'informazione per cui questo strumento esiste.
+VERIFICATO, ASSENTE, DIVERSO = "verificato", "assente", "diverso"
+
+#: Cosa NON è un documento di stanza, e quindi non riguarda questo strumento.
+#: **Contati sul volume vivo il 13-09-2026**, perché un elenco dedotto dal codice
+#: avrebbe saltato gli ultimi due — e sono i due che non finiscono in `.json`
+#: accanto a un nome di stanza, cioè quelli che un glob scritto a occhio
+#: prenderebbe o lascerebbe per caso:
+#:
+#:     .room.json   295   RoomStore          .oplog.jsonl   87   Journal
+#:     .acl.json    371   AclStore           .invites.json  18   Invites
+#:     .room.tmp      1   una `put` mai conclusa (orfana, vecchia)
+#:     groups.json    1   access.GroupStore
+#:     blend-backup-register/  8 voci   blend_backups
+#:
+#: Sono SEI registri, non quattro. L'oplog in particolare ci vive tuttora,
+#: perché `store_from_env` gli passa ancora `journal_root`. Uno strumento che
+#: traslocava i documenti non è autorizzato a fare pulizia intorno, e infatti il
+#: glob di `verify_directory` è `*.em.json` e nient'altro.
+ALTRI_REGISTRI = (".room.json", ".acl.json", ".oplog.jsonl", ".invites.json",
+                  ".room.tmp", "groups.json", "blend-backup-register")
+
+
+def digest_of(byte: bytes) -> str:
+    """L'impronta dei byte, nella stessa grafia della colonna generata.
+
+    La colonna è `encode(sha256(raw), 'hex')`: minuscola, senza prefisso. Qui si
+    calcola allo stesso modo **in Python**, perché il confronto deve essere fra
+    ciò che c'è sul disco e ciò che il database ha calcolato da sé — far
+    calcolare al database anche il primo dei due vorrebbe dire chiedergli se è
+    d'accordo con se stesso.
+    """
+    return hashlib.sha256(byte).hexdigest()
+
+
+def verify_directory(pool: Any, directory: str) -> Dict[str, Any]:
+    """Per ogni `.em.json` della directory: **esiste una riga con esattamente
+    questi byte?** → `{"verificati": […], "assenti": […], "diversi": […]}`.
+
+    Il confronto è sul **digest dei byte**, non sul nome e non sulla data. Un
+    nome dice quale progetto, non quale contenuto; una data dice quando il file
+    è stato scritto, che dopo una copia o un `rsync` non vuol dire più niente.
+    L'unica domanda che autorizza a cancellare un file è «questi byte sono al
+    sicuro da un'altra parte», e a quella risponde solo l'impronta.
+
+    I tre esiti:
+
+    * **verificato** — esiste una riga con quel digest per quel progetto: il
+      file è rimovibile;
+    * **assente** — nessuna riga con quei byte, per nessuna revisione: il file
+      **non si tocca**, ed è un risultato da gridare, perché vuol dire che il
+      trasloco ha saltato qualcosa;
+    * **diverso** — il progetto ha delle righe, ma nessuna con quei byte: il
+      file **non si tocca**, e si dice quali digest ci sono invece, perché è o
+      una revisione più vecchia del documento o un documento che è cambiato
+      dopo il trasloco — e quelle due cose si distinguono guardando le
+      revisioni, non indovinando.
+
+    **Non cancella niente**, mai, in nessun caso. Chi cancella è `_main`, con un
+    argomento esplicito, e solo i verificati.
+    """
+    root = pathlib.Path(directory)
+    if not root.is_dir():
+        raise FileNotFoundError(f"non c'è nessuna directory {root}")
+
+    ensure_schema_once(pool)
+    esito: Dict[str, Any] = {"directory": str(root), "verificati": [],
+                             "assenti": [], "diversi": []}
+    for path in sorted(root.glob("*.em.json")):
+        project = path.name[: -len(".em.json")]
+        byte = path.read_bytes()
+        atteso = digest_of(byte)
+        with pool.connection() as conn:
+            righe = conn.execute(
+                f"SELECT revision, sha256 FROM {TABLE} WHERE project_id = %s "
+                f"ORDER BY revision", (project,)).fetchall()
+            conn.rollback()
+        digest_in_tabella = {str(r[1]) for r in righe}
+        voce = {"project": project, "file": path.name,
+                "byte": len(byte), "digest": atteso}
+        if atteso in digest_in_tabella:
+            #: quale revisione li tiene: serve a chi legge l'elenco per capire
+            #: se il file è la revisione 0 (il trasloco) o una più recente
+            voce["revisione"] = next(int(r[0]) for r in righe
+                                     if str(r[1]) == atteso)
+            esito["verificati"].append(voce)
+        elif not righe:
+            esito["assenti"].append(voce)
+        else:
+            voce["in_tabella"] = [{"revisione": int(r[0]), "digest": str(r[1])}
+                                  for r in righe]
+            esito["diversi"].append(voce)
+    return esito
+
+
+def remove_verified(esito: Dict[str, Any]) -> Dict[str, Any]:
+    """Toglie **solo** i file che `verify_directory` ha verificato.
+
+    Prende l'esito e non la directory, di proposito: così non esiste un percorso
+    in cui si cancella senza aver prima verificato: il parametro *è* la verifica.
+    """
+    root = pathlib.Path(esito["directory"])
+    tolti, falliti = [], []
+    for voce in esito["verificati"]:
+        try:
+            (root / voce["file"]).unlink()
+            tolti.append(voce["file"])
+        except OSError as exc:
+            #: un permesso o un file già sparito è un fatto sul disco, non un
+            #: difetto del codice: si dice quale e si va avanti
+            falliti.append({"file": voce["file"], "perche": str(exc)})
+    return {"tolti": tolti, "falliti": falliti}
+
+
 def _main(argv: List[str]) -> int:
-    """`python -m app.documents --from /srv/em-data/snapshots`
+    """`python -m app.documents --from /srv/em-data/snapshots [--verify]`
 
     Dentro il container, dove la directory degli snapshot è montata e dove il
     nome di servizio `postgres` si risolve. `--dry-run` per guardare prima.
+
+    Due verbi e non uno, perché sono due gesti diversi: **traslocare** porta i
+    file dentro, **verificare** dice se i byte che sono dentro sono gli stessi
+    dei file — ed è la domanda che va fatta *prima* di togliere qualcosa.
     """
     import argparse
 
     parser = argparse.ArgumentParser(
         description="Porta i <stanza>.em.json di una directory nella tabella "
-                    "dei documenti, come revisione 0.")
+                    "dei documenti, come revisione 0 — oppure verifica che i "
+                    "byte dei file siano già in tabella.")
     parser.add_argument("--from", dest="directory",
                         default=os.environ.get("EM_SNAPSHOT_DIR", ""),
                         help="la directory degli snapshot (default: "
                              "EM_SNAPSHOT_DIR)")
     parser.add_argument("--dry-run", action="store_true",
                         help="dice cosa farebbe, senza scrivere")
+    parser.add_argument("--verify", action="store_true",
+                        help="non trasloca: dice, per ogni file, se esiste in "
+                             "tabella una riga con ESATTAMENTE quei byte")
+    parser.add_argument("--remove-verified", action="store_true",
+                        help="con --verify: toglie dal disco i file verificati "
+                             "(e SOLO quelli). Senza questo argomento non si "
+                             "cancella niente")
     args = parser.parse_args(argv)
 
     if not args.directory:
         parser.error("serve --from, o EM_SNAPSHOT_DIR nell'ambiente")
+    if args.remove_verified and not args.verify:
+        #: cancellare senza aver verificato non è un'opzione che si sbaglia a
+        #: digitare: è la cosa che questo strumento esiste per impedire
+        parser.error("--remove-verified vale solo con --verify: non si toglie "
+                     "un file senza aver prima chiesto se i suoi byte sono al "
+                     "sicuro")
     dsn = dsn_from_env()
     if not dsn:
         parser.error("EM_DOCUMENTS_* non è configurato: non c'è nessuna casa "
                      "in cui traslocare")
 
     pool = open_pool(dsn)
+    try:
+        if args.verify:
+            return _verifica(pool, args)
+        return _trasloco(pool, args)
+    finally:
+        pool.close()
+
+
+def _trasloco(pool: Any, args: Any) -> int:
     esito = migrate_directory(pool, args.directory, dry_run=args.dry_run)
     prefisso = "(prova) " if args.dry_run else ""
     print(f"{prefisso}dalla directory {esito['directory']}")
@@ -499,8 +645,51 @@ def _main(argv: List[str]) -> int:
     print(f"  rotti        : {len(esito['rotti'])}")
     for rotto in esito["rotti"]:
         print(f"    · {rotto['project']}: {rotto['perche']}")
-    pool.close()
     return 1 if esito["rotti"] else 0
+
+
+def _verifica(pool: Any, args: Any) -> int:
+    """Elenca, e cancella **solo** se glielo si chiede per nome.
+
+    Il valore d'uscita distingue i due guasti dal nulla di fatto: **2** se
+    qualche file non è al sicuro (assente o diverso), 0 se sono tutti
+    verificati. Un `grep` su un elenco è una lettura; un valore d'uscita è una
+    cosa che uno script può guardare.
+    """
+    esito = verify_directory(pool, args.directory)
+    print(f"nella directory {esito['directory']}")
+    print(f"  verificati : {len(esito['verificati'])} (i byte sono in tabella)")
+    print(f"  assenti    : {len(esito['assenti'])} (NESSUNA riga con quei byte)")
+    print(f"  diversi    : {len(esito['diversi'])} (righe sì, ma altri byte)")
+
+    for voce in esito["assenti"]:
+        #: da gridare: vuol dire che il trasloco ha saltato qualcosa, e quel
+        #: documento esiste in un posto solo
+        print(f"    ASSENTE  {voce['file']}  ({voce['byte']} byte, "
+              f"{voce['digest'][:12]}…)")
+    for voce in esito["diversi"]:
+        presenti = ", ".join(f"r{r['revisione']}={r['digest'][:12]}…"
+                             for r in voce["in_tabella"])
+        print(f"    DIVERSO  {voce['file']}  file={voce['digest'][:12]}… "
+              f"| in tabella: {presenti}")
+
+    if not args.remove_verified:
+        if esito["verificati"]:
+            print(f"\n  non è stato cancellato niente. Per togliere i "
+                  f"{len(esito['verificati'])} verificati:")
+            print(f"    python -m app.documents --from {esito['directory']} "
+                  f"--verify --remove-verified")
+        return 2 if (esito["assenti"] or esito["diversi"]) else 0
+
+    tolti = remove_verified(esito)
+    print(f"\n  tolti dal disco : {len(tolti['tolti'])}")
+    print(f"  non tolti       : {len(tolti['falliti'])}")
+    for guasto in tolti["falliti"]:
+        print(f"    · {guasto['file']}: {guasto['perche']}")
+    #: gli assenti e i diversi restano dove sono, e il valore d'uscita continua
+    #: a dirlo: aver cancellato i buoni non rende meno grave che ce ne siano di
+    #: non al sicuro
+    return 2 if (esito["assenti"] or esito["diversi"] or tolti["falliti"]) else 0
 
 
 if __name__ == "__main__":   # pragma: no cover — è uno strumento, non una rotta
