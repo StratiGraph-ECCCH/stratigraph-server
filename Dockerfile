@@ -89,6 +89,43 @@ COPY app ./app
 # Hat container guidelines look, so a machine can find it too.
 COPY LICENSE /licenses/LICENSE
 
+# ── L'IMMAGINE DICE COSA CONTIENE ───────────────────────────────────────────
+#
+# Un'immagine che non sa dire cosa contiene è irriproducibile nel modo
+# peggiore, perché SEMBRA riproducibile: due build dello stesso tag portano lo
+# stesso nome e cose diverse dentro.
+#
+# Qui sopra le dipendenze sono chieste con dei RANGE — `fastapi>=0.110`,
+# `uvicorn[standard]>=0.27`, e le altre — e un range risolve a ciò che esisteva
+# il giorno del build. (s3dgraphy no: la riga la costruisce con `==`, quindi è
+# esatta per costruzione. È la ragione per cui i `>=` di `pyproject.toml` NON
+# toccano questa immagine: il progetto non viene installato, solo le
+# dipendenze nominate qui.)
+#
+# Quindi l'elenco di ciò che è finito dentro viene scritto DENTRO, da pip, nel
+# momento in cui pip lo decide. Non è una lista che qualcuno mantiene: è il
+# verbale di quel build.
+#
+#   /licenses/installed.txt       tutto, con le versioni risolte
+#   /licenses/s3dgraphy-version   la sola riga che serve a un occhio
+#
+# In `/licenses` perché è il posto che questa immagine ha già per le cose che
+# viaggiano con il software e si leggono da fuori.
+RUN set -eu; \
+    pip freeze --all > /licenses/installed.txt; \
+    pip show s3dgraphy | sed -n 's/^Version: //p' > /licenses/s3dgraphy-version; \
+    test -s /licenses/s3dgraphy-version
+
+# E l'ETICHETTA, che è ciò che chi specchia l'immagine legge senza tirarla:
+# `imagetools inspect` la dà da un registry pubblico senza credenziali.
+#
+# Il valore è l'ARGOMENTO — cioè quello che abbiamo CHIESTO — mentre il file
+# qui sopra è quello che pip ha DATO. Tenerli separati è il punto: se un giorno
+# `S3DGRAPHY_VERSION` diventasse un range, i due smetterebbero di coincidere, e
+# `scripts/verifica-tirata-anonima.sh` li confronta a ogni pubblicazione. Una
+# sola delle due fonti non avrebbe niente contro cui essere sbagliata.
+LABEL org.stratigraph.s3dgraphy.version="${S3DGRAPHY_VERSION}"
+
 
 # ── NOT ROOT, AND NOT A NAMED USER EITHER ────────────────────────────────────
 #

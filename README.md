@@ -21,6 +21,7 @@ bucket, same realm, different question.
 | the one-command cheat-sheet (+ connect EMtools to MinIO) | [`dev-stack/CHEATSHEET.md`](dev-stack/CHEATSHEET.md) |
 | deploy it on a real host | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
 | know which URL is internal and which public | [`docs/URL-TOPOLOGY.md`](docs/URL-TOPOLOGY.md) |
+| know why the two Heriverse images are not publishable yet | [`docs/HERIVERSE-IMMAGINI.md`](docs/HERIVERSE-IMMAGINI.md) |
 
 > **Status: P0–P4.5.** Read endpoints, Keycloak auth, the MinIO asset store, the
 > IIIF image layer, the WIRE 2 envelope, the room relay and structural real-time

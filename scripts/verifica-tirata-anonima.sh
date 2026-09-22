@@ -143,7 +143,10 @@ echo "  ✓ ci sono tutte le architetture attese ($ARCHITETTURE)"
 # Si leggono con `buildx imagetools`, che le prende dalla CONFIG dell'immagine —
 # misurato che risponde anche a chi non ha credenziali, come il manifesto.
 # Dove buildx non c'è, questo controllo si dichiara saltato invece di fingere.
-ETICHETTE_ATTESE="${ETICHETTE_ATTESE:-org.opencontainers.image.source org.opencontainers.image.revision org.opencontainers.image.version org.opencontainers.image.created org.opencontainers.image.licenses}"
+#: `ETICHETTE_EXTRA` è come un'immagine aggiunge le proprie: le tre immagini
+#: Python ci mettono `org.stratigraph.s3dgraphy.version`, che è ciò che chi le
+#: specchia legge per sapere quale libreria c'è dentro senza tirarle.
+ETICHETTE_ATTESE="${ETICHETTE_ATTESE:-org.opencontainers.image.source org.opencontainers.image.revision org.opencontainers.image.version org.opencontainers.image.created org.opencontainers.image.licenses}${ETICHETTE_EXTRA:+ $ETICHETTE_EXTRA}"
 
 if ! docker buildx version >/dev/null 2>&1; then
   echo "  ~ etichette: NON controllate (manca buildx su questa macchina)"

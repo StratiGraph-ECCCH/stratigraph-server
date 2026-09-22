@@ -211,7 +211,18 @@ services:
   # OBJECT STORE — where the assets actually live (content-addressed)
   # =======================================================================
   minio:
-    image: quay.io/minio/minio:latest
+    # ── PINNATA, E IL DIGEST ACCANTO ────────────────────────────────────────
+    #
+    # Un tag mobile è un'immagine che cambia sotto i piedi di chi la specchia, e
+    # qui c'è chi specchia davvero. Il digest NON è decorazione: un tag di
+    # versione si può ricostruire e ripuntare, e il digest è l'unico nome che
+    # resta fermo — scritto accanto, si VEDE quando qualcuno lo ha spostato.
+    #
+    # Misurato il 22 settembre 2026 su questa macchina, e il pin è stato scelto
+    # per NON cambiare ciò che gira: il tag `RELEASE.2025-09-07T16-13-09Z` risolve allo STESSO
+    # digest che `:latest` aveva già tirato qui. Il pin non aggiorna niente,
+    # scrive soltanto quello che c'era.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z  # sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: em-dev-minio
     command: server /data --console-address ":9001"
     environment:
@@ -275,7 +286,17 @@ services:
   # first request even if em-server is started with credentials that are not
   # allowed to create buckets — which is what production looks like.
   minio-init:
-    image: quay.io/minio/mc:latest
+    # ── PINNATA, E IL DIGEST ACCANTO ────────────────────────────────────────
+    #
+    # Un tag mobile è un'immagine che cambia sotto i piedi di chi la specchia, e
+    # qui c'è chi specchia davvero. Il digest NON è decorazione: un tag di
+    # versione si può ricostruire e ripuntare, e il digest è l'unico nome che
+    # resta fermo — scritto accanto, si VEDE quando qualcuno lo ha spostato.
+    #
+    # Misurato il 22 settembre 2026 su questa macchina, e il pin è stato scelto
+    # per NON cambiare ciò che gira: come per minio, il tag di release risolve allo STESSO
+    # digest già in uso. Il pin non aggiorna niente.
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z  # sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     container_name: em-dev-minio-init
     depends_on:
       minio:
@@ -305,7 +326,30 @@ services:
   # deep zoom (tiles), region delivery (an annotation's crop, served), and
   # interoperability with every IIIF viewer there is.
   cantaloupe:
-    image: islandora/cantaloupe:main
+    # ── PINNATA, E IL DIGEST ACCANTO ────────────────────────────────────────
+    #
+    # Un tag mobile è un'immagine che cambia sotto i piedi di chi la specchia, e
+    # qui c'è chi specchia davvero. Il digest NON è decorazione: un tag di
+    # versione si può ricostruire e ripuntare, e il digest è l'unico nome che
+    # resta fermo — scritto accanto, si VEDE quando qualcuno lo ha spostato.
+    #
+    # Misurato il 22 settembre 2026 su questa macchina, e il pin è stato scelto
+    # per NON cambiare ciò che gira: questa è PER DIGEST e non per tag, ed è la sola delle
+    # tre in cui la differenza si vede. `:main` si era GIÀ mosso: il registry
+    # oggi serve `sha256:19930bfc…` mentre l'immagine in uso è `sha256:938d15c1…`
+    # — cioè il prossimo `docker pull` avrebbe cambiato il server IIIF senza
+    # che nessuno avesse deciso niente.
+    #
+    # E per tag non si poteva: dentro questa immagine c'è **Cantaloupe 5.0.7**
+    # (`Implementation-Version` nel MANIFEST.MF del jar), e i tag di versione
+    # di `islandora/cantaloupe` saltano da 5.1.5 a 6.x fino a 7.0.17 — non
+    # esiste nessun `5.0.7`. Pinnare a un tag di versione qui sarebbe stato un
+    # salto di due major travestito da pin, che è peggio di `:main` perché
+    # sembra una scelta.
+    #
+    # Aggiornare Cantaloupe è un lavoro a sé (7.0.x ha un'altra configurazione):
+    # va fatto guardando, non dentro una riga che dice «pinnata».
+    image: islandora/cantaloupe@sha256:938d15c162c3da1436f10f79cd1c81c8cf412f996fb625c55874194c28bc0077  # Cantaloupe 5.0.7, era :main
     container_name: em-dev-cantaloupe
     depends_on:
       minio-init:

@@ -1642,13 +1642,52 @@ def test_NESSUNO_SCHEMA_PER_CHI_NON_LO_REGISTRA():
     assert d["tools"]["blender"]["paste"] == d["scheme"]
 
 
+def _schemi_di_emstudio() -> set[str]:
+    """Gli schemi che EMStudio registra, letti DOVE STANNO ADESSO.
+
+    ── PERCHÉ QUESTA FUNZIONE ESISTE ──────────────────────────────────────────
+
+    Stavano in `bundle.deepLinkProtocols`. Il 16 settembre 2026 (commit
+    `9306220`) sono stati SPOSTATI in `plugins.deep-link.desktop.schemes`, e il
+    motivo è misurato nel messaggio di quel commit: lo schema di Tauri 2 ha
+    `additionalProperties: false` sotto `bundle`, quindi quella chiave faceva
+    FALLIRE le build della release. Non è una rinuncia: è il posto dove
+    `tauri-plugin-deep-link` le legge davvero.
+
+    Questa prova è rimasta rossa per sei giorni guardando il posto vecchio.
+    Cercava il fatto giusto nella stanza sbagliata, e il suo messaggio diceva
+    «non registra più lo schema» — cioè accusava EMStudio di una cosa non vera.
+    Una prova che ha torto è peggio di una prova che manca, perché la si
+    disattiva e con lei se ne va anche il giorno in cui avrebbe avuto ragione.
+
+    Quindi si guardano ENTRAMBI i posti e si uniscono: il giorno in cui Tauri
+    cambia ancora idea, questa prova segue senza mentire nel frattempo.
+    """
+    conf = _json.loads((TAURI / "tauri.conf.json").read_text(encoding="utf-8"))
+    schemi: set[str] = set()
+    #: dove stanno adesso: il plugin
+    plugin = ((conf.get("plugins") or {}).get("deep-link") or {})
+    for dove in ("desktop", "mobile"):
+        voce = plugin.get(dove)
+        if isinstance(voce, dict):
+            schemi |= set(voce.get("schemes") or [])
+        elif isinstance(voce, list):
+            for v in voce:
+                schemi |= set((v or {}).get("schemes") or [])
+    #: e dove stavano: se un giorno tornassero lì, la prova non deve fingere
+    #: che siano spariti
+    for voce in ((conf.get("bundle") or {}).get("deepLinkProtocols") or []):
+        schemi |= set(voce.get("schemes") or [])
+    return schemi
+
+
 def test_EMSTUDIO_REGISTRA_LO_SCHEMA_e_lo_dice_il_suo_repo():
     """La prova che il fatto è MISURATO e non ripetuto da una lista.
 
-    `desktop: "registered"` in `CONSUMERS` è vero perché il bundle di EMStudio
-    lo dichiara. Questa prova guarda il repository di EMStudio: se quella
-    dichiarazione sparisse, la porta `scheme` di EMStudio diventerebbe una
-    bugia — e qui diventa rossa.
+    `desktop: "registered"` in `CONSUMERS` è vero perché EMStudio lo dichiara.
+    Questa prova guarda il repository di EMStudio: se quella dichiarazione
+    sparisse, la porta `scheme` di EMStudio diventerebbe una bugia — e qui
+    diventa rossa.
     """
     if not TAURI.is_dir():
         pytest.skip("EMStudio non è affiancato: la dichiarazione non si misura")
@@ -1657,11 +1696,11 @@ def test_EMSTUDIO_REGISTRA_LO_SCHEMA_e_lo_dice_il_suo_repo():
     #: la mutazione che rinominava la chiave in `deepLinkProtocolsDISATTIVATO`
     #: la lasciava VERDE, perché la sottostringa c'è ancora. Una prova che una
     #: mutazione non rompe non stava provando niente.
-    conf = _json.loads((TAURI / "tauri.conf.json").read_text(encoding="utf-8"))
-    protocolli = (conf.get("bundle") or {}).get("deepLinkProtocols") or []
-    schemi = {s for voce in protocolli for s in (voce.get("schemes") or [])}
+    schemi = _schemi_di_emstudio()
     assert "stratigraph" in schemi, (
-        f"il bundle di EMStudio non registra più `stratigraph`: {schemi}")
+        f"EMStudio non registra più `stratigraph`: {schemi}. Cercato sia in "
+        f"`plugins.deep-link.desktop.schemes` (dove sta dal 16 set 2026) sia "
+        f"in `bundle.deepLinkProtocols` (dove stava prima).")
     #: …e il plugin che lo fa valere a runtime
     assert "tauri-plugin-deep-link" in (TAURI / "Cargo.toml").read_text(
         encoding="utf-8")
@@ -1673,15 +1712,33 @@ def test_EMSTUDIO_REGISTRA_LO_SCHEMA_e_lo_dice_il_suo_repo():
     #: bundle» non è «registrato su questo computer» — per cui `followScheme`
     #: resta la rete giusta.
     assert "could not register" in rs
+    #: ── E COSA QUESTA PROVA VERDE **NON** DIMOSTRA ─────────────────────────
+    #:
+    #: Misurato in `main.rs` il 22 settembre 2026: quel `register_all()` sta
+    #: sotto `#[cfg(any(target_os = "linux", all(debug_assertions, windows)))]`,
+    #: quindi a runtime gira su Linux e su Windows solo in debug. Su Windows
+    #: release e su macOS la registrazione è dell'INSTALLER, che legge la
+    #: configurazione qui sopra.
+    #:
+    #: Su macOS però lo schema arriva all'app via `CFBundleURLTypes` nel
+    #: `Info.plist`, e nel repository non c'è né un `bundle.macOS` né un
+    #: `Info.plist` sorgente — lo dice anche il commento dentro
+    #: `tauri.conf.json`, con un «TEST THE HANDOFF ON macOS» in maiuscolo.
+    #: L'unico bundle costruito che c'è sul disco è del 23 agosto, cioè PRIMA
+    #: che lo schema esistesse (entrato il 30 agosto, `5240aff`), quindi non
+    #: risponde alla domanda.
+    #:
+    #: Verde qui significa: EMStudio DICHIARA lo schema dove il plugin lo
+    #: legge. Non significa che un `stratigraph://` cliccato su un Mac apra
+    #: EMStudio. Quella è una misura che si fa su un Mac con l'app installata,
+    #: e finché non è fatta resta un buco dichiarato invece che nascosto.
 
 
 def test_E_CONSUMERS_CONCORDA_col_repo_di_EMStudio():
     """I due fatti non devono poter divergere in silenzio."""
     if not TAURI.is_dir():
         pytest.skip("EMStudio non è affiancato")
-    conf = _json.loads((TAURI / "tauri.conf.json").read_text(encoding="utf-8"))
-    protocolli = (conf.get("bundle") or {}).get("deepLinkProtocols") or []
-    dichiara = any("stratigraph" in (v.get("schemes") or []) for v in protocolli)
+    dichiara = "stratigraph" in _schemi_di_emstudio()
     registra = HO.CONSUMERS["emstudio"].get("desktop") == "registered"
     assert dichiara == registra, (
         f"EMStudio dichiara lo schema: {dichiara}; CONSUMERS dice: {registra}")

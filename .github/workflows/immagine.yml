@@ -129,6 +129,29 @@ jobs:
       # davvero un'immagine: un tag si può muovere, un digest no. È quello che
       # si scrive in un deploy che deve restare riproducibile, ed è quello che
       # si manda a chi specchia.
+      # ── L'ETICHETTA DICE IL VERO? ──────────────────────────────────────────
+      #
+      # La verifica anonima guarda che l'etichetta CI SIA. Questa guarda che
+      # dica il vero, e per farlo deve aprire l'immagine: `/licenses/s3dgraphy-version`
+      # lo scrive pip al momento dell'installazione, quindi è ciò che c'è
+      # DENTRO, mentre l'etichetta è ciò che il build ha CHIESTO.
+      #
+      # Ricostruisce per la sola architettura del runner con `load: true` —
+      # una lista multi-arch non si può caricare in un demone — e non costa
+      # quasi niente perché ogni strato viene dalla cache del build qui sopra.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: em-verifica-contenuto:locale
+          build-args: |
+            S3DGRAPHY_VERSION=${{ steps.s3d.outputs.versione }}
+          provenance: false
+
+      - name: L'etichetta e il contenuto dicono la stessa cosa
+        run: ./scripts/verifica-contenuto.sh em-verifica-contenuto:locale
+
       - name: Il digest, scritto dove si legge
         run: |
           {
@@ -138,6 +161,14 @@ jobs:
             echo "digest    ${{ steps.build.outputs.digest }}"
             echo "s3dgraphy ${{ steps.s3d.outputs.versione }}"
             echo '```'
+            echo
+            echo "<details><summary>Cosa contiene davvero (pip, al momento del build)</summary>"
+            echo
+            echo '```'
+            docker run --rm --entrypoint sh em-verifica-contenuto:locale \
+              -c 'cat /licenses/installed.txt'
+            echo '```'
+            echo "</details>"
             echo
             echo "Tag pubblicati:"
             echo '```'
@@ -153,6 +184,10 @@ jobs:
       # GHCR lo crea la prima volta — questo passo è ROSSO anche se il push è
       # perfettamente riuscito.
       - name: Tirata ANONIMA, e entrambe le architetture
+        env:
+          # l'etichetta che dice quale s3Dgraphy c'è dentro: chi specchia
+          # l'immagine la legge dal registry, senza tirarla e senza credenziali
+          ETICHETTE_EXTRA: org.stratigraph.s3dgraphy.version
         run: |
           ./scripts/verifica-tirata-anonima.sh \
             "ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}"
