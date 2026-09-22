@@ -245,6 +245,68 @@ is a decision taken in the wrong place.
 >   `reproject: false`. dev12 declares both, so the pin alone is now enough and the
 >   Dockerfile no longer names rdflib/pyproj separately.
 
+## L'immagine, e il passo che nessun workflow può fare
+
+L'immagine si pubblica su GHCR **su tag**, con
+`.github/workflows/immagine.yml`. Su ogni release:
+
+```
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+Il workflow costruisce `linux/amd64` e `linux/arm64` (PSNC è amd64, il nodo di
+campo è un Raspberry arm64), scrive il **digest** nel sommario del job — che è
+l'unico nome che identifica davvero un'immagine, perché un tag si può muovere —
+e finisce con una tirata **anonima**.
+
+La versione di s3Dgraphy da installare NON ha un default: il `Dockerfile`
+rifiuta di costruire senza, e il workflow fa lo stesso. Va messa una volta in
+**Settings → Secrets and variables → Actions → Variables**, con nome
+`S3DGRAPHY_VERSION`; oppure si passa a mano lanciando il workflow.
+
+### Rendere PUBBLICO il pacchetto — a mano, una volta sola
+
+**Al primo push GHCR crea il pacchetto PRIVATO.** Il workflow diventa verde, il
+push è riuscito davvero, e chi deve specchiare l'immagine non può tirare
+niente.
+
+Non si può automatizzare, e non è un'opinione: misurato il 22 settembre 2026
+con il token di `gh`, l'API REST non ha nessuna rotta per cambiare la
+visibilità di un container package —
+
+```
+GET   /orgs/{org}/packages/container/{nome}     → 404 «Package not found.»
+                                                   (documentation_url della rotta:
+                                                    la rotta ESISTE)
+PATCH /orgs/{org}/packages/container/{nome}     → 404 «Not Found»
+                                                   (documentation_url generico:
+                                                    il verbo non è instradato)
+```
+
+cioè la stessa risposta che dà una rotta inventata. Quindi è un passo di E.D.,
+e questi sono i clic:
+
+1. la pagina del pacchetto — dal repo, colonna destra, **Packages**, oppure
+   `https://github.com/orgs/<org>/packages`
+2. **Package settings** (in alto a destra della pagina del pacchetto)
+3. in fondo, **Danger Zone** → **Change package visibility** → **Public** →
+   si riscrive il nome del pacchetto per confermare
+4. e, sempre in Package settings, **Manage Actions access**: il repository che
+   pubblica dev'essere elencato con permesso *Write* (il primo push lo aggiunge
+   da solo; vale la pena guardarlo)
+
+Poi, dalla propria macchina e senza aver fatto login:
+
+```
+./scripts/verifica-tirata-anonima.sh ghcr.io/<org>/<immagine>:v1.2.3
+```
+
+che è lo stesso script che il workflow esegue come ultimo passo.
+
+*(I quattro clic sono l'interfaccia di GitHub come è documentata: non li ho
+verificati con gli occhi, perché non esiste ancora nessun pacchetto da guardare.
+Il resto di questa sezione è misurato.)*
+
 ## Tests, and how this is verified
 
 ```bash

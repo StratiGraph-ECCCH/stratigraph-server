@@ -828,6 +828,24 @@ def test_E_FCN_UP_NON_COMINCIA_A_SCARICARE(tmp_path):
     assert "up -d --build" not in chiamati, chiamati
 
 
+def _fratelli_dal_compose(compose: pathlib.Path) -> dict[str, str]:
+    """La mappa cartella→URL come la legge `fcn-install.sh`: il blocco
+    `x-sibling-repos`, e nient'altro."""
+    import re as _re
+    dentro, mappa = False, {}
+    for riga in compose.read_text(encoding="utf-8").splitlines():
+        if riga.startswith("x-sibling-repos:"):
+            dentro = True
+            continue
+        if dentro:
+            if riga and not riga[0].isspace():
+                break
+            m = _re.match(r"\s+([^\s#:]+):\s*(\S+)", riga)
+            if m:
+                mappa[m.group(1)] = m.group(2)
+    return mappa
+
+
 @needs_bash
 def test_UN_FRATELLO_ASSENTE_CON_L_URL_lo_clona(tmp_path):
     """L'altra metà: quando sa l'indirizzo, lo clona invece di lamentarsi.
@@ -849,10 +867,24 @@ def test_UN_FRATELLO_ASSENTE_CON_L_URL_lo_clona(tmp_path):
     g.chmod(0o755)
     done = _installa(dev, bin_, tmp_path)
     chiamati = _chiamati(tmp_path)
-    for atteso in ("stratigraph-chatbot.git", "stratigraph-catalog.git"):
-        assert atteso in chiamati, f"non ha clonato {atteso}:\n{chiamati}"
-    #: e dagli indirizzi del compose, non da una lista sua
-    assert "StratiGraph-ECCCH/stratigraph-chatbot" in chiamati, chiamati
+    #: GLI URL ATTESI SI LEGGONO DAL COMPOSE, non si scrivono qui — e non è
+    #: pigrizia, è la stessa regola che questo file difende altrove. Questa
+    #: prova aveva `"stratigraph-chatbot.git"` scritto a mano, ed è diventata
+    #: rossa il 22 settembre 2026 quando il repository è stato rinominato in
+    #: `stratigraph-stratifield`: l'installer faceva la cosa giusta e la prova
+    #: diceva di no, perché era la SECONDA scrittura di un indirizzo che sta
+    #: nel compose.
+    #:
+    #: Quello che si misura qui è il MECCANISMO: l'installer clona ciò che il
+    #: compose dice, e non una lista sua. Che quegli indirizzi siano poi quelli
+    #: canonici — e non un nome vecchio che funziona per redirect — lo misura
+    #: `tests/test_gli_indirizzi_dei_fratelli.py`, che è l'altra metà e non
+    #: sarebbe tautologica insieme a questa.
+    fratelli = _fratelli_dal_compose(dev / "docker-compose.dev.yml")
+    for cartella in ("stratigraph-chatbot", "stratigraph-catalog"):
+        url = fratelli[cartella]
+        assert url in chiamati, f"non ha clonato {cartella} da {url}:\n{chiamati}"
+        assert str(tmp_path) in chiamati, "non dice dove ha clonato"
 
 
 # ── 8.3 · IDEMPOTENTE, E LO DICE ────────────────────────────────────────────

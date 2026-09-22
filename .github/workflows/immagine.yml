@@ -1,0 +1,158 @@
+# immagine · costruisce e pubblica stratigraph-server su GHCR
+#
+# ── SU TAG, NON SU OGNI PUSH ─────────────────────────────────────────────────
+#
+# Un'immagine che cambia sotto i piedi di chi la specchia è ingestibile, e qui
+# c'è qualcuno che specchia davvero: PSNC copia le immagini sul registry interno
+# del loro OpenShift. `main` che si muove è la vita normale di un repo; una
+# release è un fatto che si può citare. Quindi il grilletto è il TAG.
+#
+# ── IL NAMESPACE STA IN UN POSTO SOLO, E NON È SCRITTO QUI ───────────────────
+#
+# `ghcr.io/${{ github.repository }}` — cioè il proprietario del repo. Non c'è
+# nessuna stringa «stratigraph-eccch» in questo file, e la ragione è che il
+# giorno in cui un repo si sposta il pacchetto deve seguirlo senza che qualcuno
+# si ricordi di aggiornare una riga. (`docker/metadata-action` abbassa da solo
+# le maiuscole, che GHCR non accetta.)
+#
+# ── L'ULTIMO PASSO È QUELLO CHE CONTA ────────────────────────────────────────
+#
+# Vedi `scripts/verifica-tirata-anonima.sh`. In breve: al primo push GHCR crea
+# il pacchetto PRIVATO, e questo job — che è autenticato per costruzione — non
+# può accorgersene. Perciò l'ultimo gesto lo fa un estraneo, senza credenziali.
+
+name: immagine
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      s3dgraphy_version:
+        description: 'La versione di s3dgraphy da installare (sovrascrive la variabile del repo)'
+        required: false
+        type: string
+
+# `packages: write` e nient'altro che serva: il GITHUB_TOKEN di un repo può
+# scrivere nel namespace del suo proprietario, e questo è tutto ciò che serve
+# per pubblicare. NESSUN token personale: una chiave di una persona che tiene in
+# ostaggio un artefatto del progetto è la forma che qui si sta smontando, non
+# quella che si sta copiando.
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  immagine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # ── LA VERSIONE DI s3Dgraphy, DICHIARATA O NIENTE ──────────────────────
+      #
+      # Il `Dockerfile` RIFIUTA di costruire senza `S3DGRAPHY_VERSION`, e non è
+      # una svista: un default qui sarebbe una seconda scrittura di un numero
+      # che deve concordare con il resto dello stack, e due scritture di una
+      # versione sono due versioni il giorno in cui qualcuno ne modifica una.
+      # Questo passo tiene la stessa disciplina un gradino più in alto: il
+      # numero sta nella variabile del repository `S3DGRAPHY_VERSION`
+      # (Settings → Secrets and variables → Actions → Variables), oppure lo si
+      # passa a mano lanciando il workflow. Se non c'è, si ferma qui e lo dice —
+      # invece di costruire un'immagine che nessuno ha scelto.
+      - name: La versione di s3Dgraphy
+        id: s3d
+        run: |
+          v="${{ inputs.s3dgraphy_version }}"
+          [ -n "$v" ] || v="${{ vars.S3DGRAPHY_VERSION }}"
+          if [ -z "$v" ]; then
+            echo "::error::S3DGRAPHY_VERSION non è dichiarata. Mettila nelle" \
+                 "variabili del repository (Settings → Secrets and variables →" \
+                 "Actions → Variables), o passala lanciando il workflow a mano." \
+                 "Il Dockerfile rifiuta un default, e questo passo fa lo stesso."
+            exit 1
+          fi
+          echo "versione=$v" >> "$GITHUB_OUTPUT"
+          echo "s3dgraphy $v" >> "$GITHUB_STEP_SUMMARY"
+
+      # QEMU: è ciò che permette a un runner amd64 di costruire anche arm64.
+      # Serve perché le due parti che devono tirare questa immagine NON sono
+      # sulla stessa architettura — PSNC è amd64, il nodo di campo è un
+      # Raspberry arm64, e ci gira uno stack vero.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── I TAG E LE ETICHETTE ───────────────────────────────────────────────
+      #
+      # `:latest` c'è IN AGGIUNTA e mai da solo: un mirror di `:latest` è un
+      # registry che nessuno può riprodurre, perché il nome non dice quale
+      # immagine è. Il tag di versione è immutabile ed è quello che si cita.
+      #
+      # `org.opencontainers.image.source` non è cortesia: è ciò che lega il
+      # pacchetto a questo repo (ed è perché la pagina del pacchetto mostra il
+      # README), e sotto GPL è anche il posto da cui si prende il sorgente
+      # corrispondente a questo binario.
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=sha,format=long
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+          labels: |
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+            org.opencontainers.image.title=stratigraph-server
+            org.opencontainers.image.description=StratiGraph Server — l'API di accesso a s3Dgraphy su HTTP, e la stanza.
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            S3DGRAPHY_VERSION=${{ steps.s3d.outputs.versione }}
+          provenance: false
+
+      # Il DIGEST nel sommario del job, perché è l'unico nome che identifica
+      # davvero un'immagine: un tag si può muovere, un digest no. È quello che
+      # si scrive in un deploy che deve restare riproducibile, ed è quello che
+      # si manda a chi specchia.
+      - name: Il digest, scritto dove si legge
+        run: |
+          {
+            echo "## ${{ github.repository }}"
+            echo
+            echo '```'
+            echo "digest    ${{ steps.build.outputs.digest }}"
+            echo "s3dgraphy ${{ steps.s3d.outputs.versione }}"
+            echo '```'
+            echo
+            echo "Tag pubblicati:"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ── E QUI IL JOB SMETTE DI FIDARSI DI SÉ ───────────────────────────────
+      #
+      # Fin qui è stato autenticato dal primo passo, quindi non ha mai visto il
+      # muro che vede chiunque altro. Lo script cancella ogni credenziale e
+      # ripone la domanda da estraneo. Se il pacchetto è privato — che è come
+      # GHCR lo crea la prima volta — questo passo è ROSSO anche se il push è
+      # perfettamente riuscito.
+      - name: Tirata ANONIMA, e entrambe le architetture
+        run: |
+          ./scripts/verifica-tirata-anonima.sh \
+            "ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}"

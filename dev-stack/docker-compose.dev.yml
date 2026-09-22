@@ -43,10 +43,11 @@ x-s3dgraphy-version: &s3dgraphy_version "${S3DGRAPHY_VERSION:-1.6.0.dev17}"
 # percorsi assoluti. Quello che il compose NON può contenere è da dove si
 # clonano — e `fcn-install.sh` lo legge da qui.
 #
-# Perché non si derivano dal `git remote` di stratigraph-server: misurato, i tre
-# repository stanno su DUE organizzazioni diverse
-# (`zalmoxes-laran` e `StratiGraph-ECCCH`), quindi sostituire il nome nel remote
-# darebbe un URL sbagliato per uno dei tre.
+# Perché non si derivano dal `git remote` di stratigraph-server: misurato il 22
+# settembre 2026, i tre servizi stanno ORMAI tutti in `StratiGraph-ECCCH`, ma
+# `s3Dgraphy` no — è su `zalmoxes-laran`, ed è l'unico repository di questa
+# lista che la sostituzione del nome nel remote manderebbe in un posto
+# sbagliato. Una regola che vale per tre su quattro non è una regola.
 #
 # Perché stanno QUI e non in un file dell'installer: perché una seconda lista
 # sarebbe la copia da tenere allineata. Così c'è UN file, e il cancello in
@@ -157,14 +158,52 @@ x-public-addresses:
       giusto perché in un browser è la macchina di chi guarda, e quella è
       l'unica da cui quella porta si apre
 
+# ── GLI URL SONO QUELLI CANONICI, NON QUELLI CHE FUNZIONANO ──────────────────
+#
+# I tre repository si sono spostati, e fino al 22 settembre 2026 questa lista
+# non lo sapeva: `git clone` funzionava lo stesso, ma per REDIRECT. Misurato con
+# `curl` su github.com quel giorno:
+#
+#   zalmoxes-laran/stratigraph-server    301 → StratiGraph-ECCCH/stratigraph-server
+#   zalmoxes-laran/stratigraph-catalog   301 → StratiGraph-ECCCH/stratigraph-catalog
+#   StratiGraph-ECCCH/stratigraph-chatbot 301 → StratiGraph-ECCCH/stratigraph-stratifield
+#
+# Un redirect di GitHub è una cortesia, non un contratto: smette il giorno in
+# cui qualcuno riusa il nome vecchio, e allora `fcn-install.sh` clona il
+# repository di un altro senza che niente diventi rosso. Qui si scrive dove le
+# cose SONO.
+#
+# Le CHIAVI invece non cambiano, e non è una dimenticanza: la chiave è il nome
+# della CARTELLA (il basename del `context:`, vedi sopra), cioè il nome che il
+# clone ha su questo disco — non il nome del repository. `git clone <url> <dir>`
+# li tiene distinti apposta. Per la stessa ragione restano invariati il nome del
+# servizio nel compose e la chiave `stratigraph-chatbot` in `CONSUMERS`
+# (`app/node_health.py`, che il nome visibile «StratiField» lo tiene già
+# separato dalla chiave).
 x-sibling-repos:
-  stratigraph-server: https://github.com/zalmoxes-laran/stratigraph-server.git
-  stratigraph-chatbot: https://github.com/StratiGraph-ECCCH/stratigraph-chatbot.git
-  stratigraph-catalog: https://github.com/zalmoxes-laran/stratigraph-catalog.git
+  stratigraph-server: https://github.com/StratiGraph-ECCCH/stratigraph-server.git
+  stratigraph-chatbot: https://github.com/StratiGraph-ECCCH/stratigraph-stratifield.git
+  stratigraph-catalog: https://github.com/StratiGraph-ECCCH/stratigraph-catalog.git
   # s3Dgraphy non ha un `context:`: serve solo con `--local-s3d`, che lo monta
   # come volume (`docker-compose.local-s3d.yml`). L'installer lo clona solo se
   # gli si chiede quel modo.
-  s3Dgraphy: https://github.com/zalmoxes-laran/s3Dgraphy.git
+  #
+  # E l'indirizzo è quello NUOVO: il 22 settembre 2026 s3Dgraphy è stato
+  # trasferito in `github.com/ExtendedMatrix`, l'organizzazione della comunità
+  # Extended Matrix — che è più longeva del progetto, e a cui la libreria
+  # appartiene più che a StratiGraph. Misurato con `curl`:
+  #
+  #   zalmoxes-laran/s3Dgraphy   301 → ExtendedMatrix/s3Dgraphy
+  #
+  # Resta UNA cosa aperta, e non si risolve in questo file: esiste ancora
+  # `StratiGraph-ECCCH/s3Dgraphy`. Fino a quella mattina era una copia ferma al
+  # 9 aprile (HEAD `f31f514`, un ANTENATO dell'altro con zero commit propri —
+  # `git merge-base --is-ancestor` misurato in entrambi i versi); ora è stata
+  # riallineata ed è allo stesso commit `aec4a80`. Due repository vivi che
+  # dicono la stessa cosa sono comunque due, e per una libreria pubblicata su
+  # PyPI il canonico dev'essere uno: archiviare quello di troppo è una
+  # decisione di E.D., non una riga di questo file.
+  s3Dgraphy: https://github.com/ExtendedMatrix/s3Dgraphy.git
 
 
 services:
