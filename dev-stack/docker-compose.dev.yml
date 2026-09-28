@@ -314,6 +314,64 @@ services:
       "
     restart: "no"
 
+  # A one-shot: i VOLUMI DEI DATI all'utente con cui girano le immagini, poi
+  # esce. Come `minio-init`, e per la stessa ragione: una cosa che deve essere
+  # vera prima della prima richiesta si fa prima, non si spera.
+  #
+  # ── IL GUASTO CHE CHIUDE, MISURATO IL 28 SETTEMBRE 2026 ─────────────────────
+  #
+  # Le tre immagini girano come `10001:0` (`ARG APP_UID` nei loro Dockerfile:
+  # un UID numerico nel gruppo 0, la forma che OpenShift assegna). I volumi di
+  # questa macchina erano stati creati quando giravano come `1000:1000`, e un
+  # volume che esiste già NON prende la proprietà dall'immagine nuova: la
+  # prende solo un volume vuoto. Risultato, su tutti e tre:
+  #
+  #     PermissionError: '/srv/em-data/snapshots/<stanza>.room.tmp'
+  #     → `POST /v1/rooms` 500, e il 500 che faceva rosso test_room_writer_wire
+  #
+  # Riparato a mano quel giorno (978 file). Questo servizio fa la stessa cosa a
+  # ogni avvio, così un volume di un'immagine vecchia — su questa macchina o su
+  # quella di chiunque cloni — si aggiusta da solo invece di diventare un 500.
+  #
+  # ── COSA FA, E PERCHÉ COSÌ ───────────────────────────────────────────────────
+  #
+  # La regola è quella dei Dockerfile, non una nuova: proprietario `APP_UID`,
+  # gruppo 0, e i permessi del gruppo uguali a quelli del proprietario
+  # (`chmod g=u`), così anche un UID arbitrario del gruppo 0 ci scrive.
+  # Idempotente: tocca solo ciò che non è già così, e dice quanti file ha
+  # toccato — un avvio normale scrive «0». `APP_UID` qui e nei tre Dockerfile
+  # devono coincidere, e `tests/test_i_volumi_si_aggiustano.py` lo controlla.
+  #
+  # Gira come root, ed è l'unico: è un one-shot SENZA RETE, che vede solo i tre
+  # volumi e non tocca nessun altro file del nodo.
+  volumi-init:
+    # ── PINNATA, E IL DIGEST ACCANTO ────────────────────────────────────────
+    # Misurato il 28 settembre 2026: `alpine:3.24.1` risolve allo STESSO digest
+    # dell'`alpine:3` già su questa macchina. Il pin non aggiorna niente.
+    image: alpine:3.24.1  # sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+    container_name: em-dev-volumi-init
+    user: "0:0"
+    network_mode: none
+    environment:
+      APP_UID: "10001"
+    volumes:
+      - em_data:/volumi/em-data
+      - chatbot_data:/volumi/chatbot-data
+      - em_catalog_data:/volumi/em-catalog-data
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        for v in /volumi/*; do
+          n=$$(find "$$v" ! -user "$$APP_UID" -o ! -group 0 | wc -l)
+          find "$$v" \( ! -user "$$APP_UID" -o ! -group 0 \) -exec chown "$$APP_UID:0" {} +
+          m=$$(find "$$v" -perm -u=w ! -perm -g=w | wc -l)
+          chmod -R g=u "$$v"
+          echo "$$v: $$n file ripresi a $$APP_UID:0, $$m con la scrittura di gruppo aggiunta"
+        done
+    restart: "no"
+
   # =======================================================================
   # IIIF IMAGE API — Cantaloupe, reading straight from the bucket
   # =======================================================================
@@ -667,6 +725,9 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      # i volumi all'utente dell'immagine, PRIMA di scriverci: vedi `volumi-init`
+      volumi-init:
+        condition: service_completed_successfully
       # …e la casa dei documenti PRONTA, non solo accesa: `store_from_env`
       # apre il pool e crea lo schema durante l'import di `app.ws`, cioe' prima
       # che uvicorn serva la prima richiesta. Un `service_started` qui vorrebbe
@@ -944,6 +1005,9 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
+      # i volumi all'utente dell'immagine, PRIMA di scriverci: vedi `volumi-init`
+      volumi-init:
+        condition: service_completed_successfully
     environment:
       # --- identity: WHO IS DICTATING, and the reason this is not optional ----
       # No ingestion without an author. The assistant refuses to write without a
@@ -1161,6 +1225,9 @@ services:
       keycloak:
         condition: service_healthy
       minio-init:
+        condition: service_completed_successfully
+      # i volumi all'utente dell'immagine, PRIMA di scriverci: vedi `volumi-init`
+      volumi-init:
         condition: service_completed_successfully
     environment:
       # --- identity: the SAME realm as em-server, and the same two variables --
