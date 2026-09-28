@@ -97,6 +97,13 @@ class Member:
     #: sono identità, quindi non c'è niente da rivalutare e la risposta è
     #: `owner` come alla porta.
     dev_mode: bool = False
+    #: QUANDO SCADE IL TOKEN con cui questa connessione è entrata (`exp`, epoca
+    #: in secondi), o None in modo sviluppo. La porta lo verificava una volta
+    #: sola, al join: una sessione aperta sopravviveva al proprio token — la
+    #: firma valeva finché il socket restava su, cioè anche ore dopo che il
+    #: realm aveva smesso di garantirla. Tenuto qui perché il cancello delle
+    #: scritture (`ws._handle`) lo guardi a ogni verbo che cambia qualcosa.
+    token_exp: Optional[float] = None
     #: L'ULTIMO ISTANTE IN CUI SI È SENTITO QUESTO CLIENT, in due orologi.
     #:
     #: `last_seen` è ISO perché viaggia e lo legge una persona; `last_seen_mono`

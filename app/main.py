@@ -2395,9 +2395,11 @@ async def _acting_role(room_id: str, request: Request) -> tuple:
     """
     principal = authenticator.require_token(request)
     dev_mode = bool(principal.get("em_dev_mode"))
-    orcid = None if dev_mode else (principal.get("orcid")
-                                   or principal.get("preferred_username")
-                                   or principal.get("sub"))
+    # LA STESSA LETTURA DELLA PORTA WEBSOCKET, non una sua copia: la copia
+    # che stava qui saltava `ORCID`, e un realm che scrive la chiave in
+    # maiuscolo avrebbe dato due identità alla stessa persona — una per il
+    # socket e una per il REST, cioè due ruoli nella stessa stanza.
+    orcid = None if dev_mode else _ws._identity(principal)
     room = await rooms().get(room_id)
     role = authorize(room, orcid, dev_mode=dev_mode)
     return load_acl(room_id), room, role, orcid

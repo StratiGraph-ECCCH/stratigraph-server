@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from typing import Any, Dict, Optional
 
@@ -81,6 +82,36 @@ HOST_TOOL = "StratiGraph Server (relay)"
 #: `request_snapshot` is a read — asking for the document again is what a
 #: viewer does when it loses its place.
 _WRITING_VERBS = frozenset({"op", "request_save", "command"})
+
+#: I verbi per cui un token SCADUTO chiude la sessione. Le scritture, e la
+#: lettura del documento intero: una stanza sotto embargo non si rilegge con
+#: una firma che il realm non garantisce più. Non il battito (`still_here`) né
+#: la selezione: sono presenza, non contenuto, e chiudere un EMStudio fermo da
+#: un quarto d'ora per un battito sarebbe punire l'assenza di lavoro.
+_LAPSE_CHECKED = _WRITING_VERBS | {"request_snapshot"}
+
+#: Cosa legge chi ha il token scaduto. Una frase, e poi la porta si chiude con
+#: 4401: la stessa parola del join rifiutato, perché il rimedio è lo stesso —
+#: un token nuovo, e rientrare.
+TOKEN_LAPSED = ("your token has expired: this session is closed, renew the "
+                "token and join again")
+
+
+class TokenLapsed(Exception):
+    """Il token della connessione è scaduto: il ciclo chiude con 4401."""
+
+
+def _lapsed(member, *, now: Optional[float] = None) -> bool:
+    """Il token con cui questo membro è entrato è scaduto?
+
+    Un confronto fra due numeri: misurato, non costa niente accanto alla
+    rilettura dell'ACL che il cancello fa già (`_role_now`). Il modo sviluppo
+    non ha token, quindi non scade.
+    """
+    exp = getattr(member, "token_exp", None)
+    if exp is None or member.dev_mode:
+        return False
+    return (time.time() if now is None else now) >= float(exp)
 
 
 # ── LA RETE, E CHI LA STENDE ─────────────────────────────────────────────────
@@ -467,6 +498,7 @@ async def room_socket(websocket: WebSocket, room_id: str,
     member = room.join(connection_id, websocket, author,
                        display=str(claims.get("name") or author or "anon"),
                        role=role, dev_mode=bool(claims.get("em_dev_mode")))
+    member.token_exp = claims.get("exp")
 
     # ── the join: who you are, what the room is, what you missed ─────────────
     await _send(websocket, envelope("host_info", {
@@ -544,6 +576,12 @@ async def room_socket(websocket: WebSocket, room_id: str,
                 # `_handle` può aver già diffuso la presenza per conto suo (un
                 # cambio di ruolo lo fa), e questa riga non deve rifarlo.
                 await _refresh_presence(room)
+            except TokenLapsed:
+                # LA FIRMA NON VALE PIÙ: la frase è già partita (`denied`), ora
+                # la porta. 4401 come al join: il client sa che il rimedio è un
+                # token nuovo, non un nuovo tentativo con quello vecchio.
+                await websocket.close(code=4401, reason="token expired")
+                break
             except WireError as exc:
                 # A speaker from another protocol version is TOLD, not
                 # half-understood. There are no external clients to migrate, but
@@ -618,6 +656,14 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
     # a frame with a reason rather than a silence: a client that saw its edits
     # vanish without a word would report a lost connection, and the room would
     # get blamed for a rule it applied correctly.
+    if kind in _LAPSE_CHECKED and _lapsed(member):
+        # §5 · IL TOKEN SI RILEGGE ANCHE LUI. La porta lo verificava al join e
+        # basta: una sessione aperta alle 9 con un token da un'ora scriveva
+        # ancora alle 17. Adesso la scrittura dopo la scadenza è rifiutata, con
+        # la frase, e la sessione si chiude (`TokenLapsed` → 4401).
+        await _deny(websocket, member, kind, TOKEN_LAPSED)
+        raise TokenLapsed()
+
     if kind in _WRITING_VERBS:
         # §4 · IL RUOLO SI RILEGGE, e si rilegge QUI. Prima era congelato su
         # `member.role` alla porta, e la conseguenza è misurata: `US911: DOPO

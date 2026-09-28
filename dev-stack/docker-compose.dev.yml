@@ -992,6 +992,15 @@ services:
       # che qualcuno ti ha passato. VUOTO qui, e per la stessa ragione delle due
       # sopra: un link senza token fa rifiutare l'avvio, e ha ragione.
       EM_CHATBOT_HANDOFF: "${EM_CHATBOT_HANDOFF:-}"
+      # --- A CHI SI PUÒ PRESENTARE LA FIRMA DI UNA PERSONA (25 ottobre) -------
+      # Dal 25 ottobre il nodo scrive nella stanza col token di chi detta
+      # (`app/scrivani.py`), e quel token va SOLO ai server nominati qui: il
+      # *confused deputy* di un link che sceglie il server si chiude così. Nel
+      # container il nome pubblico del nodo non si raggiunge da dentro, quindi
+      # la voce è `pubblico=raggiungibile`. Il pubblico segue `EM_PUBLIC_BASE`
+      # (lo costruisce `fcn-up.sh` al rinomino), il raggiungibile è il nome del
+      # servizio sulla rete di compose.
+      EM_ROOM_SERVERS: "${EM_CHATBOT_ROOM_SERVERS:-${EM_PUBLIC_BASE:-https://em.localhost:${HTTPS_PORT:-8443}/em}=http://stratigraph-server:8000}"
       # --- LA DISPENSA: dove aspettano i byte che non sono ancora saliti ------
       # Misurato il 30 settembre, staccando MinIO con il servizio in piedi: una
       # foto di cantiere impiega 306 s a fallire e poi non e' da nessuna parte,

@@ -20,7 +20,14 @@ What it seeds, and why each piece is needed to get a token with `curl`:
 | user `dev` / `dev` | the human; carries the ORCID attribute. Bootstraps as the **owner** of any room they are the first to join |
 | user `viewer` / `viewer` | a second, ordinary authenticated identity with **no** membership anywhere. Added 2026-08-17 for the embargo end-to-end (`dev-stack/smoke_embargo_viewer.py`): the gate refuses anybody below editor, and with one user in the realm there was nobody to be refused — the 403 could only be measured against a stand-in. Its ORCID is a different one, so a room can tell the two apart |
 
+| users `editor` / `editor2` / `outsider` (password = username) | added 2026-10-25 for **firme vere e ruoli nella stanza**: the four cases a room tells apart need four people. `editor` and `editor2` are two editors (two authors to tell apart in one room's register), `viewer` above is the reader, and `outsider` is an authenticated identity with **no** role anywhere — the one the door closes on with 4403. ORCIDs `0000-0003-1111-1112`, `0000-0003-2222-2221`, `0000-0003-3333-3330` (valid check digits, not real people). The ROLES are not here: roles live in the room's ACL on StratiGraph Server (`PUT /v1/rooms/{id}/members/{orcid}`), the realm only says who somebody is |
+| client `stratifield-breve` | public, PKCE S256, **access tokens of 60 s**, same three mappers as `em-console` (`em-server` + `em-chatbot` audiences, `orcid`), redirect URIs of the field page only. Exists for the EXPIRY proofs: `em-console` issues 900 s, and a token that lapses inside an open session is a thing nobody waits a quarter of an hour to watch. Direct access grants ON, so a smoke can mint one with `curl` (dev realm only). Point a StratiField at it with `EM_CHATBOT_CLIENT_ID=stratifield-breve` |
+
 No custom scope is required, so `OIDC_REQUIRED_SCOPE` stays unset.
+
+**Lifespans, measured on 25 October**: `em-server` (password grant) 3600 s ·
+`em-console` (the pages' PKCE client) 900 s · `stratifield-breve` 60 s. The
+refresh token lives 1800 s (`refresh_expires_in`), the realm's SSO idle.
 
 ## `em-console`'s redirect URIs, and the two that are deliberately NOT there
 
