@@ -54,6 +54,7 @@ from fastapi import Request
 from .assets import ASSET_STORE, asset_ref_valid
 from .assets import describe as asset_describe
 from .auth import AuthDependency, authenticator
+from .identity import identity_of
 from .access import Acl, Group, Role, may_assign, parse_role
 from .access import describe as acl_describe
 from .corpus import (CORPUS_STORE, RESIDENT, canonical_digest, may_read_whole,
@@ -874,9 +875,7 @@ async def put_asset(room_id: str, request: Request,
         raise HTTPException(status_code=400, detail="empty body: nothing to store")
     info = ASSET_STORE.put(data, media_type)
     principal = authenticator.require_token(request)
-    author = None if principal.get("em_dev_mode") else (
-        principal.get("orcid") or principal.get("preferred_username")
-        or principal.get("sub"))
+    author = None if principal.get("em_dev_mode") else identity_of(principal)
     return AssetInfo(**info, author=author)
 
 
@@ -1310,8 +1309,7 @@ async def _role_in_room(room_id: str, request: Request):
                       else authenticator.verify(str(token).strip()))
         except Exception:  # noqa: BLE001 — a bad token is simply not an identity
             claims = {}
-    orcid = None if claims.get("em_dev_mode") else (
-        claims.get("orcid") or claims.get("preferred_username") or claims.get("sub"))
+    orcid = None if claims.get("em_dev_mode") else identity_of(claims)
     room = await rooms().get(room_id)
     return authorize(room, orcid, dev_mode=bool(claims.get("em_dev_mode")))
 
@@ -1436,9 +1434,7 @@ def get_corpus(
     if not digests:
         principal = authenticator.require_token(request)
         dev_mode = bool(principal.get("em_dev_mode"))
-        who = None if dev_mode else (principal.get("orcid")
-                                     or principal.get("preferred_username")
-                                     or principal.get("sub"))
+        who = None if dev_mode else identity_of(principal)
         if not may_read_whole(who, dev_mode=dev_mode):
             raise HTTPException(status_code=403, detail=whole_read_refusal())
     section = RESIDENT.read_slice(digests or None)
@@ -1709,8 +1705,7 @@ def _identity_of(request: Request) -> Optional[str]:
         claims = {}
     if claims.get("em_dev_mode"):
         return None
-    return (claims.get("orcid") or claims.get("preferred_username")
-            or claims.get("sub"))
+    return identity_of(claims)
 
 
 async def _role_without_bootstrap(room_id: str, orcid: Optional[str],
@@ -2660,9 +2655,7 @@ def _caller_identity(request: Request) -> tuple:
     """
     principal = authenticator.require_token(request)
     dev_mode = bool(principal.get("em_dev_mode"))
-    orcid = None if dev_mode else (principal.get("orcid")
-                                   or principal.get("preferred_username")
-                                   or principal.get("sub"))
+    orcid = None if dev_mode else identity_of(principal)
     return orcid, dev_mode
 
 
@@ -3394,8 +3387,7 @@ def _require_operator(request: Request) -> Optional[str]:
         raise HTTPException(status_code=403, detail=ops.refusal())
     if principal.get("em_dev_mode"):
         return None
-    return (principal.get("orcid") or principal.get("preferred_username")
-            or principal.get("sub"))
+    return identity_of(principal)
 
 
 class NodeWhoAmI(BaseModel):
@@ -3453,9 +3445,7 @@ async def node_whoami(request: Request) -> NodeWhoAmI:
     "you are not an operator, here is who grants it" teaches people to reload."""
     principal = authenticator.require_token(request)
     is_op = ops.is_operator(principal)
-    who = None if principal.get("em_dev_mode") else (
-        principal.get("orcid") or principal.get("preferred_username")
-        or principal.get("sub"))
+    who = None if principal.get("em_dev_mode") else identity_of(principal)
     return NodeWhoAmI(operator=is_op, orcid=who, capability=ops.describe(),
                       auth=authenticator.settings.describe())
 
@@ -3882,8 +3872,7 @@ def _caller(request: Request) -> Optional[str]:
     principal = authenticator.require_token(request)
     if principal.get("em_dev_mode"):
         return None            # dev mode has no identities; see `access.py`
-    return (principal.get("orcid") or principal.get("preferred_username")
-            or principal.get("sub"))
+    return identity_of(principal)
 
 
 def _may_manage(group: Group, who: Optional[str], request: Request) -> None:
@@ -4018,9 +4007,7 @@ def member_whoami(request: Request) -> WhoAmI:
     principal = authenticator.require_token(request)
     dev_mode = bool(principal.get("em_dev_mode"))
     return WhoAmI(
-        orcid=None if dev_mode else (principal.get("orcid")
-                                     or principal.get("preferred_username")
-                                     or principal.get("sub")),
+        orcid=None if dev_mode else identity_of(principal),
         name=principal.get("name") or None,
         enforcing=bool(authenticator.settings.enforcing))
 

@@ -40,6 +40,7 @@ from . import access
 from .access import (Acl, Groups, Role, acl_store_from_env,
                      group_store_from_env)
 from .auth import authenticator
+from .identity import identity_of
 from . import keeping
 from . import presence
 from .rooms import RoomRegistry, now_iso
@@ -290,19 +291,15 @@ ws_router = APIRouter(prefix="/v1")
 def _identity(claims: Dict[str, Any]) -> Optional[str]:
     """The author to stamp operations with, out of the token's claims.
 
-    ORCID first, because in this ecosystem the ORCID iD **is** the identity
-    (AUDIT1/ORCID batch); then the realm's preferred username, then the subject.
-    In dev mode there is no token and therefore no author — and the honest
-    answer is None, which the stamp treats as "unknown" rather than inventing
-    somebody.
+    The order is ONE, decided in `app/identity.py` (ORCID first, in all its
+    spellings; then the realm's preferred username, then the subject) and
+    shared with every HTTP endpoint and with StratiField. In dev mode there is
+    no token and therefore no author — and the honest answer is None, which the
+    stamp treats as "unknown" rather than inventing somebody.
     """
     if claims.get("em_dev_mode"):
         return None
-    for key in ("orcid", "ORCID", "preferred_username", "sub"):
-        value = claims.get(key)
-        if value:
-            return str(value)
-    return None
+    return identity_of(claims)
 
 
 def load_acl(room_id: str) -> Acl:

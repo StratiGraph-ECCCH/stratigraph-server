@@ -39,6 +39,8 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Iterable, List, Optional
 
+from .identity import identity_of
+
 #: The realm role that carries the capability. Renamable because a realm shared
 #: with other services may already have a naming convention.
 DEFAULT_ROLE = "em-operator"
@@ -97,8 +99,7 @@ def is_operator(claims: Optional[Dict[str, Any]], *,
     wanted = operator_role(environ)
     if any(role == wanted for role in _roles_in(claims)):
         return True
-    who = _norm(claims.get("orcid") or claims.get("preferred_username")
-                or claims.get("sub"))
+    who = _norm(identity_of(claims))
     return bool(who) and who in operators(environ)
 
 

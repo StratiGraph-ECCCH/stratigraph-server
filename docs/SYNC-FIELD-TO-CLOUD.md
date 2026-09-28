@@ -280,7 +280,12 @@ The services are the only place that can read the graph and decide.
 **Correct, and there is a concrete mechanism behind it.**
 
 Measured: the author of an operation is always the **identity on the caller's
-token**, resolved as `orcid` → `preferred_username` → `sub`, and the client's own
+token**, resolved in ONE order decided by this service (`app/identity.py`,
+2026-09-28): `orcid` → `ORCID` → `orcid_id` → `https://orcid.org/id` →
+`preferred_username` → `sub`, the first claim that speaks deciding. StratiField
+carries the same tuple and a test compares the two, so the node that writes the
+note and the room that stamps it cannot disagree on who wrote it (before, with the
+ORCID only in `orcid_id`, they did). The client's own
 `author` field is **dropped before anything else**, on both the WebSocket and
 the HTTP path (`ws.py:651`). The comment is explicit: *"an author nobody verified
 is not an author."*
