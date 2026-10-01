@@ -31,7 +31,13 @@ dependencies = [
     #     [rdf] brings rdflib. Without them /v1/reproject and /v1/export-ttl are
     #     honest 501s rather than working endpoints.
     # Loosen to `>=1.6` once 1.6.0 final is out.
-    "s3dgraphy[geo,rdf]==1.6.0.dev12",
+    #
+    # THIS LINE IS THE ONE PLACE THE VERSION IS WRITTEN BY HAND (2026-10-24).
+    # The Dockerfile's `ARG S3DGRAPHY_VERSION=` default and the dev-stack
+    # compose anchor `x-s3dgraphy-version` are COPIES of it: `bump-s3dgraphy.sh`
+    # writes all of them in one go, and `tests/test_s3dgraphy_pin.py` refuses a
+    # build where any of them disagrees with this line.
+    "s3dgraphy[geo,rdf]==1.6.0.dev25",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     # P1 auth: verify the realm's RS256 tokens against its published JWKS.
@@ -52,9 +58,9 @@ dependencies = [
 # Kept as NAMES for the capabilities they buy, even though the base pin already
 # carries both: `pip install stratigraph-server[geo]` reads as intent, and the day the base
 # pin is loosened these are the knobs that stay meaningful.
-rdf = ["s3dgraphy[rdf]==1.6.0.dev12"]      # /v1/export-ttl
-geo = ["s3dgraphy[geo]==1.6.0.dev12"]      # /v1/reproject (pyproj bundles PROJ)
-all = ["s3dgraphy[rdf,geo]==1.6.0.dev12"]
+rdf = ["s3dgraphy[rdf]==1.6.0.dev25"]      # /v1/export-ttl
+geo = ["s3dgraphy[geo]==1.6.0.dev25"]      # /v1/reproject (pyproj bundles PROJ)
+all = ["s3dgraphy[rdf,geo]==1.6.0.dev25"]
 # The object store. Optional because a deployment that keeps its assets on a
 # volume (one instance, `EM_ASSET_DIR`) does not need an S3 client — and because
 # a missing client must fail at construction with a sentence, which is only

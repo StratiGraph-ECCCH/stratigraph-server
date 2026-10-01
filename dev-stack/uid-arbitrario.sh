@@ -30,8 +30,9 @@
 set -eu
 
 UID_FINTO=12345
-VERSIONE="${S3DGRAPHY_VERSION:-1.6.0.dev17}"
 QUI="$(cd "$(dirname "$0")" && pwd)"
+# la versione dal posto solo (`pyproject.toml`), non un quarto numero scritto qui
+VERSIONE="${S3DGRAPHY_VERSION:-$(sed -nE 's/^ *"s3dgraphy\[[a-z,]*\]==([^"]+)",.*/\1/p' "$QUI/../pyproject.toml" | head -1)}"
 RADICE="$(cd "$QUI/../.." && pwd)"
 
 rosse=0

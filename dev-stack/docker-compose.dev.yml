@@ -33,7 +33,13 @@ name: em-dev
 # in a file a fresh clone does not have is a version nobody else has. An anchor
 # and not three copies, for the reason this whole change exists. The environment
 # may still override it for a deliberate experiment; what it cannot do is drift.
-x-s3dgraphy-version: &s3dgraphy_version "${S3DGRAPHY_VERSION:-1.6.0.dev17}"
+#
+# A COPY of `pyproject.toml`'s pin (2026-10-24). That line is the one written by
+# hand; `bump-s3dgraphy.sh` rewrites this one with it, and
+# `tests/test_s3dgraphy_pin.py` fails when the two — or the Dockerfile default —
+# disagree. It stays HERE as well because the chatbot and the catalogue build
+# from their own repositories and read the version from this anchor.
+x-s3dgraphy-version: &s3dgraphy_version "${S3DGRAPHY_VERSION:-1.6.0.dev25}"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # I REPOSITORY FRATELLI — dove stanno, e questo è l'unico posto che lo dice.

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # bump-s3dgraphy.sh — allinea StratiGraph Server a una nuova s3dgraphy pubblicata su PyPI.
-# Aggiorna il pin ESATTO in pyproject.toml e nel Dockerfile (tiene gli extra
-# [geo,rdf], cambia solo il numero), mostra il diff, e — con --build — ricostruisce
+# Aggiorna il pin ESATTO in pyproject.toml (il posto solo, tiene gli extra
+# [geo,rdf] e cambia solo il numero) e le sue due COPIE — il default di
+# `ARG S3DGRAPHY_VERSION=` nel Dockerfile e l'anchor `x-s3dgraphy-version` del
+# compose del dev-stack —, mostra il diff, e — con --build — ricostruisce
 # e riavvia StratiGraph Server nel dev-stack (il bump della versione fa da cache-bust del layer).
 #
 #   ./bump-s3dgraphy.sh 1.6.0.dev15            # imposta questa versione
@@ -39,16 +41,24 @@ echo "$VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(\.dev[0-9]+)?$' \
 
 # sostituisci OVUNQUE compaia il pin: tiene s3dgraphy[...]== , cambia solo la versione.
 # Le righe di commento che nominano una vecchia dev NON hanno '==' e restano intatte.
-changed=0
-for f in pyproject.toml Dockerfile; do
-  [ -f "$f" ] || { echo "⚠ $f non trovato, salto"; continue; }
-  sed -E -i.bak "s/(s3dgraphy(\[[a-z,]*\])?==)[0-9][A-Za-z0-9.]*/\1${VER}/g" "$f"
-  rm -f "$f.bak"; changed=1
+for f in pyproject.toml Dockerfile dev-stack/docker-compose.dev.yml; do
+  [ -f "$f" ] || { echo "✗ $f non trovato — sei in stratigraph-server?"; exit 1; }
 done
-[ "$changed" = "1" ] || { echo "✗ né pyproject.toml né Dockerfile trovati — sei in stratigraph-server?"; exit 1; }
+sed -E -i.bak "s/(s3dgraphy(\[[a-z,]*\])?==)[0-9][A-Za-z0-9.]*/\1${VER}/g" pyproject.toml
+# le due copie: il default dell'ARG e l'anchor del compose
+sed -E -i.bak "s/^(ARG S3DGRAPHY_VERSION=).*/\1${VER}/" Dockerfile
+sed -E -i.bak "s/^(x-s3dgraphy-version: &s3dgraphy_version \"\\\$\{S3DGRAPHY_VERSION:-)[^}]*(\}\")/\1${VER}\2/" \
+  dev-stack/docker-compose.dev.yml
+rm -f pyproject.toml.bak Dockerfile.bak dev-stack/docker-compose.dev.yml.bak
 
 echo "▶ pin aggiornato a s3dgraphy[geo,rdf]==$VER. Diff:"
-git diff -- pyproject.toml Dockerfile 2>/dev/null || echo "  (git non disponibile: controlla i file a mano)"
+git diff -- pyproject.toml Dockerfile dev-stack/docker-compose.dev.yml 2>/dev/null || echo "  (git non disponibile: controlla i file a mano)"
+
+# la guardia che tiene le tre righe una: se un sed non ha preso, lo dice qui
+if [ -x .venv/bin/python ]; then
+  .venv/bin/python -m pytest -q -p no:cacheprovider tests/test_s3dgraphy_pin.py -k "not what_is_installed" \
+    || { echo "✗ le tre righe non coincidono: guarda il diff qui sopra"; exit 1; }
+fi
 
 if [ "$BUILD" = "yes" ]; then
   echo "▶ ricostruisco StratiGraph Server nel dev-stack…"

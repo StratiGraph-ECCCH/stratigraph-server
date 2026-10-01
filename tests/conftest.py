@@ -15,6 +15,7 @@ fails in a way that looks like a code problem.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 
@@ -22,8 +23,14 @@ _REPO = pathlib.Path(__file__).resolve().parent.parent
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+# `EM_TEST_S3DGRAPHY=installed` runs the suite against the INSTALLED wheel
+# instead — the only way to measure what a pin bump changes (2026-10-24: a
+# dev17-vs-dev25 comparison without it ran the checkout twice and agreed with
+# itself). Absent, the checkout wins as before.
 _CHECKOUT = _REPO.parent / "s3Dgraphy" / "src"
-if _CHECKOUT.is_dir() and str(_CHECKOUT) not in sys.path:
+if os.environ.get("EM_TEST_S3DGRAPHY") == "installed":
+    _CHECKOUT = None
+if _CHECKOUT is not None and _CHECKOUT.is_dir() and str(_CHECKOUT) not in sys.path:
     sys.path.insert(0, str(_CHECKOUT))
 
 

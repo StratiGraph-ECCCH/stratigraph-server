@@ -3,10 +3,10 @@
 # Stateless by construction: no volume, no writable path the app depends on, no
 # state in the container. Scale it by adding replicas.
 #
-#   docker build --build-arg S3DGRAPHY_VERSION=<version> -t em-server .
+#   docker build -t em-server .
 #   docker run --rm -p 8000:8000 em-server
 #
-# The build argument is REQUIRED — see the note on it below.
+# The s3dgraphy version has a default, and it is a COPY — see the note below.
 #
 # To run against a s3Dgraphy CHECKOUT instead of the published wheel while the
 # language and the service move together, do NOT try to build without one: this
@@ -33,22 +33,30 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # The s3Dgraphy this image installs: the VERSION from one place, the EXTRAS
 # from this service.
 #
-# `S3DGRAPHY_VERSION` has NO DEFAULT, and that is the whole point rather than an
-# omission. A default here would be a second spelling of a number that must agree
-# with `dev-stack/.env.dev`, and two spellings of one version are two versions the
-# day somebody edits one — which is exactly what happened: this image sat
-# on dev12 while the catalogue and the field assistant had drifted to dev16, in a
-# stack that shares em.json files and one semantic vocabulary. A build without the
-# argument REFUSES, the way `auth.py` refuses a half-configured realm, instead of
-# falling back to a pin nobody chose.
+# `S3DGRAPHY_VERSION` HAS A DEFAULT since 2026-10-24, and it is a copy.
 #
-#   docker build --build-arg S3DGRAPHY_VERSION=<version> -t em-server .
+# Until then it had none, on the argument that a default would be a second
+# spelling of a number that must agree with the stack. The argument was right
+# and the remedy did not hold: the "one place" it pointed at was
+# `dev-stack/.env.dev`, which is gitignored and never carried the variable, so
+# the real value lived in the compose anchor (dev17) while `pyproject.toml` —
+# what the test suite installs — said dev12. Three spellings, three versions,
+# measured by MICRO-CATENA-DATAMODEL on 30 September.
+#
+# So the version is now written BY HAND in one place, `pyproject.toml`, and
+# copied to two: this default and the compose anchor `x-s3dgraphy-version`.
+# `bump-s3dgraphy.sh` writes all three in one go, and
+# `tests/test_s3dgraphy_pin.py` fails the suite the day any of them disagrees.
+# A copy under a test is not a second source; an unguarded one would be.
+#
+#   docker build -t em-server .                                   # the pin
+#   docker build --build-arg S3DGRAPHY_VERSION=<v> -t em-server . # an experiment
 #
 # The EXTRAS stay here because they are legitimately this service's own: `[geo]`
 # and `[rdf]` are what make /v1/reproject and /v1/export-ttl work rather than
 # answer 501. A service may choose what it needs; it may not move the version by
 # itself.
-ARG S3DGRAPHY_VERSION
+ARG S3DGRAPHY_VERSION=1.6.0.dev25
 ARG S3DGRAPHY_EXTRAS="geo,rdf"
 
 WORKDIR /srv/em-server
@@ -74,7 +82,7 @@ COPY pyproject.toml README.md ./
 # `[binary]` perché il wheel porta libpq dentro: niente `libpq-dev` da
 # installare e niente compilatore in un'immagine che non ne ha uno.
 RUN set -eu; \
-    : "${S3DGRAPHY_VERSION:?required — dev-stack/.env.dev holds it}"; \
+    : "${S3DGRAPHY_VERSION:?an empty --build-arg; the pin is in pyproject.toml}"; \
     spec="s3dgraphy${S3DGRAPHY_EXTRAS:+[${S3DGRAPHY_EXTRAS}]}==${S3DGRAPHY_VERSION}"; \
     pip install --upgrade pip && \
     pip install "$spec" "fastapi>=0.110" "uvicorn[standard]>=0.27" \

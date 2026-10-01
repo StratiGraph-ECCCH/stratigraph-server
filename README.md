@@ -192,7 +192,7 @@ python3 -m venv .venv
 # this is what a developer here wants, and what the dev stack mounts
 .venv/bin/pip install -e ../s3Dgraphy
 # …or the published wheel, for a run that does not track the library:
-# .venv/bin/pip install 's3dgraphy[geo,rdf]==1.6.0.dev12'
+# .venv/bin/pip install 's3dgraphy[geo,rdf]==1.6.0.dev25'
 
 .venv/bin/uvicorn app.main:app --reload --port 8000
 curl -s localhost:8000/health | python3 -m json.tool
@@ -216,8 +216,9 @@ docker run --rm -p 8000:8000 StratiGraph Server
 curl -s localhost:8000/v1/health | python3 -m json.tool
 ```
 
-Nothing to mount: the image installs `s3dgraphy[geo,rdf]==1.6.0.dev12` from PyPI and
-that is sufficient — verified in a real container (see below). To develop against a
+Nothing to mount: the image installs `s3dgraphy[geo,rdf]==1.6.0.dev25` from PyPI
+(the version is written once, in `pyproject.toml`; the Dockerfile default and the
+dev-stack anchor are copies a test keeps equal) and that is sufficient — verified in a real container (see below). To develop against a
 checkout instead, mount it and point `PYTHONPATH` at it:
 
 ```bash
@@ -232,7 +233,7 @@ PROJ in its wheel so this needs no system GDAL. One uvicorn worker per container
 replicas are the orchestrator's business, and a process count baked into an image
 is a decision taken in the wrong place.
 
-> **Why the pin is spelled `s3dgraphy[geo,rdf]==1.6.0.dev12`** — three lessons, each
+> **Why the pin is spelled `s3dgraphy[geo,rdf]==1.6.0.devN`** (dev25 today) — three lessons, each
 > learned from a build that failed:
 >
 > * `s3dgraphy>=1.6` matches **nothing** while 1.6 is a dev series: PEP 440 will not
