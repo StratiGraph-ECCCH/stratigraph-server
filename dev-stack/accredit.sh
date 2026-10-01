@@ -65,7 +65,7 @@ except ValueError:
     users = []
 print(",".join(u.get("username", "?") for u in users))')"
         if [[ -n "$other" ]]; then
-            echo "· $orcid  already carried by user «$other»: one user per ORCID, left as it is"
+            echo "· $orcid  already carried by user «${other}»: one user per ORCID, left as it is"
             refused=$((refused + 1)); continue
         fi
         if [[ -n "$DRY" ]]; then echo "+ $orcid  $name  (would be created)"; continue; fi

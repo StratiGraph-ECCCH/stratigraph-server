@@ -47,7 +47,7 @@ print("yes" if any(l.get("identityProvider") == sys.argv[1] for l in links) else
     "$KC_ORCID_IDP")"
 if [[ -z "$LINKED" ]]; then
     KC_EXIT=4 kc_die "$ORCID never signed in with ORCID on this node (no link to
-  the identity provider «$KC_ORCID_IDP»). The node attests only an iD that ORCID
+  the identity provider «${KC_ORCID_IDP}»). The node attests only an iD that ORCID
   verified once: the person signs in online with ORCID first, then run this again."
 fi
 
