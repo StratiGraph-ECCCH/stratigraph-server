@@ -53,7 +53,16 @@ def content_id(data: bytes) -> str:
 #: which is exactly what «implements this interface» means here.
 @runtime_checkable
 class AssetStore(Protocol):
-    """Put bytes, get bytes, ask about bytes, take bytes out. Nothing else."""
+    """Put bytes, get bytes, ask about bytes, take bytes out. Nothing else.
+
+    **One optional capability beside the four verbs: `read_range(ref, start,
+    length)`** — the bytes `[start, start+length)` without moving the rest
+    (2026-10-24, for HTTP `Range` on `get_asset`). Optional and NOT a fifth
+    verb on purpose: a store that cannot seek is still a store, and
+    `get_asset` falls back to `get` + a slice for it — correct, only slower.
+    All three implementations here offer it, and
+    `tests/test_get_asset_range.py` checks that they do.
+    """
 
     def put(self, data: bytes, media_type: str) -> Dict[str, Any]:
         """Store `data`; return `{ref, sha256, media_type, size, created}`.
@@ -136,6 +145,11 @@ class InMemoryAssetStore:
             meta = self._meta.get(ref)
         return dict(meta) if meta else None
 
+    def read_range(self, ref: str, start: int, length: int) -> Optional[bytes]:
+        with self._lock:
+            blob = self._blobs.get(ref)
+        return None if blob is None else blob[start:start + length]
+
     def delete(self, ref: str) -> Dict[str, Any]:
         with self._lock:
             existed = ref in self._blobs
@@ -203,6 +217,15 @@ class DirectoryAssetStore:
     def get(self, ref: str) -> Optional[bytes]:
         path = self._path(ref)
         return path.read_bytes() if path.is_file() else None
+
+    def read_range(self, ref: str, start: int, length: int) -> Optional[bytes]:
+        """A seek and a read: the rest of the file never leaves the disk."""
+        path = self._path(ref)
+        if not path.is_file():
+            return None
+        with path.open("rb") as fh:
+            fh.seek(start)
+            return fh.read(length)
 
     def head(self, ref: str) -> Optional[Dict[str, Any]]:
         path = self._path(ref)
@@ -363,6 +386,26 @@ class MinioAssetStore:
         response = None
         try:
             response = self._client.get_object(self.bucket, self._key(ref))
+            return response.read()
+        except S3Error as exc:
+            if exc.code in ("NoSuchKey", "NoSuchObject", "NotFound"):
+                return None
+            raise
+        finally:
+            if response is not None:
+                response.close()
+                response.release_conn()
+
+    def read_range(self, ref: str, start: int, length: int) -> Optional[bytes]:
+        """`GetObject` with `offset`/`length`, i.e. an S3 ranged GET: MinIO
+        sends only these bytes, so a tile read from the end of a 200 MB `.3tz`
+        costs the tile and not the archive."""
+        from minio.error import S3Error  # type: ignore
+
+        response = None
+        try:
+            response = self._client.get_object(self.bucket, self._key(ref),
+                                               offset=start, length=length)
             return response.read()
         except S3Error as exc:
             if exc.code in ("NoSuchKey", "NoSuchObject", "NotFound"):

@@ -109,10 +109,20 @@ def test_head_answers_without_downloading(store):
     assert meta["sha256"] == info["sha256"]
 
 
+def test_a_range_is_an_s3_ranged_get(store):
+    """`read_range` (2026-10-24, for HTTP Range on `get_asset`): the bytes
+    asked, and the tail a `.3tz` reader asks for first — from the server."""
+    payload = bytes(range(256)) * 400
+    info = store.put(payload, "application/vnd.3tz")
+    assert store.read_range(info["ref"], 1000, 100) == payload[1000:1100]
+    assert store.read_range(info["ref"], len(payload) - 22, 22) == payload[-22:]
+
+
 def test_a_reference_nobody_stored_is_absent_not_an_error(store):
     missing = "sha256:" + "0" * 64
     assert store.get(missing) is None
     assert store.head(missing) is None
+    assert store.read_range(missing, 0, 1) is None
 
 
 def test_two_different_contents_are_two_objects(store):

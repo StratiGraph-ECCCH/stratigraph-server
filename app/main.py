@@ -219,10 +219,13 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS,
     allow_credentials=False,
-    allow_methods=["GET", "PUT", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["GET", "HEAD", "PUT", "POST", "DELETE", "OPTIONS"],
+    # `Range`/`If-Range`: a `.3tz` read from another origin asks for its tail
+    # first, and a browser preflights a Range it does not consider simple
+    allow_headers=["Authorization", "Content-Type", "Range", "If-Range"],
     expose_headers=["ETag", "X-EM-License", "X-EM-License-Default",
-                    "X-EM-Embargo", "X-EM-Author", "X-EM-Authz"],
+                    "X-EM-Embargo", "X-EM-Author", "X-EM-Authz",
+                    "Content-Range", "Accept-Ranges", "Content-Length"],
 )
 
 #: Every endpoint hangs off this router, so the prefix is declared once and cannot
@@ -879,7 +882,50 @@ async def put_asset(room_id: str, request: Request,
     return AssetInfo(**info, author=author)
 
 
-@v1.get("/rooms/{room_id}/asset/{ref:path}", tags=["assets"])
+def _byte_range(header: Optional[str], size: int):
+    """`Range` → `None` (send it all), `(start, end)` inclusive, or `"416"`.
+
+    ONE interval only, in its three shapes: `bytes=a-b`, `bytes=a-`,
+    `bytes=-n`. The choices, each one the RFC 9110 option that costs nothing
+    to get right:
+
+    * **several intervals → the whole file (200)**, not a multipart answer: no
+      reader in this ecosystem asks for one (the `.3tz` plugin asks one range
+      at a time), and `multipart/byteranges` is a body format nobody here
+      would parse — a 200 is a correct answer to any Range;
+    * a header that does not parse, or another unit, is IGNORED (200), which
+      is what the RFC says a server does with a Range it does not understand;
+    * an interval that starts at or past the end, or a `-0` suffix, is
+      **unsatisfiable (416)**; an end past the end is clipped to it.
+    """
+    if not header:
+        return None
+    unit, _, spec = header.strip().partition("=")
+    if unit.strip().lower() != "bytes" or not spec or "," in spec:
+        return None
+    first, dash, last = spec.strip().partition("-")
+    if not dash:
+        return None
+    first, last = first.strip(), last.strip()
+    try:
+        if not first:                                   # bytes=-n: the tail
+            n = int(last)
+            if n <= 0 or size == 0:
+                return "416"
+            return (max(0, size - n), size - 1)
+        start = int(first)
+        end = int(last) if last else None
+    except ValueError:
+        return None
+    if start < 0 or (end is not None and end < start):
+        return None
+    if start >= size:
+        return "416"
+    return (start, size - 1 if end is None else min(end, size - 1))
+
+
+@v1.api_route("/rooms/{room_id}/asset/{ref:path}", methods=["GET", "HEAD"],
+              tags=["assets"])
 async def get_asset(room_id: str, ref: str, request: Request) -> Response:
     """Fetch an asset by reference — if the graph says you may have it yet.
 
@@ -903,13 +949,32 @@ async def get_asset(room_id: str, ref: str, request: Request) -> Response:
     embargoed inside a study that is not.
 
     An asset the graph says nothing about is served as it always was.
+
+    **HEAD and Range** (2026-10-24). EMStudio reads a `.3tz` from its END, one
+    tile at a time, and this route used to answer 200 with every byte to a
+    Range and 405 to a HEAD — 199 MB for TempluMare where 175 KB would do.
+    Now:
+
+    * **HEAD** is this same function: same gates, same headers
+      (`Content-Length` the size, `Accept-Ranges: bytes`), no body. Whoever may
+      not have the bytes gets the GET's refusal, not a hint;
+    * **one interval** → 206 with `Content-Range`, read from the store with a
+      ranged read (`read_range`: an S3 ranged GET on MinIO, a seek on disk);
+      out of the file → 416 with `Content-Range: bytes */<size>`; several →
+      200 with everything (see `_byte_range`);
+    * **If-Range** with anything but this ETag → 200 with everything.
+
+    The gates run BEFORE the range is looked at, so an embargo answers the same
+    to a request for the whole file and to one for 22 bytes of it.
     """
     if not asset_ref_valid(ref):
         raise HTTPException(status_code=400,
                             detail=f"not an asset reference: {ref!r} "
                                    f"(expected 'sha256:<hex>')")
-    data = ASSET_STORE.get(ref)
-    if data is None:
+    # Existence from the store's HEAD, not its GET: the bytes are moved only
+    # after the gates, and only the ones asked for.
+    meta = ASSET_STORE.head(ref)
+    if meta is None:
         raise HTTPException(status_code=404, detail=f"no asset {ref}")
 
     # THE NAMED ROOM FIRST, then everybody else — because the store is shared.
@@ -926,8 +991,8 @@ async def get_asset(room_id: str, ref: str, request: Request) -> Response:
     # room the caller came through.
     rights = await _corpus_gate(ref, request, door=room_id, room_rights=rights)
 
-    meta = ASSET_STORE.head(ref) or {}
-    headers = {"ETag": f'"{ref}"'}
+    etag = f'"{ref}"'
+    headers = {"ETag": etag, "Accept-Ranges": "bytes"}
     # The licence TRAVELS WITH THE BYTES. Not enforcement — a share-alike cannot
     # be imposed by an HTTP header, and pretending otherwise would be worse than
     # saying nothing. What this does is remove the excuse: whoever downloads
@@ -941,9 +1006,40 @@ async def get_asset(room_id: str, ref: str, request: Request) -> Response:
         authors = [a.get("orcid") or a.get("name") for a in rights.get("authors") or []]
         if authors:
             headers["X-EM-Author"] = ", ".join(str(a) for a in authors if a)
-    return Response(content=data,
-                    media_type=str(meta.get("media_type") or "application/octet-stream"),
-                    headers=headers)
+
+    media_type = str(meta.get("media_type") or "application/octet-stream")
+    size = int(meta.get("size") or 0)
+    if request.method == "HEAD":
+        # an explicit Content-Length: Starlette would otherwise count the
+        # empty body and say 0
+        return Response(content=b"", media_type=media_type,
+                        headers={**headers, "Content-Length": str(size)})
+
+    wanted = _byte_range(request.headers.get("range"), size)
+    if_range = request.headers.get("if-range")
+    if wanted is not None and if_range is not None and if_range.strip() != etag:
+        wanted = None                       # the file changed since: all of it
+    if wanted == "416":
+        return Response(status_code=416, media_type=media_type,
+                        headers={**headers, "Content-Range": f"bytes */{size}"})
+    if wanted is not None:
+        start, end = wanted
+        reader = getattr(ASSET_STORE, "read_range", None)
+        if reader is not None:
+            part = reader(ref, start, end - start + 1)
+        else:                               # a store that cannot seek
+            whole = ASSET_STORE.get(ref)
+            part = None if whole is None else whole[start:end + 1]
+        if part is None:
+            raise HTTPException(status_code=404, detail=f"no asset {ref}")
+        return Response(content=part, status_code=206, media_type=media_type,
+                        headers={**headers,
+                                 "Content-Range": f"bytes {start}-{end}/{size}"})
+
+    data = ASSET_STORE.get(ref)
+    if data is None:                        # gone between the HEAD and now
+        raise HTTPException(status_code=404, detail=f"no asset {ref}")
+    return Response(content=data, media_type=media_type, headers=headers)
 
 
 # ── the `.blend` safety archive (opaque, on demand, never publishable) ───────
