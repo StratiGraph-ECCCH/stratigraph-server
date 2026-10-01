@@ -8,7 +8,8 @@ chain with the requests EMStudio's `.3tz` reader makes
 (`frontend/src/tiles3tz.ts`: `bytes=-1` for the size, the last kilobyte, the
 index, a tile) and measures the bytes that moved.
 
-    cd dev-stack && ../.venv/bin/python smoke_asset_range.py
+    cd dev-stack && python3 smoke_asset_range.py      # standard library only:
+                                                     # it runs on the node too
 """
 
 from __future__ import annotations
@@ -20,12 +21,11 @@ import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / "tests"))
-sys.path.insert(0, str(HERE.parent))           # `app`, which the test module imports
+sys.path.insert(0, str(HERE.parent / "tests"))   # lettore_3tz: standard library only
 
 from smoke_common import (_TLS, Tally, alive, arguments, body_of, call,  # noqa: E402
                           detail_of, need, token_for, unique)
-from test_get_asset_range import _big_3tz, open_3tz, read_entry  # noqa: E402
+from lettore_3tz import _big_3tz, open_3tz, read_entry  # noqa: E402
 
 CASE_20 = HERE.parent / "tests" / "data" / "small-tileset-canonical.3tz"
 
@@ -41,7 +41,7 @@ def fetch(method, url, token, headers=None):
 
 
 class LiveSource:
-    """`test_get_asset_range.HttpSource`, over the network."""
+    """`lettore_3tz.HttpSource`, over the network."""
 
     def __init__(self, url, token):
         self.url, self.token = url, token
