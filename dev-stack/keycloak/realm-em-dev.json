@@ -3,6 +3,12 @@
   "enabled": true,
   "sslRequired": "none",
   "registrationAllowed": false,
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "it",
+    "en"
+  ],
+  "defaultLocale": "en",
   "accessTokenLifespan": 3600,
   "clients": [
     {

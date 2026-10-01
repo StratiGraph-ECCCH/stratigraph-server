@@ -40,7 +40,7 @@ from . import access
 from .access import (Acl, Groups, Role, acl_store_from_env,
                      group_store_from_env)
 from .auth import authenticator
-from .identity import identity_of
+from .identity import identity_of, signature_auth
 from . import keeping
 from . import presence
 from .rooms import RoomRegistry, now_iso
@@ -496,6 +496,7 @@ async def room_socket(websocket: WebSocket, room_id: str,
                        display=str(claims.get("name") or author or "anon"),
                        role=role, dev_mode=bool(claims.get("em_dev_mode")))
     member.token_exp = claims.get("exp")
+    member.auth = signature_auth(claims)
 
     # ── the join: who you are, what the room is, what you missed ─────────────
     await _send(websocket, envelope("host_info", {
@@ -698,6 +699,10 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
         op.pop("author", None)
         if author:
             op["author"] = author
+        # …and HOW THAT AUTHOR HAD ENTERED is the token's too (dev28, decision
+        # 13): the access mode a client declares is written over by the one the
+        # relay read at the door, in every place an op can carry one.
+        op = _stamp_auth(room, op, member.auth, who=author)
         op.setdefault("ts", now_iso())
         graph_id = message.get("graph_id")
         async with room.lock:
@@ -817,10 +822,32 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
 # because that is the property that survives a third: a connector written next
 # month gets the lock, the save and the announcement by calling this, and
 # `test_write_paths.py` refuses a caller of `room.apply` from anywhere else.
+def _stamp_auth(room, op: Dict[str, Any], auth: Optional[Dict[str, Any]], *,
+                who: Optional[str]) -> Dict[str, Any]:
+    """The op with the sender's access mode (``s3dgraphy.crdt.stamp_auth``);
+    a correction is counted on the room and logged."""
+    from s3dgraphy import api as em
+    stamp = getattr(em, "stamp_auth", None)
+    if stamp is None:
+        # the pinned s3dgraphy predates dev28: the op goes on as it came, and
+        # that is said — never a relay that drops every op until the pin moves
+        log.warning("s3dgraphy %s has no stamp_auth (dev28): the access mode "
+                    "of the op is the client's", getattr(em, "__version__", "?"))
+        return op
+    stamped, outcome = stamp(op, auth)
+    if outcome == "corrected":
+        room.auth_corrected += 1
+        log.info("room %s: an op from %s declared another access mode; the "
+                 "token's (%s) was written", room.room_id, who,
+                 (auth or {}).get("mode"))
+    return stamped
+
+
 async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
                                source: str,
                                graph_id: Optional[str] = None,
-                               author: Optional[str] = None) -> Dict[str, Any]:
+                               author: Optional[str] = None,
+                               auth: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Apply a batch that came from something which is not a socket.
 
     Returns what landed, so the caller can put it on a job record. RAISES if the
@@ -843,6 +870,8 @@ async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
             entry.pop("author", None)
             if author:
                 entry["author"] = author
+            # the caller's access mode, as the socket does (dev28)
+            entry = _stamp_auth(room, entry, auth, who=author)
             entry.setdefault("ts", now_iso())
             outcome = room.apply(entry, graph_id)
             if outcome.get("applied"):

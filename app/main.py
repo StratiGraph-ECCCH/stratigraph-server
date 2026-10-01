@@ -54,7 +54,7 @@ from fastapi import Request
 from .assets import ASSET_STORE, asset_ref_valid
 from .assets import describe as asset_describe
 from .auth import AuthDependency, authenticator
-from .identity import auth_mode_of, identity_of
+from .identity import auth_mode_of, identity_of, node_name, orcid_idp_alias, signature_auth
 from . import accredited as accredited_module
 from .access import Acl, Group, Role, may_assign, parse_role
 from .access import describe as acl_describe
@@ -444,30 +444,6 @@ class AuthConfig(BaseModel):
     #: who attests an identity signed in with the node's password (see
     #: `/v1/whoami`). Empty when the node never said its name
     node_name: str = ""
-
-
-def node_name() -> str:
-    """This node's name, as an attestation carries it.
-
-    MEASURED 2026-10-01: before this there was no node-name setting at all; the
-    nearest thing is `EM_PUBLIC_BASE` (what `fcn-up.sh` derives from the host it
-    is given). So: `EM_NODE_NAME` when set, else the authority (`host:port`) of
-    the public base — the same spelling EMStudio already shows as the witness of
-    a node sign-in («verifiedBy: em.localhost:8443») — else empty.
-    """
-    explicit = os.environ.get("EM_NODE_NAME", "").strip()
-    if explicit:
-        return explicit
-    from . import handoff as ho
-    base = ho.public_base()
-    if not base:
-        return ""
-    import urllib.parse
-    return urllib.parse.urlsplit(base).netloc
-
-
-def orcid_idp_alias() -> str:
-    return os.environ.get("EM_ORCID_IDP_ALIAS", "orcid").strip()
 
 
 @v1_public.get("/auth-config", response_model=AuthConfig, tags=["meta"])
@@ -2211,7 +2187,8 @@ async def start_photogrammetry(request: Request,
                             detail="a model with nobody's name on it is a record "
                                    "nobody can defend: sign in")
 
-    job = pg.JOBS.new(ask.room_id, author=who, mode=ask.mode)
+    job = pg.JOBS.new(ask.room_id, author=who, mode=ask.mode,
+                      auth=signature_auth(authenticator.require_token(request)))
 
     # THE LOOP, TAKEN HERE, while we are still on it. The applier below runs on a
     # daemon thread, and a thread cannot find the running loop by asking (there
@@ -2240,7 +2217,7 @@ async def start_photogrammetry(request: Request,
         # which already reports which half landed.
         future = asyncio.run_coroutine_threadsafe(
             _ws.apply_from_connector(room, ops, source=CONNECTOR_SOURCE,
-                                     author=the_job.author),
+                                     author=the_job.author, auth=the_job.auth),
             loop)
         outcome = future.result(timeout=APPLY_DEADLINE)
         the_job.result["ops_applied"] = outcome["applied"]
@@ -3303,7 +3280,8 @@ async def apply_ops(room_id: str, body: OpsIn, request: Request) -> OpsOut:
 
     outcome = await _ws.apply_from_connector(
         room, body.ops, source=REST_OPS_SOURCE,
-        graph_id=body.graph_id, author=who)
+        graph_id=body.graph_id, author=who,
+        auth=signature_auth(authenticator.require_token(request)))
     return OpsOut(**outcome)
 
 

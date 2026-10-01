@@ -71,6 +71,9 @@ class Job:
     room_id: str
     status: str = "queued"          # queued · staging · running · done · failed
     author: Optional[str] = None
+    #: dev28 · how the person who asked had entered (`identity.signature_auth`),
+    #: stamped on the job's ops by the relay like the author
+    auth: Optional[Dict[str, Any]] = None
     mode: str = "local"
     created_at: float = field(default_factory=time.time)
     finished_at: Optional[float] = None
@@ -100,8 +103,9 @@ class JobRegistry:
         self._lock = threading.Lock()
         self._history = max(1, history)
 
-    def new(self, room_id: str, *, author: Optional[str], mode: str) -> Job:
-        job = Job(job_id=_uuid.uuid4().hex, room_id=room_id, author=author,
+    def new(self, room_id: str, *, author: Optional[str], mode: str,
+            auth: Optional[Dict[str, Any]] = None) -> Job:
+        job = Job(job_id=_uuid.uuid4().hex, room_id=room_id, author=author, auth=auth,
                   mode=mode)
         with self._lock:
             self._jobs[job.job_id] = job

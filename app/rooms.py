@@ -67,6 +67,10 @@ class Member:
     #: the ORCID (or subject) from the TOKEN, never what the client said it was
     author: Optional[str]
     display: str = ""
+    #: dev28 · HOW this member had entered, from the TOKEN
+    #: (`identity.signature_auth`): the access mode the relay stamps on every op
+    #: it forwards (`s3dgraphy.crdt.stamp_auth`), never the client's declaration
+    auth: Optional[Dict[str, Any]] = None
     #: what this member may do here (`access.Role`). Resolved at the door and
     #: carried, so the write gate is a comparison and not a second lookup —
     #: re-resolving per message would let a revocation take effect mid-session
@@ -195,6 +199,10 @@ class Room:
         #: rimandati per non dire niente di nuovo.
         self.roster_shape: Optional[tuple] = None
         self.lock = asyncio.Lock()
+        #: dev28 · how many ops arrived declaring an access mode other than the
+        #: one the sender's token says, and were corrected by the relay. In
+        #: memory: a count to read and to say aloud, not a record
+        self.auth_corrected: int = 0
         self.snapshot_at: Optional[str] = None
         self.last_op_at: Optional[str] = None
         #: QUANTE OPERAZIONI SONO STATE APPLICATE DOPO L'ULTIMO SALVATAGGIO.

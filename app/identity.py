@@ -101,3 +101,56 @@ def auth_mode_of(claims: Optional[Mapping[str, Any]], *,
             return None                 # a machine, not a person with a password
         return "node_password"
     return None
+
+
+# ── moved from app/main.py (dev28): the relay needs them too, and ws.py does not
+# import main ───────────────────────────────────────────────────────────────
+
+def node_name() -> str:
+    """This node's name, as an attestation carries it.
+
+    MEASURED 2026-10-01: before this there was no node-name setting at all; the
+    nearest thing is `EM_PUBLIC_BASE` (what `fcn-up.sh` derives from the host it
+    is given). So: `EM_NODE_NAME` when set, else the authority (`host:port`) of
+    the public base — the same spelling EMStudio already shows as the witness of
+    a node sign-in («verifiedBy: em.localhost:8443») — else empty.
+    """
+    import os
+    explicit = os.environ.get("EM_NODE_NAME", "").strip()
+    if explicit:
+        return explicit
+    from . import handoff as ho
+    base = ho.public_base()
+    if not base:
+        return ""
+    import urllib.parse
+    return urllib.parse.urlsplit(base).netloc
+
+
+def orcid_idp_alias() -> str:
+    import os
+    return os.environ.get("EM_ORCID_IDP_ALIAS", "orcid").strip()
+
+
+def signature_auth(claims: Optional[Mapping[str, Any]]) -> Optional[dict]:
+    """How the sender of an op had entered, as a signature carries it:
+    ``{"mode": "orcid"}`` · ``{"mode": "node_password", "attested_by": <node>}``
+    · None.
+
+    dev28 (E.D., 1 Oct 2026, decision 13): the relay stamps this on every op
+    it forwards (``s3dgraphy.crdt.stamp_auth``), like the author — the client
+    does not declare it any more. None in dev mode (no token, nobody to
+    attest), when the realm does not say, and for a node password on a node
+    that never said its name: an attestation nobody can trace back to a node
+    is not one, so nothing is written rather than a nameless witness.
+    """
+    claims = claims or {}
+    if claims.get("em_dev_mode"):
+        return None
+    mode = auth_mode_of(claims, orcid_aliases=(orcid_idp_alias(),))
+    if mode == "orcid":
+        return {"mode": "orcid"}
+    if mode == "node_password":
+        node = node_name()
+        return {"mode": "node_password", "attested_by": node} if node else None
+    return None
