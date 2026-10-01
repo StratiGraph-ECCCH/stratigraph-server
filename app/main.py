@@ -54,7 +54,8 @@ from fastapi import Request
 from .assets import ASSET_STORE, asset_ref_valid
 from .assets import describe as asset_describe
 from .auth import AuthDependency, authenticator
-from .identity import identity_of
+from .identity import auth_mode_of, identity_of
+from . import accredited as accredited_module
 from .access import Acl, Group, Role, may_assign, parse_role
 from .access import describe as acl_describe
 from .corpus import (CORPUS_STORE, RESIDENT, canonical_digest, may_read_whole,
@@ -435,6 +436,38 @@ class AuthConfig(BaseModel):
     #: False when this node enforces nothing — the console then keeps the paste
     #: box and says why, instead of offering a Sign in that cannot work
     enforcing: bool = False
+    #: the realm's identity-provider alias for ORCID — what a page passes as
+    #: `kc_idp_hint` to go straight to ORCID (`EM_ORCID_IDP_ALIAS`, default
+    #: `orcid`). Configuration, not a probe: whether ORCID ANSWERS is the
+    #: caller's to measure, since that is exactly what fails on the field
+    orcid_idp: str = ""
+    #: who attests an identity signed in with the node's password (see
+    #: `/v1/whoami`). Empty when the node never said its name
+    node_name: str = ""
+
+
+def node_name() -> str:
+    """This node's name, as an attestation carries it.
+
+    MEASURED 2026-10-01: before this there was no node-name setting at all; the
+    nearest thing is `EM_PUBLIC_BASE` (what `fcn-up.sh` derives from the host it
+    is given). So: `EM_NODE_NAME` when set, else the authority (`host:port`) of
+    the public base — the same spelling EMStudio already shows as the witness of
+    a node sign-in («verifiedBy: em.localhost:8443») — else empty.
+    """
+    explicit = os.environ.get("EM_NODE_NAME", "").strip()
+    if explicit:
+        return explicit
+    from . import handoff as ho
+    base = ho.public_base()
+    if not base:
+        return ""
+    import urllib.parse
+    return urllib.parse.urlsplit(base).netloc
+
+
+def orcid_idp_alias() -> str:
+    return os.environ.get("EM_ORCID_IDP_ALIAS", "orcid").strip()
 
 
 @v1_public.get("/auth-config", response_model=AuthConfig, tags=["meta"])
@@ -469,6 +502,8 @@ def auth_config() -> AuthConfig:
                               if issuer else ""),
         scope=os.environ.get("EM_CONSOLE_SCOPE", "openid profile email").strip(),
         enforcing=bool(getattr(settings, "enforcing", False)),
+        orcid_idp=orcid_idp_alias() if issuer else "",
+        node_name=node_name(),
     )
 
 
@@ -4088,6 +4123,17 @@ class WhoAmI(BaseModel):
     #: False on a node with no OIDC: there is nobody to be, and saying so beats
     #: showing an empty name as if the sign-in had failed
     enforcing: bool = True
+    #: HOW the token was obtained: `orcid` (verified by ORCID) · `node_password`
+    #: (the iD and the node's offline password: attested by the node) · null when
+    #: the realm does not say (`app/identity.py::auth_mode_of`)
+    auth_mode: Optional[str] = None
+    #: the node that stands as guarantor — set only for `node_password`
+    attested_by: Optional[str] = None
+    #: the iD is on this node's list of accredited ORCIDs (`EM_ACCREDITED_FILE`,
+    #: `app/accredited.py`). An accredited iD signed in once with real ORCID
+    #: before it could get an offline password, so an attested identity for it
+    #: may publish. False when the node keeps no list
+    accredited: bool = False
 
 
 @v1.get("/whoami", response_model=WhoAmI, tags=["meta"])
@@ -4102,10 +4148,24 @@ def member_whoami(request: Request) -> WhoAmI:
     """
     principal = authenticator.require_token(request)
     dev_mode = bool(principal.get("em_dev_mode"))
+    orcid = None if dev_mode else identity_of(principal)
+    mode = None if dev_mode else auth_mode_of(
+        principal, orcid_aliases=(orcid_idp_alias(),))
+    try:
+        accredited = bool(orcid) and accredited_module.is_accredited(orcid)
+    except (OSError, accredited_module.AccreditedListError) as exc:
+        #: a list that is named and unreadable is a fault of the node, said as
+        #: one — not a quiet «not accredited» for somebody who is
+        raise HTTPException(
+            status_code=503,
+            detail=f"the node's accredited list cannot be read: {exc}")
     return WhoAmI(
-        orcid=None if dev_mode else identity_of(principal),
+        orcid=orcid,
         name=principal.get("name") or None,
-        enforcing=bool(authenticator.settings.enforcing))
+        enforcing=bool(authenticator.settings.enforcing),
+        auth_mode=mode,
+        attested_by=(node_name() or None) if mode == "node_password" else None,
+        accredited=accredited)
 
 
 @v1.get("/rooms/{room_id}/open", response_model=HandoffOut, tags=["rooms"])

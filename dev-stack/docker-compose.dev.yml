@@ -163,6 +163,10 @@ x-public-addresses:
       127.0.0.1 e NON servita da Caddy (misurato, /minio/ dà 404). localhost è
       giusto perché in un browser è la macchina di chi guarda, e quella è
       l'unica da cui quella porta si apre
+    ORCID_ISSUER: >-
+      non è un indirizzo di questo nodo e non deve diventarlo: è ORCID (la
+      sandbox, o https://orcid.org), il fornitore d'identità a cui Keycloak
+      manda il browser. L'accesso sul campo, 1 ottobre 2026
 
 # ── GLI URL SONO QUELLI CANONICI, NON QUELLI CHE FUNZIONANO ──────────────────
 #
@@ -594,6 +598,16 @@ services:
       # the admin console) even though the public identity is the https one.
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
+      # ── L'ACCESSO SUL CAMPO: the ORCID identity provider (1 Oct 2026) ──────
+      # The realm file says `${ORCID_CLIENT_ID}` & co. and Keycloak resolves them
+      # from THIS environment at import (measured on 24.0.4). The client id and
+      # secret are E.D.'s, registered at ORCID: they live in `.env.dev` or the
+      # shell, never in the realm file. Without them the ORCID button is there
+      # and ORCID answers «invalid client» — expected, and said in the report.
+      # Sandbox first; `ORCID_ISSUER=https://orcid.org` for the real one.
+      ORCID_ISSUER: "${ORCID_ISSUER:-https://sandbox.orcid.org}"
+      ORCID_CLIENT_ID: "${ORCID_CLIENT_ID:-orcid-client-not-registered}"
+      ORCID_CLIENT_SECRET: "${ORCID_CLIENT_SECRET:-orcid-secret-not-set}"
     ports:
       # `127.0.0.1:` DAVANTI. Il nodo di campo, per progetto, FA DA HOTSPOT ai
       # tablet del cantiere: «siamo tutti sulla stessa rete» non e' un
@@ -855,6 +869,11 @@ services:
       # under /em, and the link has to say so or the tool that follows it dials a
       # path that is not there.
       EM_PUBLIC_BASE: "${EM_PUBLIC_BASE:-https://em.localhost:${HTTPS_PORT:-8443}/em}"
+      # L'accesso sul campo: the node's accredited iDs (`/v1/whoami` →
+      # `accredited`) and the name an offline sign-in is attested by
+      # (`attested_by`; empty → the authority of EM_PUBLIC_BASE).
+      EM_ACCREDITED_FILE: "/srv/em-node/accredited.yaml"
+      EM_NODE_NAME: "${EM_NODE_NAME:-}"
       # --- where the tools' WEB builds live ------------------------------------
       # Set one and the room browser offers "browser" beside "desktop" for that
       # tool: a plain tab at `<web>?server=&room=`, no token, the app signs
@@ -977,6 +996,7 @@ services:
       # is discovered as a 404 on an endpoint that plainly exists.
       - ../app:/srv/em-server/app:ro
       - ../../s3Dgraphy/src:/srv/s3dgraphy-src:ro
+      - ./accredited.yaml:/srv/em-node/accredited.yaml:ro
     restart: unless-stopped
 
   # =======================================================================

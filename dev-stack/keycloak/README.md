@@ -156,3 +156,26 @@ service configured for the other. One frontend URL means one `iss`, whichever
 door it came through — measured: a token from `token.sh` (direct port) carries
 `iss = https://em.localhost:8443/auth/realms/em-dev` and `GET /v1/whoami` answers
 200.
+
+## L'accesso sul campo — ORCID, the accredited list, the node's password (2026-10-01)
+
+Decided by E.D. on 1 October 2026: **a user is an ORCID**. Online you sign in
+with ORCID (*verified by ORCID*); on the field, without internet, with the iD and
+a password the node gave you (*attested by the node*). Nobody gets a password who
+has not signed in once with real ORCID. What the realm carries for it, every piece
+measured on this image (Keycloak 24.0.4) in a throwaway container:
+
+| piece | what it does |
+|---|---|
+| `identityProviders[orcid]` | OIDC broker towards `${ORCID_ISSUER}` (sandbox by default, `https://orcid.org` for the real one). Endpoints written out, not discovered: Keycloak's importer does no discovery. **Client id and secret are `${ORCID_CLIENT_ID}` / `${ORCID_CLIENT_SECRET}`**: Keycloak resolves the placeholders from its own environment at import (measured: the id came out substituted), and the compose passes them from `.env.dev` or the shell. Never in this file |
+| `identityProviderMappers` | username = the ORCID `sub` (the iD); attribute `orcid` = the `sub`, FORCE-synced at every login |
+| flow `em accredited first login` | the IdP's first-login flow: **detect existing user** + **automatically link**. No «create user»: an iD with no user is refused — measured: «The ORCID iD 0000-0003-5555-5559 is not accredited on this node…» (the realm overrides `federatedIdentityUnavailableMessage`). Keycloak has no condition «iD in a list», so the list is enforced by **who exists**: `../accredit.sh` creates the users from `../accredited.yaml` |
+| user profile | KC 24 has the declarative user profile ON, and **an undeclared attribute is silently dropped by the admin API** (measured: a user created with `orcid` came back without it). So `orcid` is declared (pattern-validated, edit = admin only), and email/first/last name are no longer required — otherwise every login of a user without an e-mail would stop at «update your profile» |
+| mappers `em-idp`, `em-auth-reported` | on every client that carries `orcid`. `em_idp` = the user-session note `identity_provider` (`orcid` after a brokered login, absent after a password); `em_auth_reported: true` says this realm reports the mode, so absence means *password*. `oidc-amr-mapper` exists in 24.0.4 but gave `amr: []` for both — not used. `/v1/whoami` reads them (`app/identity.py::auth_mode_of`) |
+
+The offline password: `../offline-password.sh <iD>` — only for a user already
+LINKED to `orcid`, chosen at the prompt, temporary (changed at first use).
+
+Two files, NOT `realm-em-dev.demo.json`: that one is rendered by
+`render_realm.py` and git-ignored (`realm-em-dev.*.json`), so it follows this
+file at the next `fcn-up.sh`.

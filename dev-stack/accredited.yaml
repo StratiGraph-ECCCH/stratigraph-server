@@ -1,0 +1,23 @@
+# THE NODE'S LIST OF ACCREDITED ORCID iDs — who may sign in on the field.
+#
+# «L'accesso sul campo» (E.D., 1 Oct 2026): a user is an ORCID. The node manager
+# writes the iD here, runs `./accredit.sh` (it creates the Keycloak user, with
+# username = the iD), the person signs in ONCE with real ORCID, and only then
+# `./offline-password.sh <iD>` gives the password for the field.
+#
+# Read by `app/accredited.py` — a strict subset of YAML: `accredited:` and then
+# entries of `orcid:` and `name:`, nothing else. Every iD is checked with its
+# check digit. StratiGraph Server reads this file through EM_ACCREDITED_FILE
+# (`/v1/whoami` → `accredited`).
+#
+# DEV STACK: test iDs only, none of them a real person. On a real node this file
+# is the manager's, and it holds no secret (an iD and a name are public).
+accredited:
+  # the seeded `dev` user's iD (ORCID's own documentation iD, Josiah Carberry)
+  - orcid: 0000-0002-1825-0097
+    name: Dev User
+  # the two editors of the room-signature proofs (realm users editor, editor2)
+  - orcid: 0000-0003-1111-1112
+    name: Editor Uno
+  - orcid: 0000-0003-2222-2221
+    name: Editor Due
