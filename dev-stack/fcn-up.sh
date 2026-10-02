@@ -156,21 +156,7 @@ fi
 # crearlo è un atto di una persona — la stessa ragione per cui `fcn-trust-ca.sh`
 # stampa il comando `sudo` invece di eseguirlo. Qui si stampa la riga da
 # incollare, che è una cosa sola.
-if [ ! -f .env.dev ]; then
-  echo "✖ Manca \`dev-stack/.env.dev\`, e \`--env-file\` lo vuole." >&2
-  if [ -f .env.dev.example ]; then
-    echo "  È in .gitignore di proposito: porta i valori riempiti. Il modello c'è," >&2
-    echo "  e per il dev-stack va bene così com'è:" >&2
-    echo >&2
-    echo "      cp .env.dev.example .env.dev" >&2
-    echo >&2
-    echo "  (dentro ci sono minioadmin/minioadmin e un realm em-dev: valori che" >&2
-    echo "   sarebbero una vulnerabilità su qualcosa di raggiungibile.)" >&2
-  else
-    echo "  E non trovo nemmeno \`.env.dev.example\`: questo checkout è incompleto." >&2
-  fi
-  exit 1
-fi
+sg_need_env_dev || exit 1
 
 # QUALE compose. Era `docker-compose` scritto a mano: è il binario autonomo, e
 # su una macchina nuova (Docker Engine su Linux, Docker Desktop su Windows) non

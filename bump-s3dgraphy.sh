@@ -63,11 +63,22 @@ if [ -x .venv/bin/python ]; then
 fi
 
 if [ "$BUILD" = "yes" ]; then
-  echo "▶ ricostruisco StratiGraph Server nel dev-stack…"
-  ( cd dev-stack && docker-compose -f docker-compose.dev.yml build stratigraph-server \
-      && docker-compose -f docker-compose.dev.yml up -d stratigraph-server )
+  # CON `--env-file .env.dev`, come `fcn-up.sh`. Il 2 ottobre 2026 questa riga
+  # non lo diceva: `up -d` ha RICREATO il server con l'ambiente della shell, cioè
+  # senza le chiavi di MinIO, e il server è andato in crash a ripetizione. Senza
+  # `.env.dev` ci si ferma PRIMA di toccare il container, col messaggio di
+  # `fcn-up.sh` (`sg_need_env_dev`, in `dev-stack/platform.sh`).
+  ( cd dev-stack
+    . ./platform.sh
+    sg_need_env_dev || exit 1
+    sg_compose_array || exit 1
+    COMPOSE+=(--env-file .env.dev -f docker-compose.dev.yml)
+    echo "▶ ricostruisco StratiGraph Server nel dev-stack…"
+    "${COMPOSE[@]}" build stratigraph-server \
+      && "${COMPOSE[@]}" up -d stratigraph-server ) \
+    || { echo "✗ StratiGraph Server NON ricostruito: il pin è aggiornato, il container no."; exit 1; }
   echo "✔ StratiGraph Server ricostruito e riavviato con s3dgraphy $VER."
 else
   echo "  Per applicarlo:  ./bump-s3dgraphy.sh $VER --build"
-  echo "  (o:  cd dev-stack && docker-compose -f docker-compose.dev.yml build stratigraph-server && up -d stratigraph-server)"
+  echo "  (o:  cd dev-stack && docker-compose --env-file .env.dev -f docker-compose.dev.yml build stratigraph-server && … up -d stratigraph-server)"
 fi

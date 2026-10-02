@@ -184,6 +184,30 @@ sg_compose_array() {
   read -r -a COMPOSE <<< "$trovato"
 }
 
+#: `.env.dev` c'è? Se no lo dice — la riga da incollare compresa — e ritorna 1.
+#:
+#: Era dentro `fcn-up.sh` (9 ottobre 2026: un clone fresco moriva con
+#: «couldn't find env file»). Sta qui dal 3 ottobre perché lo vuole anche
+#: `bump-s3dgraphy.sh --build`, che il 2 ottobre ha ricreato il server SENZA
+#: `--env-file`: niente chiavi di MinIO, e il server è andato in crash a
+#: ripetizione. Due script, un solo messaggio. Va chiamata da `dev-stack/`.
+sg_need_env_dev() {
+  [ -f .env.dev ] && return 0
+  echo "✖ Manca \`dev-stack/.env.dev\`, e \`--env-file\` lo vuole." >&2
+  if [ -f .env.dev.example ]; then
+    echo "  È in .gitignore di proposito: porta i valori riempiti. Il modello c'è," >&2
+    echo "  e per il dev-stack va bene così com'è:" >&2
+    echo >&2
+    echo "      cp .env.dev.example .env.dev" >&2
+    echo >&2
+    echo "  (dentro ci sono minioadmin/minioadmin e un realm em-dev: valori che" >&2
+    echo "   sarebbero una vulnerabilità su qualcosa di raggiungibile.)" >&2
+  else
+    echo "  E non trovo nemmeno \`.env.dev.example\`: questo checkout è incompleto." >&2
+  fi
+  return 1
+}
+
 #: L'indirizzo di questa macchina sulla LAN, o "". Serve SOLO come ripiego da
 #: stampare quando un nome non regge — mai come indirizzo da usare: la CA
 #: interna di Caddy non firma per un IP nudo, quindi con l'IP il TLS non
