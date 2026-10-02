@@ -47,7 +47,9 @@ l'`ack` in due client, cioè due repository, cioè un prompt suo.
 
 from __future__ import annotations
 
+import calendar
 import json
+import time
 
 import pytest
 
@@ -78,7 +80,35 @@ def _document():
 
 
 @pytest.fixture
-def relay(monkeypatch):
+def orologio(monkeypatch):
+    """L'orologio del server, portato a `T0` e lasciato camminare da lì.
+
+    Le operazioni di questa scena hanno istanti SCRITTI (il 27 settembre, dalle
+    10 alle 12), ma l'ingresso di un membro in una stanza senza operazioni lo
+    timbra il server con il suo orologio (`ws.py`: `room.last_op_at or
+    now_iso()`). Con l'orologio vero, quindi, gli ingressi cadevano «oggi» e
+    le operazioni nel passato: la scena raccontava membri entrati DOPO il lavoro
+    che ricevevano, e `test_con_UN_ack_solo_non_basta` era verde solo finché
+    l'orologio di chi lo lanciava stava prima di `2026-09-27T11:00:00Z` (l'`ack`
+    di B) — misurato il 2 ottobre spostando l'orologio: verde alle 09:30 e alle
+    10:30, rosso alle 11:30. Era il calendario, non il server.
+
+    Da qui gli ingressi cadono a `T0`, prima del lavoro, come nella realtà.
+    """
+    reale = time.gmtime
+    partenza = calendar.timegm(time.strptime(T0, "%Y-%m-%dT%H:%M:%SZ"))
+    avvio = time.time()
+
+    def gmtime(secs=None):
+        if secs is None:
+            return reale(partenza + (time.time() - avvio))
+        return reale(secs)
+
+    monkeypatch.setattr(time, "gmtime", gmtime)
+
+
+@pytest.fixture
+def relay(monkeypatch, orologio):
     store = InMemorySnapshotStore()
     store.put(ROOM, _document())
     registry = RoomRegistry(store)

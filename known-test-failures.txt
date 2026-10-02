@@ -2,9 +2,6 @@
 # (./em.sh release, step 0 «the downstream proof»), which stops on any failure
 # NOT in this list. One pytest node id per line; '#' starts a comment.
 #
-# Measured 2026-10-02 (MICRO le decisioni della dev29, R1): red with the
-# s3dgraphy of the working tree AND with 1.6.0.dev29 from PyPI — so it is not
-# the library's: «un ack solo ha spostato il minimo: non è quello che deve fare».
-# The test came with 2deee19 (Add room dashboard and change history). To fix in
-# this repository, then remove the line.
-tests/test_chi_manda_ack.py::test_con_UN_ack_solo_non_basta
+# None today. tests/test_chi_manda_ack.py::test_con_UN_ack_solo_non_basta was
+# here from 2026-10-02 (e7ce40d): it depended on the wall clock, not on the
+# library nor on the server, and its scene now runs on a clock anchored at T0.
