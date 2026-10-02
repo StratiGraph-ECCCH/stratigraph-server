@@ -52,7 +52,9 @@ sed -E -i.bak "s/^(x-s3dgraphy-version: &s3dgraphy_version \"\\\$\{S3DGRAPHY_VER
 rm -f pyproject.toml.bak Dockerfile.bak dev-stack/docker-compose.dev.yml.bak
 
 echo "▶ pin aggiornato a s3dgraphy[geo,rdf]==$VER. Diff:"
-git diff -- pyproject.toml Dockerfile dev-stack/docker-compose.dev.yml 2>/dev/null || echo "  (git non disponibile: controlla i file a mano)"
+# --no-pager (dev29, C1): dentro ./em.sh release un pager aperto qui fermava
+# il release su «:» finché non si premeva q
+git --no-pager diff -- pyproject.toml Dockerfile dev-stack/docker-compose.dev.yml 2>/dev/null || echo "  (git non disponibile: controlla i file a mano)"
 
 # la guardia che tiene le tre righe una: se un sed non ha preso, lo dice qui
 if [ -x .venv/bin/python ]; then
