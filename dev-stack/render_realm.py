@@ -31,7 +31,9 @@ non c'è nessun percorso nuovo da giudicare, e l'host è un letterale.
 
 **Non tocca `webOrigins`.** Misurato: vale `["+"]`, che in Keycloak significa
 «le origini delle redirect URI». Aggiungere una URI estende il CORS da sé, e
-non c'è nessun jolly da scrivere.
+non c'è nessun jolly da scrivere. (Su `em-console` ci sono in più, dal 3 ottobre
+2026, le due origini della webview di EMStudio desktop, `tauri://localhost` e
+`http://tauri.localhost`: non sono host del nodo e non si rispecchiano.)
 
 **Funzione pura.** Legge un dict, ritorna un dict. Nessun Docker, nessuna rete,
 nessun Keycloak — quindi si prova per intero senza far ripartire niente, che è

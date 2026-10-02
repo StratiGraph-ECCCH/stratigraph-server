@@ -125,10 +125,13 @@
         "http://localhost:5173/*",
         "http://127.0.0.1:5173/*",
         "https://em.localhost:8443/catalog/ui/*",
-        "https://localhost:8443/catalog/ui/*"
+        "https://localhost:8443/catalog/ui/*",
+        "org.extendedmatrix.emstudio:/oidc-return"
       ],
       "webOrigins": [
-        "+"
+        "+",
+        "tauri://localhost",
+        "http://tauri.localhost"
       ],
       "protocolMappers": [
         {

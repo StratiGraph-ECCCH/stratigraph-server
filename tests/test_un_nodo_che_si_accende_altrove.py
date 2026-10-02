@@ -1003,7 +1003,10 @@ def test_IL_REALM_COMMITTATO_e_ancora_quello_che_credo():
     """Il presupposto, asserito: se le URI del dev-stack cambiassero forma
     questa prova va guardata prima delle altre."""
     u = _uris(REALM)
-    assert len(u) == 28, f"erano 28, adesso {len(u)}"
+    #: 29 dal 3 ottobre 2026: `org.extendedmatrix.emstudio:/oidc-return`, il
+    #: ritorno di EMStudio desktop (uno schema privato, non un host: non si
+    #: rispecchia)
+    assert len(u) == 29, f"erano 29, adesso {len(u)}"
     canoniche = [x for x in u if x.startswith("https://em.localhost:8443/")]
     assert len(canoniche) == 8, canoniche
     #: e nessun jolly nella parte host, di partenza
@@ -1028,7 +1031,7 @@ def test_RISPECCHIA_e_non_inventa():
     for u in nuove:
         assert u.startswith("https://fcn.local:8443/")
     #: e l'ingresso non è stato mutato
-    assert len(_uris(REALM)) == 28
+    assert len(_uris(REALM)) == 29
 
 
 def test_NIENTE_JOLLY_NELLA_PARTE_HOST():
@@ -1108,7 +1111,7 @@ def test_FCN_UP_RENDE_IL_REALM_e_lo_monta(tmp_path):
     assert done.returncode == 0, done.stderr + done.stdout
     reso = dev / "keycloak" / "realm-em-dev.fcn.local.json"
     assert reso.is_file(), "non ha reso il realm"
-    assert len(_uris(_json.loads(reso.read_text()))) == 36, "8 in più"
+    assert len(_uris(_json.loads(reso.read_text()))) == 37, "8 in più (29 + 8)"
     #: …e l'ORDINE: reso prima dell'`up`
     chiamati = _chiamati(tmp_path)
     assert "up -d --build" in chiamati
