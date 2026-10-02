@@ -441,6 +441,12 @@ class AuthConfig(BaseModel):
     #: `orcid`). Configuration, not a probe: whether ORCID ANSWERS is the
     #: caller's to measure, since that is exactly what fails on the field
     orcid_idp: str = ""
+    #: 3 Oct 2026 · whether that provider HAS an ORCID client, measured by
+    #: asking the realm what a browser would get (`orcid_idp_probe.py`): True,
+    #: False with `orcid_idp_why`, or None when the realm could not be asked
+    #: (then nothing is claimed and the way is offered as before)
+    orcid_idp_ready: Optional[bool] = None
+    orcid_idp_why: str = ""
     #: who attests an identity signed in with the node's password (see
     #: `/v1/whoami`). Empty when the node never said its name
     node_name: str = ""
@@ -466,6 +472,8 @@ def auth_config() -> AuthConfig:
     settings = authenticator.settings
     issuer = str(getattr(settings, "issuer", "") or "")
     client_id = os.environ.get("EM_CONSOLE_CLIENT_ID", "em-console").strip()
+    alias = orcid_idp_alias() if issuer else ""
+    ready, why = _orcid_idp_verdict(issuer, client_id, alias)
     return AuthConfig(
         issuer=issuer,
         client_id=client_id if issuer else "",
@@ -478,9 +486,52 @@ def auth_config() -> AuthConfig:
                               if issuer else ""),
         scope=os.environ.get("EM_CONSOLE_SCOPE", "openid profile email").strip(),
         enforcing=bool(getattr(settings, "enforcing", False)),
-        orcid_idp=orcid_idp_alias() if issuer else "",
+        orcid_idp=alias,
+        orcid_idp_ready=ready,
+        orcid_idp_why=why,
         node_name=node_name(),
     )
+
+
+#: the return of EMStudio desktop, registered on `em-console` in the dev realm
+#: (3 Oct 2026): the redirect the probe uses when the node names none
+DESKTOP_RETURN = "org.extendedmatrix.emstudio:/oidc-return"
+
+
+def _orcid_idp_verdict(issuer: str, client_id: str, alias: str):
+    """Does the realm's ORCID provider have a client? (`orcid_idp_probe.py`)
+
+    Off with `EM_ORCID_IDP_PROBE=0`. The realm is reached by its INTERNAL name
+    when the server has one (`OIDC_JWKS_URI`, `http://keycloak:8080/…` on the
+    dev stack), since the issuer's public name may not resolve inside the
+    container.
+    """
+    from . import orcid_idp_probe as probe
+    if not (issuer and client_id and alias):
+        return None, ""
+    if os.environ.get("EM_ORCID_IDP_PROBE", "1").strip() in ("0", "false", "no"):
+        return None, ""
+    jwks = os.environ.get("OIDC_JWKS_URI", "").strip()
+    suffix = "/protocol/openid-connect/certs"
+    internal = jwks[: -len(suffix)] if jwks.endswith(suffix) else ""
+    from . import handoff as ho
+    base = (ho.public_base() or "").rstrip("/")
+    #: the round trip needs a redirect the client accepts: the node's own, the
+    #: desktop's, and the editor's page on this node — the first one the realm
+    #: does not refuse answers
+    redirects = [r for r in (os.environ.get("EM_CONSOLE_REDIRECT_URI", "").strip(),
+                             DESKTOP_RETURN, f"{base}/studio/" if base else "") if r]
+
+    def run():
+        for redirect in redirects:
+            verdict = probe.probe_orcid_idp(
+                authorization_endpoint=f"{issuer}/protocol/openid-connect/auth",
+                client_id=client_id, redirect_uri=redirect, alias=alias,
+                public_prefix=issuer if internal else "", internal_prefix=internal)
+            if verdict[0] is not None:
+                return verdict
+        return None, ""
+    return probe.cached_probe(f"{issuer}|{client_id}|{alias}", run)
 
 
 class NodeOffer(BaseModel):

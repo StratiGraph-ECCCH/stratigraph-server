@@ -179,3 +179,82 @@ LINKED to `orcid`, chosen at the prompt, temporary (changed at first use).
 Two files, NOT `realm-em-dev.demo.json`: that one is rendered by
 `render_realm.py` and git-ignored (`realm-em-dev.*.json`), so it follows this
 file at the next `fcn-up.sh`.
+
+## EMStudio desktop signs in here too — `org.extendedmatrix.emstudio:/oidc-return` (2026-10-03)
+
+The desktop app's page is served by its shell (`tauri://localhost` on macOS and
+Linux, `http://tauri.localhost` on Windows), and `em-console` accepted only
+http(s) addresses: «Sign in to StratiGraph» from the desktop stopped at
+Keycloak with «Invalid parameter: redirect_uri» (2 October). Two things were
+added to `em-console`, and each was measured on a throwaway Keycloak 24.0.4
+before it went in:
+
+    redirectUris  + org.extendedmatrix.emstudio:/oidc-return
+    webOrigins    + tauri://localhost
+                  + http://tauri.localhost
+
+- **The redirect is a private-use scheme** (RFC 8252 §7.1), the reverse-DNS of
+  the app's identifier. Keycloak accepts it, EXACTLY: `…:/oidc-return` → the
+  login page (200), `…:/other` → 400 «Invalid parameter: redirect_uri». After
+  the password it answers `302 Location: org.extendedmatrix.emstudio:/oidc-return
+  ?state=…&session_state=…&iss=…&code=…`; the system browser hands that to the
+  OS, the OS to the app. PKCE S256 as for every page.
+- **The two origins are for the code exchange**, which the webview makes with
+  `fetch`: from `Origin: tauri://localhost` the token endpoint answers 200 with
+  `Access-Control-Allow-Origin: tauri://localhost` (and the preflight too).
+  `+` alone derives the origins from the http(s) redirects, and the webview is
+  none of them.
+- **Not through the public page** (`https://extendedmatrix.org/orcid/callback/`,
+  the one ORCID's own sign-in returns to): the node's password is THE way in
+  without internet, and a return through a page on the internet would close it
+  exactly where it is needed. The node sends the browser straight to the app.
+
+**On a real node**, the realm's owner adds the same three lines to the public
+client the node names in `/v1/auth-config` (`EM_CONSOLE_CLIENT_ID`, default
+`em-console`). Nothing else: no secret (the app is a public client), no new
+client, no mapper.
+
+## Il nodo di sviluppo che parla con ORCID (2026-10-03)
+
+The provider is in the realm since 1 October (`identityProviders[orcid]`, above);
+what it lacks is an ORCID client. Until it has one, `/v1/auth-config` says so —
+`orcid_idp_ready: false` and `orcid_idp_why` (`app/orcid_idp_probe.py` starts the
+round trip a browser starts and reads the `client_id` Keycloak is about to send
+to ORCID; measured on em-dev: `orcid-client-not-registered`) — and EMStudio's
+«Who you are» shows the node's ORCID way closed, with that reason, instead of
+sending the person to ORCID to be told «invalid client».
+
+The steps are E.D.'s (the secret is E.D.'s, and nobody else writes it):
+
+1. **On orcid.org › Developer Tools**, in the application `APP-DBYSPGP676HKN8OE`
+   (the one EMStudio uses for ORCID's own sign-in), add the broker's redirect
+   URI — measured on this Keycloak 24.0.4, it is the `redirect_uri` Keycloak
+   sends to ORCID:
+
+       https://em.localhost:8443/auth/realms/em-dev/broker/orcid/endpoint
+
+   (one per node: `https://<node>/auth/realms/<realm>/broker/<alias>/endpoint`).
+2. **In `dev-stack/.env.dev`** (git-ignored; the model is in `.env.dev.example`):
+
+       ORCID_CLIENT_ID=APP-DBYSPGP676HKN8OE
+       ORCID_CLIENT_SECRET=<the secret ORCID shows once>
+       ORCID_ISSUER=https://orcid.org
+
+   The secret stays in Keycloak: it is the BROKER that exchanges ORCID's code
+   (`client_secret_post`, the only method ORCID's token endpoint offers). It
+   never reaches EMStudio, which signs in to the node with PKCE and no secret.
+3. **Recreate Keycloak with the env file** — the placeholders are resolved at
+   import, and the import runs only on a fresh container:
+
+       cd stratigraph-server/dev-stack
+       docker-compose --env-file .env.dev -f docker-compose.dev.yml up -d --force-recreate --no-build keycloak
+
+   (`docker compose …` where the plugin exists.) The re-import also brings in
+   the desktop redirect above, and mints new realm keys: sign in again.
+4. **Check**: `curl -sk https://em.localhost:8443/em/v1/auth-config` says
+   `"orcid_idp_ready": true` (after a minute: the answer is cached 60 s, and
+   the server reads it through `http://keycloak:8080`). Then in EMStudio, «Who
+   you are» › «Sign in to StratiGraph with ORCID».
+
+A user still has to EXIST to come in through ORCID (`em accredited first
+login`, above): `../accredit.sh` creates them from `../accredited.yaml`.

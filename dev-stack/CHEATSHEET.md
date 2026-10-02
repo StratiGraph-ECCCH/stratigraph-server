@@ -129,6 +129,37 @@ document URL**, so the same file works at `http://localhost:8020/` and at
 only the second one has a camera: `localhost` is a secure context, `http://<lan
 ip>:8020` is not.
 
+## 1-quinquies · ORCID on the dev node, and EMStudio desktop
+
+The node's «Sign in with ORCID» needs an ORCID client in the realm; without one,
+`/v1/auth-config` says `"orcid_idp_ready": false` and EMStudio shows the way
+closed, with the reason. To open it (E.D.; the full story is in
+[`keycloak/README.md`](keycloak/README.md), «Il nodo di sviluppo che parla con
+ORCID»):
+
+1. orcid.org › Developer Tools › `APP-DBYSPGP676HKN8OE` › add the redirect URI
+   `https://em.localhost:8443/auth/realms/em-dev/broker/orcid/endpoint`
+2. in `.env.dev` (never in a committed file):
+
+   ```
+   ORCID_CLIENT_ID=APP-DBYSPGP676HKN8OE
+   ORCID_CLIENT_SECRET=<the secret>
+   ORCID_ISSUER=https://orcid.org
+   ```
+3. recreate Keycloak WITH the env file (the realm is re-imported, new keys):
+
+   ```bash
+   cd stratigraph-server/dev-stack
+   docker-compose --env-file .env.dev -f docker-compose.dev.yml up -d --force-recreate --no-build keycloak
+   ```
+4. `curl -sk https://em.localhost:8443/em/v1/auth-config` → `"orcid_idp_ready": true`
+
+**EMStudio desktop** signs in to this node with the redirect
+`org.extendedmatrix.emstudio:/oidc-return` (in `em-console` since 3 October,
+with the webview origins `tauri://localhost` and `http://tauri.localhost`). A
+Keycloak started before that needs the same recreate as step 3. In EMStudio:
+Settings › Sync › «Your StratiGraph node» = `https://em.localhost:8443/em`.
+
 ## 2 · Colima is the intended runtime
 
 The stack is written for **Colima** (`fcn-up.sh` runs `colima start --cpu 4 --memory 8`);
