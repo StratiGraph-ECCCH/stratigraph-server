@@ -75,6 +75,19 @@ BACKUP_PREFIX = "blend-backups/"
 #: The media type we store them as. Deliberately generic: an opaque blob.
 BLEND_MEDIA_TYPE = "application/x-blender"
 
+#: What a kept `.blend` is FOR. A `backup` is a person's safety copy, read back
+#: only by its author. A `package` (MICRO-ASSET-VERSIONI, B1, E.D. 3 Oct 2026)
+#: is the scene as a STARTER PACKAGE for a computer with no cache yet: the
+#: working file with its asset libraries packed in, readable by everybody in the
+#: room — that is its whole point. Both are room attachments, never a node of
+#: the graph, never a publishable asset: the same opaque namespace.
+KINDS = ("backup", "package")
+
+
+def _kind_of(record: Dict[str, Any]) -> str:
+    """A record written before kinds existed is a backup."""
+    return str(record.get("kind") or "backup")
+
 
 def digest_of(data: bytes) -> str:
     """`<hex>` — the name these bytes will have. No `sha256:` prefix: that
@@ -354,7 +367,8 @@ class BlendBackups:
         self._lock = threading.Lock()
 
     def archive(self, room_id: str, data: bytes, *, orcid: Optional[str],
-                label: str = "", filename: str = "") -> Dict[str, Any]:
+                label: str = "", filename: str = "",
+                kind: str = "backup") -> Dict[str, Any]:
         """Keep these bytes. Returns the record, with `created` telling the
         caller whether anything new was stored.
 
@@ -371,6 +385,8 @@ class BlendBackups:
         """
         if not data:
             raise ValueError("empty body: there is no snapshot in zero bytes")
+        if kind not in KINDS:
+            raise ValueError(f"kind must be one of {list(KINDS)}, got {kind!r}")
         stored = self.blobs.put(data)
         sha = stored["sha256"]
         # `created` below is about the RECORD, not about the object, and the
@@ -382,7 +398,8 @@ class BlendBackups:
         with self._lock:
             records = self.register.records(room_id)
             for record in records:
-                if record.get("sha256") == sha and record.get("orcid") == orcid:
+                if record.get("sha256") == sha and record.get("orcid") == orcid \
+                        and _kind_of(record) == kind:
                     record["last_seen"] = now()
                     record["seen"] = int(record.get("seen") or 1) + 1
                     self.register.put(room_id, records)
@@ -400,11 +417,14 @@ class BlendBackups:
                 "last_seen": now(),
                 "seen": 1,
                 "room_id": room_id,
+                "kind": kind,
                 # The DTC-shaped note. A distinct EVENT — «somebody kept a copy
                 # of a working file» — and explicitly not a derivation producing
                 # a scientific product. It lives here and not in the resident
                 # corpus; see the module docstring for why.
-                "dtc": {"kind": "backup", "act": "archive_working_file",
+                "dtc": {"kind": "backup" if kind == "backup" else "scene_package",
+                        "act": ("archive_working_file" if kind == "backup"
+                                else "archive_scene_package"),
                         "about": f"sha256:{sha}", "by": orcid, "at": now(),
                         "opaque": True, "publishable": False},
             }
@@ -429,11 +449,30 @@ class BlendBackups:
         `all_authors` exists for dev mode, where there is no identity to compare
         against — and it says so in its name instead of pretending.
         """
-        records = self.register.records(room_id)
+        records = [r for r in self.register.records(room_id)
+                   if _kind_of(r) == "backup"]
         if not all_authors:
             records = [r for r in records if r.get("orcid") == orcid]
         return sorted(records, key=lambda r: str(r.get("created_at") or ""),
                       reverse=True)
+
+    def packages(self, room_id: str) -> List[Dict[str, Any]]:
+        """The scene packages kept in this room, by anybody, newest first.
+
+        Not per-author, and that is the difference from a backup: a package is
+        kept FOR the others — the computer that has no cache yet. Who may read
+        the list is the door's question (a role in the room)."""
+        records = [r for r in self.register.records(room_id)
+                   if _kind_of(r) == "package"]
+        return sorted(records, key=lambda r: str(r.get("created_at") or ""),
+                      reverse=True)
+
+    def fetch_package(self, room_id: str, sha256: str) -> Optional[bytes]:
+        """The bytes of a package kept in this room, or None."""
+        wanted = str(sha256).lower()
+        if not any(r.get("sha256") == wanted for r in self.packages(room_id)):
+            return None
+        return self.blobs.get(wanted)
 
     def fetch(self, room_id: str, sha256: str, *, orcid: Optional[str],
               all_authors: bool = False) -> Optional[bytes]:

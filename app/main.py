@@ -1604,6 +1604,9 @@ class BlendBackupOut(BaseModel):
     label: str = ""
     #: the `.blend`'s own name, for recognising a snapshot months later
     filename: str = ""
+    #: `backup` (yours only) or `package` (the scene for a computer with no
+    #: cache: everybody in the room reads it) — see `blend_backups.KINDS`
+    kind: str = "backup"
     #: whose it is — the TOKEN's identity, never a field the client filled in
     orcid: Optional[str] = None
     created_at: str = ""
@@ -1647,7 +1650,10 @@ async def _backup_door(room_id: str, request: Request) -> tuple:
         tags=["assets"])
 async def archive_blend(room_id: str, request: Request,
                         label: str = Query(default="", description="what this snapshot is"),
-                        filename: str = Query(default="", description="the .blend's own name")
+                        filename: str = Query(default="", description="the .blend's own name"),
+                        kind: str = Query(default="backup",
+                                          description="backup (yours only) or "
+                                                      "package (the scene for the room)")
                         ) -> BlendBackupOut:
     """Keep the posted bytes as an opaque snapshot of a working file.
 
@@ -1668,7 +1674,7 @@ async def archive_blend(room_id: str, request: Request,
                             detail="empty body: there is no snapshot in zero bytes")
     try:
         record = BACKUPS.archive(room_id, data, orcid=who, label=label,
-                                filename=filename)
+                                filename=filename, kind=kind)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return BlendBackupOut(**{k: v for k, v in record.items() if k != "room_id"})
@@ -1706,6 +1712,44 @@ async def restore_blend(room_id: str, sha256: str, request: Request) -> Response
     if data is None:
         raise HTTPException(status_code=404,
                             detail=f"no snapshot {sha256} kept by you in this room")
+    return Response(content=data, media_type=BLEND_MEDIA_TYPE,
+                    headers={"ETag": f'"{str(sha256).lower()}"',
+                             "X-EM-Opaque-Backup": "true"})
+
+
+async def _package_door(room_id: str, request: Request) -> None:
+    """Reading a scene package needs a role in the room — ANY role: a package is
+    kept for the others (B1, E.D. 3 Oct 2026). Keeping one is the backup door's
+    rule: editor or above."""
+    _acl, _room, role, _who = await _acting_role(room_id, request)
+    if role is None:
+        raise HTTPException(status_code=403,
+                            detail="the scene packages of this room are for "
+                                   "the people working in it")
+
+
+@v1.get("/rooms/{room_id}/blend-packages", response_model=List[BlendBackupOut],
+        tags=["assets"])
+async def list_blend_packages(room_id: str, request: Request
+                              ) -> List[BlendBackupOut]:
+    """The scene packages kept in this room, by anybody, newest first: the
+    starting point for a computer that has no cache of the scene yet."""
+    await _package_door(room_id, request)
+    return [BlendBackupOut(**{k: v for k, v in record.items()
+                              if k != "room_id"}, created=False)
+            for record in BACKUPS.packages(room_id)]
+
+
+@v1.get("/rooms/{room_id}/blend-package/{sha256}", tags=["assets"])
+async def fetch_blend_package(room_id: str, sha256: str, request: Request
+                              ) -> Response:
+    """The exact bytes of a scene package of this room. Verify them: the name IS
+    the digest."""
+    await _package_door(room_id, request)
+    data = BACKUPS.fetch_package(room_id, sha256)
+    if data is None:
+        raise HTTPException(status_code=404,
+                            detail=f"no scene package {sha256} in this room")
     return Response(content=data, media_type=BLEND_MEDIA_TYPE,
                     headers={"ETag": f'"{str(sha256).lower()}"',
                              "X-EM-Opaque-Backup": "true"})

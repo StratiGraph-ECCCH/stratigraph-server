@@ -304,3 +304,77 @@ def test_the_shared_data_is_untouched(client, instance, enforcing):
 def test_health_says_where_the_snapshots_go(client):
     payload = client.get("/health").json()
     assert "blend_backup_store" in payload
+
+
+# ── the scene package (B1, MICRO-ASSET-VERSIONI, E.D. 3 Oct 2026) ────────────
+#
+# The same opaque namespace, a different reader: a package is the scene kept FOR
+# the others — a computer with no cache starts from it. Keeping one is an
+# editor's act like a backup; reading it is anybody's in the room.
+
+def test_a_package_is_read_by_the_room_and_a_backup_is_not(client, instance,
+                                                           enforcing):
+    enforcing(ANNA)
+    kept = client.put(f"/v1/rooms/{ROOM}/blend-backup?kind=package&label=start"
+                      f"&filename=tempio.blend", content=CHANGED, headers=AUTH)
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["kind"] == "package"
+    assert kept.json()["dtc"]["kind"] == "scene_package"
+    assert kept.json()["dtc"]["publishable"] is False
+    client.put(f"/v1/rooms/{ROOM}/blend-backup", content=BLEND, headers=AUTH)
+
+    # ANNA's own list of backups does not carry the package
+    assert [r["sha256"] for r in client.get(
+        f"/v1/rooms/{ROOM}/blend-backups", headers=AUTH).json()] == [digest_of(BLEND)]
+
+    acls = ws_module.ACL_STORE
+    acls.put(ROOM, {"owner": ANNA, "members": {BRUNO: Role.VIEWER.value}})
+    enforcing(BRUNO)
+    listing = client.get(f"/v1/rooms/{ROOM}/blend-packages", headers=AUTH)
+    assert listing.status_code == 200, listing.text
+    assert [(r["sha256"], r["filename"]) for r in listing.json()] == \
+        [(digest_of(CHANGED), "tempio.blend")]
+    back = client.get(f"/v1/rooms/{ROOM}/blend-package/{digest_of(CHANGED)}",
+                      headers=AUTH)
+    assert back.status_code == 200 and back.content == CHANGED
+    # …and the backup is still ANNA's alone, also through the package door
+    assert client.get(f"/v1/rooms/{ROOM}/blend-package/{digest_of(BLEND)}",
+                      headers=AUTH).status_code == 404
+    # a viewer reads packages but does not keep one
+    assert client.put(f"/v1/rooms/{ROOM}/blend-backup?kind=package",
+                      content=BLEND, headers=AUTH).status_code == 403
+
+
+def test_a_stranger_reads_no_package(client, instance, enforcing):
+    enforcing(ANNA)
+    client.put(f"/v1/rooms/{ROOM}/blend-backup?kind=package", content=BLEND,
+               headers=AUTH)
+    enforcing("0000-0003-1415-9265")
+    assert client.get(f"/v1/rooms/{ROOM}/blend-packages",
+                      headers=AUTH).status_code == 403
+    assert client.get(f"/v1/rooms/{ROOM}/blend-package/{digest_of(BLEND)}",
+                      headers=AUTH).status_code == 403
+
+
+def test_the_same_bytes_as_backup_and_as_package_are_two_records():
+    service = BlendBackups(InMemoryBackupBlobs(), InMemoryBackupRegister())
+    service.archive(ROOM, BLEND, orcid=ANNA, label="mine")
+    package = service.archive(ROOM, BLEND, orcid=ANNA, label="for all",
+                              kind="package")
+    assert package["created"] is True and package["stored_bytes"] is False
+    assert len(service.mine(ROOM, orcid=ANNA)) == 1
+    assert [r["label"] for r in service.packages(ROOM)] == ["for all"]
+    with pytest.raises(ValueError, match="kind"):
+        service.archive(ROOM, BLEND, orcid=ANNA, kind="share")
+
+
+def test_a_package_adds_nothing_to_the_graph_or_the_assets(client, instance,
+                                                           enforcing):
+    from app.assets import ASSET_STORE
+
+    before = ws_module.SNAPSHOT_STORE.get(ROOM)
+    enforcing(ANNA)
+    client.put(f"/v1/rooms/{ROOM}/blend-backup?kind=package", content=BLEND,
+               headers=AUTH)
+    assert ws_module.SNAPSHOT_STORE.get(ROOM) == before
+    assert ASSET_STORE.get(f"sha256:{digest_of(BLEND)}") is None
