@@ -251,6 +251,59 @@ def test_a_listing_is_not_a_discovery_service(client, enforcing):
     assert client.get("/v1/rooms/cantiere", headers=AUTH).status_code == 403
 
 
+def test_a_room_entered_by_name_is_in_its_owners_list(client, enforcing):
+    """Measured on the dev node, 3 October: `scavo-2026`, opened in EMStudio by
+    name, had its owner in its ACL (the door's bootstrap) and was NOT in its
+    owner's `GET /v1/rooms` — the listing walked the register only. A person who
+    entered a room must find it in «Le tue»; one it was shared with, in
+    «Condivise con te», with the role. The split is `your_role`, nothing else."""
+    enforcing(CARLA)
+    # entering by name: no record, no snapshot — the door makes CARLA the owner
+    assert client.get("/v1/rooms/Scavo-2026", headers=AUTH).status_code == 200
+    mine = {r["room_id"]: r for r in client.get("/v1/rooms", headers=AUTH).json()}
+    assert set(mine) == {"Scavo-2026"}
+    assert mine["Scavo-2026"]["implicit"] is True, \
+        "said out loud: nobody declared it, it is listed from its ACL"
+    assert mine["Scavo-2026"]["your_role"] == "owner"
+    assert mine["Scavo-2026"]["owner"] == CARLA
+
+    # …shared with BRUNO as a viewer: he finds it, with his role
+    client.put(f"/v1/rooms/Scavo-2026/members/{BRUNO}", headers=AUTH,
+               json={"role": "viewer"})
+    enforcing(BRUNO)
+    shared = {r["room_id"]: r for r in client.get("/v1/rooms", headers=AUTH).json()}
+    assert shared["Scavo-2026"]["your_role"] == "viewer"
+    assert shared["Scavo-2026"]["members"] == [], "the team is for managers"
+
+    # …and somebody with no grant still sees nothing
+    enforcing(ANNA)
+    assert "Scavo-2026" not in {r["room_id"] for r in
+                                client.get("/v1/rooms", headers=AUTH).json()}
+
+
+def test_a_snapshot_with_no_acl_is_not_invented_into_the_list(client, enforcing):
+    """`scavo-a` and `scavo-b` exist as snapshots naming ANNA in their header, and
+    nobody has entered them: there is no recorded grant, so they are not listed —
+    the header is the study's word, not a record of who came in. The first entry
+    writes the ACL, and from then on the room is there."""
+    enforcing(ANNA)
+    assert client.get("/v1/rooms", headers=AUTH).json() == []
+    client.get("/v1/rooms/scavo-a", headers=AUTH)          # she goes in
+    listed = {r["room_id"]: r for r in client.get("/v1/rooms", headers=AUTH).json()}
+    assert set(listed) == {"scavo-a"}
+    assert listed["scavo-a"]["implicit"] is True
+    assert listed["scavo-a"]["your_role"] == "owner"
+
+
+def test_a_declared_room_is_listed_once_even_with_its_acl(client, enforcing):
+    """The two walks meet on every declared room (its creator is in its ACL): it
+    must come back once, as declared."""
+    enforcing(ANNA)
+    client.post("/v1/rooms", headers=AUTH, json={"room_id": "cantiere"})
+    listed = client.get("/v1/rooms", headers=AUTH).json()
+    assert [(r["room_id"], r["implicit"]) for r in listed] == [("cantiere", False)]
+
+
 def test_an_orphan_is_reported_and_archived_never_deleted(client, enforcing,
                                                           instance):
     """The lifecycle rule: a room whose container moved is a *report*, and the

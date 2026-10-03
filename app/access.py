@@ -65,7 +65,7 @@ import os
 import pathlib
 import threading
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, Optional, Protocol
+from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol
 
 
 class Role(str, Enum):
@@ -198,6 +198,12 @@ class AclStore(Protocol):
 
     def put(self, room_id: str, acl: Dict[str, Any]) -> None: ...
 
+    #: OPTIONAL third method, `ids() -> List[str]`: the rooms that have an ACL
+    #: recorded. Added for `GET /v1/rooms` (2026-10-03), which must list a room
+    #: somebody entered BY NAME — never declared, but owned the moment they came
+    #: in, because the door wrote the bootstrap here. A store that cannot
+    #: enumerate simply leaves those rooms out of the listing, as before.
+
 
 class InMemoryAclStore:
     """Tests and a single-process laptop. Dies with the process, and says so."""
@@ -215,6 +221,10 @@ class InMemoryAclStore:
         blob = json.dumps(acl, sort_keys=True, ensure_ascii=False)
         with self._lock:
             self._data[room_id] = blob
+
+    def ids(self) -> List[str]:
+        with self._lock:
+            return sorted(self._data)
 
 
 class DirectoryAclStore:
@@ -247,6 +257,19 @@ class DirectoryAclStore:
         tmp.write_text(json.dumps(acl, ensure_ascii=False, indent=1, sort_keys=True),
                        encoding="utf-8")
         tmp.replace(path)      # atomic: a reader never sees half an ACL
+
+    def ids(self) -> List[str]:
+        """The rooms with an ACL file, by the name the file carries.
+
+        The name is the SAFE spelling `_path` wrote (`[A-Za-z0-9._-]`, anything
+        else `_`). For every room id a client can create or open by name today
+        the two are the same; for one that is not, the listing shows the safe
+        spelling — and `get()` of it reads the same file, so the role it reports
+        is still the true one. Not stored inside the file: the ACL document is
+        `{owner, members, groups}` and a test holds it to exactly that.
+        """
+        suffix = ".acl.json"
+        return sorted(p.name[:-len(suffix)] for p in self.root.glob(f"*{suffix}"))
 
 
 def acl_store_from_env(environ: Optional[Dict[str, str]] = None) -> AclStore:

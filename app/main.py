@@ -2829,23 +2829,61 @@ async def list_rooms(request: Request) -> List[RoomOut]:
     (no OIDC, no identities) everything is listed, for the same reason `authorize`
     makes dev mode owner: there is nobody to distinguish.
 
-    Declared rooms only. A room that exists as a snapshot and was never declared
-    is reachable by name and absent from here — inventing entries for it would
-    make the register a guess about what somebody meant.
+    **Declared rooms, and the implicit rooms with a RECORDED ACL** (2026-10-03).
+    Measured on the dev node: `scavo-2026`, opened in EMStudio by name, had its
+    owner written into its ACL by the door (`authorize` → `claim_owner`) and was
+    still absent from its owner's list — because this walked the register only.
+    A person who entered a room must find it in «Le tue». So the ACL store is
+    walked too, and a room found only there comes back with `implicit: true`.
+
+    What is still NOT invented: a room that exists only as a snapshot, with no
+    ACL. Nobody has a recorded grant in it, so listing it would be a guess about
+    who it belongs to; the first authenticated entry writes the ACL, and from
+    then on it is here.
+
+    **How a client splits the list** — no second field needed: `your_role ==
+    "owner"` is «Le tue», any other role is «Condivise con te» (the role is the
+    one to show beside it). `owner` is there too, but comparing ORCIDs on the
+    client is the thing `your_role` exists to spare it.
+
+    Dev mode lists the ACL'd implicit rooms as well, as `owner` like the rest:
+    the rule is «a room with a record», and the ACL is a record in both modes.
+    (In dev mode the door writes no bootstrap, so in practice this adds only
+    rooms whose ACL somebody wrote with a token.)
     """
     orcid, dev_mode = _caller_identity(request)
     expander = groups().expander()
     out: List[RoomOut] = []
-    for descriptor in rooms().declared():
+    registry = rooms()
+
+    def _role_here(room_id: str) -> Optional[Role]:
         if dev_mode:
-            role = Role.OWNER
-        else:
-            role = load_acl(descriptor.room_id).role_for(orcid, groups_of=expander)
-            if role is None:
-                continue
+            return Role.OWNER
+        return load_acl(room_id).role_for(orcid, groups_of=expander)
+
+    declared = registry.declared()
+    for descriptor in declared:
+        role = _role_here(descriptor.room_id)
+        if role is None:
+            continue
         # the member list is for admins; a listing shows the room, not the team
         out.append(_describe_room(descriptor, role=role,
                                   with_members=bool(role and role.can_manage)))
+
+    # `_ws.ACL_STORE`, never the imported name: tests replace the store on the
+    # module, and the binding made at import would keep the old one.
+    acl_ids = getattr(_ws.ACL_STORE, "ids", None)
+    if callable(acl_ids):
+        seen = {d.room_id for d in declared}
+        for room_id in acl_ids():
+            if room_id in seen:
+                continue
+            role = _role_here(room_id)
+            if role is None:
+                continue
+            descriptor = registry.descriptor(room_id)    # implicit: from its name
+            out.append(_describe_room(descriptor, role=role,
+                                      with_members=bool(role.can_manage)))
     return out
 
 
