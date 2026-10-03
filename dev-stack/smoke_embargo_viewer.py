@@ -211,8 +211,28 @@ def main() -> int:
         return 2
     ok("the asset is published", json.loads(body)["ref"] == digest, digest[:23])
 
-    # before the embargo: everybody with a token may have it. Measured FIRST, so
-    # the 403 below cannot be a permission problem wearing an embargo's clothes.
+    # D-C (3 Oct 2026): bytes with no licence are for the room's participants.
+    # `viewer` is in no room yet, so even before any embargo the answer is 403 —
+    # and NOT an embargo's 403: the detail says so.
+    status, body, _ = request(f"{server}/v1/rooms/{room}/asset/{digest}",
+                              headers=viewer)
+    ok("D-C: a stranger to the room → 403 before any embargo",
+       status == 403 and b"embargo" not in body, f"{status} {body[:80]!r}")
+
+    # …so the viewer is made a VIEWER of the room, which is what lets the next
+    # measures be about the embargo: a participant who may read, refused only
+    # while it runs.
+    status, body, _ = request(f"{server}/v1/whoami", headers=viewer)
+    viewer_orcid = json.loads(body).get("orcid") if status == 200 else None
+    status, _, _ = request(
+        f"{server}/v1/rooms/{room}/members/{viewer_orcid}", method="PUT",
+        data=json.dumps({"role": "viewer"}).encode(),
+        headers={**owner, "Content-Type": "application/json"})
+    ok("the owner makes `viewer` a viewer of the room", status == 200,
+       f"{status} · {viewer_orcid}")
+
+    # before the embargo: a participant may have it. Measured FIRST, so the 403
+    # below cannot be a permission problem wearing an embargo's clothes.
     status, _, _ = request(f"{server}/v1/rooms/{room}/asset/{digest}",
                            headers=viewer)
     ok("before the embargo, the viewer may have it", status == 200, str(status))

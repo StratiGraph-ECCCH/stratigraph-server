@@ -941,7 +941,17 @@ async def put_asset(room_id: str, request: Request,
     info = ASSET_STORE.put(data, media_type)
     principal = authenticator.require_token(request)
     author = None if principal.get("em_dev_mode") else identity_of(principal)
+    _record_home(info["ref"], room_id, author)
     return AssetInfo(**info, author=author)
+
+
+def _record_home(ref: str, room_id: str, author: Optional[str]) -> None:
+    """Remember the room these bytes came in through, and who brought them — the
+    D-C gate's answer for an asset no graph cites yet (`app/asset_homes.py`).
+    Recorded on EVERY upload, dedup included: whoever sends the same bytes has
+    proved they hold them, and their room becomes one more home."""
+    from . import asset_homes
+    asset_homes.ASSET_HOMES.record(ref, room_id, author)
 
 
 def _byte_range(header: Optional[str], size: int):
@@ -1010,7 +1020,9 @@ async def get_asset(room_id: str, ref: str, request: Request) -> Response:
     study-level embargo already refuses at the door, and an asset may be
     embargoed inside a study that is not.
 
-    An asset the graph says nothing about is served as it always was.
+    An asset the graph says nothing about is no longer served to any token:
+    since D-C (3 October 2026) bytes with no licence declared are for the
+    participants of the rooms that hold them — see `_participants_gate`.
 
     **HEAD and Range** (2026-10-24). EMStudio reads a `.3tz` from its END, one
     tile at a time, and this route used to answer 200 with every byte to a
@@ -1046,12 +1058,16 @@ async def get_asset(room_id: str, ref: str, request: Request) -> Response:
     # is stated in the graph of the room that holds the picture and the asset
     # store is not partitioned by room. A gate you get past by typing another
     # room name is not a gate.
-    rights = await _rights_seen_anywhere(room_id, ref, request)
+    citing: Dict[str, Dict[str, Any]] = {}
+    rights = await _rights_seen_anywhere(room_id, ref, request, citing=citing)
     # …AND THE RESIDENT CORPUS. This is the hole that was measured: the licence
     # was declared in a corpus, and a corpus StratiGraph Server does not hold cannot make
     # anything bite. The register speaks about the BYTES, so it speaks whatever
     # room the caller came through.
     rights = await _corpus_gate(ref, request, door=room_id, room_rights=rights)
+    # …AND THE ROOM'S OWN DEFAULT (D-C): no licence said anywhere → the people
+    # of the rooms that hold these bytes, and nobody else.
+    await _participants_gate(room_id, ref, request, rights=rights, citing=citing)
 
     etag = f'"{ref}"'
     headers = {"ETag": etag, "Accept-Ranges": "bytes"}
@@ -1284,8 +1300,9 @@ def _fresh_verdict(rights: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]
     return {**rights, "embargo_active": embargo_active(rights.get("embargo"))}
 
 
-async def _rights_seen_anywhere(room_id: str, ref: str,
-                                request: Request) -> Optional[Dict[str, Any]]:
+async def _rights_seen_anywhere(room_id: str, ref: str, request: Request,
+                                citing: Optional[Dict[str, Dict[str, Any]]] = None
+                                ) -> Optional[Dict[str, Any]]:
     """The rights to REPORT, having refused if any room forbids this caller.
 
     Asks the named room first — it is the one the caller meant, and its answer
@@ -1301,6 +1318,11 @@ async def _rights_seen_anywhere(room_id: str, ref: str,
     The declared cost: on a big instance this reads every room's document. It is
     bounded by the rooms one instance owns, and a deployment that minds can pass
     the room explicitly. Correct-and-slow beats fast-and-bypassable.
+
+    `citing`, when given, is filled with `{room: rights}` for the rooms whose
+    graph DOES mention the digest — the walk already reads them, and the D-C
+    gate needs exactly that («whose participants may read these bytes», «did
+    any of them publish it») — so it is collected here rather than walked twice.
     """
     first: Optional[Dict[str, Any]] = None
     checked: List[str] = []
@@ -1317,6 +1339,8 @@ async def _rights_seen_anywhere(room_id: str, ref: str,
                        f"it does — an embargo that cannot be read is not an "
                        f"embargo that can be ignored.") from None
         checked.append(candidate)
+        if citing is not None and rights is not None:
+            citing[candidate] = rights
         if candidate == room_id:
             first = rights
         if not rights or not rights.get("embargo_active"):
@@ -1411,6 +1435,81 @@ async def _corpus_gate(ref: str, request: Request, *, door: Optional[str],
                        f"readable by the people working on the study (editor and "
                        f"above)")
     return _combine_rights(room_rights, corpus_rights)
+
+
+async def _participants_gate(room_id: str, ref: str, request: Request, *,
+                             rights: Optional[Dict[str, Any]],
+                             citing: Dict[str, Dict[str, Any]]) -> None:
+    """D-C · bytes nobody has published are for the people of their room.
+
+    Decided by E.D. on 3 October 2026, measured the same day on the dev node: an
+    asset uploaded to a room with no rights on its resource node was served to
+    ANY authenticated caller holding its digest — `viewer`, member of nothing,
+    got 200. A digest is not a secret (it travels in manifests and documents),
+    so that was publication by default. The default is now the room:
+
+    * **a licence said anywhere** — on the resource, through its DTC chain, or
+      in the resident corpus — publishes the bytes: served to whoever has a
+      token, as before. The licence is the act of publishing; the embargo, if
+      any, has already been judged above;
+    * otherwise the caller must be a **participant** (viewer and above) of a
+      room that holds these bytes: one whose graph cites the digest, or one the
+      bytes were uploaded through (`asset_homes`). A PUBLIC study's room grants
+      `viewer` to everybody, so its files stay public — `access.role_of`'s rule,
+      not a second one here;
+    * **whoever uploaded them** may read them back, and so may their declared
+      authors — the gate protects the bytes for those people, not from them;
+    * bytes with NO known home at all (uploaded before the register existed, and
+      cited by no graph) fall back to the room the request came through: the
+      only home anybody can name. Its participants pass; nobody else.
+
+    Roles are resolved WITHOUT the owner bootstrap (`_role_without_bootstrap`):
+    a room name typed into the URL must not become a role on the way to a file —
+    the same hole `_corpus_gate` closed one level up.
+
+    Dev mode has no identities and passes, as everywhere else. Anonymous callers
+    never reach here: the `/v1` router refuses them with 401 first.
+    """
+    if not authenticator.settings.enforcing:
+        return
+    def _published(said: Optional[Dict[str, Any]]) -> bool:
+        return bool(said and said.get("license")
+                    and not said.get("license_is_default"))
+
+    # the door's statement (with the corpus folded in), or ANY citing room's:
+    # a licence is about the bytes, so it publishes them whichever room the
+    # caller came through — the same reasoning that makes an embargo compound
+    if _published(rights) or any(_published(r) for r in citing.values()):
+        return
+    me = _identity_of(request)
+    if me:
+        authors = {str(a.get("orcid") or "").strip()
+                   for a in (rights or {}).get("authors") or []}
+        if me in authors:
+            return
+    from . import asset_homes
+    try:
+        homes = asset_homes.ASSET_HOMES.homes(_digest_of(ref))
+    except Exception:  # noqa: BLE001 — a record that only grants: unread = none
+        homes = {}
+    if me and any(me in (who or []) for who in homes.values()):
+        return
+    rooms_of_the_bytes = list(dict.fromkeys(list(citing) + list(homes)))
+    if not rooms_of_the_bytes:
+        rooms_of_the_bytes = [room_id]       # no home known: the door is the home
+    for candidate in rooms_of_the_bytes:
+        try:
+            role = await _role_without_bootstrap(candidate, me, request)
+        except Exception:  # noqa: BLE001 — a room that will not read grants nothing
+            role = None
+        if role is not None:
+            return
+    raise HTTPException(
+        status_code=403,
+        detail=("these bytes have no licence declared, so they are visible only "
+                "to the participants of the room that holds them "
+                f"({', '.join(rooms_of_the_bytes)}). Ask its owner to add you, "
+                "or declare a licence on the resource to publish them."))
 
 
 def _combine_rights(room: Optional[Dict[str, Any]],
