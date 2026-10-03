@@ -62,6 +62,16 @@ class AssetStore(Protocol):
     `get_asset` falls back to `get` + a slice for it — correct, only slower.
     All three implementations here offer it, and
     `tests/test_get_asset_range.py` checks that they do.
+
+    **A second optional capability: `put_file(path, sha256, size, media_type)`**
+    (2026-10-03, U1 · big uploads) — store a file that is ALREADY on disk and
+    whose digest the caller has already computed while it arrived, without ever
+    holding it in memory. `put(data)` takes `bytes`, which for a 2 GB scan or a
+    folder of raw photographs means a 2 GB `bytes` object inside the server.
+    Optional for the same reason as `read_range`: the upload door falls back to
+    `put(path.read_bytes())` for a store that lacks it — correct, only heavy.
+    The caller owns the file: a store may MOVE it (the directory store does,
+    when it can) and the caller deletes whatever is left.
     """
 
     def put(self, data: bytes, media_type: str) -> Dict[str, Any]:
@@ -134,6 +144,16 @@ class InMemoryAssetStore:
                                    "media_type": media_type, "size": len(data)}
         info = dict(self._meta[ref])
         info["created"] = not existed
+        return info
+
+    def put_file(self, path: str | os.PathLike[str], sha256: str, size: int,
+                 media_type: str) -> Dict[str, Any]:
+        """Memory is where this store keeps bytes, so the file is read — the
+        capability is here so the upload door takes ONE path for every store."""
+        info = self.put(pathlib.Path(path).read_bytes(), media_type)
+        if info["sha256"] != sha256:      # the caller's digest is a claim: check
+            raise ValueError(f"put_file: the file is {info['sha256']}, "
+                             f"not {sha256}")
         return info
 
     def get(self, ref: str) -> Optional[bytes]:
@@ -213,6 +233,34 @@ class DirectoryAssetStore:
             path.with_suffix(".type").write_text(media_type, encoding="utf-8")
         return {"ref": ref, "sha256": ref.split(":", 1)[1], "media_type": media_type,
                 "size": len(data), "created": not existed}
+
+    def put_file(self, path: str | os.PathLike[str], sha256: str, size: int,
+                 media_type: str) -> Dict[str, Any]:
+        """A RENAME when the file is on the same filesystem, a streamed copy
+        when it is not — never the whole file in memory.
+
+        The digest is the caller's (computed while the bytes arrived); it is not
+        recomputed here, because a second pass over 2 GB is exactly the cost
+        this method exists to avoid, and the only caller is the upload door that
+        hashed every byte it wrote.
+        """
+        import shutil
+
+        ref = f"{DIGEST_PREFIX}:{sha256}"
+        target = self._path(ref)
+        existed = target.is_file()
+        if not existed:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(".tmp")
+            try:
+                os.replace(path, tmp)                  # same filesystem: free
+            except OSError:
+                with open(path, "rb") as src, open(tmp, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1024 * 1024)
+            tmp.replace(target)                        # never half a file
+            target.with_suffix(".type").write_text(media_type, encoding="utf-8")
+        return {"ref": ref, "sha256": sha256, "media_type": media_type,
+                "size": int(size), "created": not existed}
 
     def get(self, ref: str) -> Optional[bytes]:
         path = self._path(ref)
@@ -379,6 +427,29 @@ class MinioAssetStore:
                                     content_type=media_type)
         return {"ref": ref, "sha256": key, "media_type": media_type,
                 "size": len(data), "created": not existed}
+
+    def put_file(self, path: str | os.PathLike[str], sha256: str, size: int,
+                 media_type: str) -> Dict[str, Any]:
+        """`fput_object`: a multipart upload read from the file, part by part
+        (5 MiB parts by default) — what the server holds at any moment is a few
+        parts, not the object. Asked first with a `stat`, like `put`, so the
+        same bytes twice are one object and the answer says `created: false`."""
+        from minio.error import S3Error  # type: ignore
+
+        key = sha256
+        existed = False
+        try:
+            self._client.stat_object(self.bucket, key)
+            existed = True
+        except S3Error as exc:
+            if exc.code not in ("NoSuchKey", "NoSuchObject", "NotFound"):
+                raise
+        if not existed:
+            self._client.fput_object(self.bucket, key, str(path),
+                                     content_type=media_type)
+        return {"ref": f"{DIGEST_PREFIX}:{key}", "sha256": key,
+                "media_type": media_type, "size": int(size),
+                "created": not existed}
 
     def get(self, ref: str) -> Optional[bytes]:
         from minio.error import S3Error  # type: ignore

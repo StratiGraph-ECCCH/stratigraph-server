@@ -310,7 +310,21 @@ def test_the_openapi_schema_is_served():
                       #  · one digest, one call, named by a person: no sweep and
                       #    no timer, and `test_il_verbo_che_manca` asserts that
                       #    no route removes more than one.
-                      ("DELETE", "/v1/admin/assets/{ref}")}, \
+                      ("DELETE", "/v1/admin/assets/{ref}"),
+                      # ── AND A RESUMABLE UPLOAD (U1, 2026-10-03) ───────────
+                      #
+                      # The one PATCH, and it is not the PATCH this list forbids.
+                      # What it modifies is an UPLOAD IN PROGRESS: a half-arrived
+                      # file in a working directory, which is not a study, not an
+                      # asset and not citable — the asset is CREATED, content-
+                      # addressed, only when the last byte lands and its sha256
+                      # checks out, exactly as a PUT creates it. PATCH because
+                      # appending at an offset is what PATCH means (tus's verb
+                      # too); a PUT here would claim to replace something. The
+                      # DELETE abandons those partial bytes — never an asset,
+                      # never anything somebody could have cited.
+                      ("PATCH", "/v1/rooms/{room_id}/uploads/{upload_id}"),
+                      ("DELETE", "/v1/rooms/{room_id}/uploads/{upload_id}")}, \
         f"unexpected write endpoints: {sorted(writes)}"
     assert not [p for p in paths if p.endswith("/study") or p.endswith("/graph")], \
         "no route may take a study away: the deletions are tombstones"

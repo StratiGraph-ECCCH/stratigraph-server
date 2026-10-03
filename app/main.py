@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import os
 import pathlib
 from typing import Any, Dict, List, Optional
@@ -927,22 +928,83 @@ class AssetInfo(BaseModel):
 @v1.put("/rooms/{room_id}/asset", response_model=AssetInfo, tags=["assets"])
 async def put_asset(room_id: str, request: Request,
                     media_type: str = Query(default="application/octet-stream",
-                                            description="the MIME type of the bytes")) -> AssetInfo:
+                                            description="the MIME type of the bytes"),
+                    expected_sha256: Optional[str] = Query(
+                        default=None,
+                        description="the digest the client computed: the upload "
+                                    "is refused (422) if the bytes that arrived "
+                                    "are not these")) -> AssetInfo:
     """Publish bytes into a room's store; the reference is their digest.
 
     The body is the raw bytes (not multipart): an asset is one object, and a
     form wrapper would only add a boundary to parse. Re-uploading the same bytes
     is not an error and not a duplicate — it is the same object, and the answer
     says `created: false`.
+
+    **Streamed** (U1, 3 October 2026). It used to be `await request.body()`: a
+    2 GB file was a 2 GB `bytes` in this process. Now the body goes chunk by
+    chunk into a file beside the upload sessions, hashed on the way, and the
+    file is handed to the store (`put_file`: a rename on a directory store, a
+    multipart `fput_object` on MinIO). The answer is the same as before, byte
+    for byte, for a small body and a big one.
+
+    `expected_sha256` (query) or the `X-EM-Expected-SHA256` header: what the
+    client says it sent. A mismatch is **422** and nothing is stored — the
+    bytes were damaged on the way, and storing them under their own (wrong)
+    digest would make the client's resource node point at nothing.
+
+    For files that may not make it in one go, the resumable door is
+    `POST /v1/rooms/{room_id}/uploads` (below). Either way, a client asks
+    `HEAD /v1/rooms/{room_id}/asset/sha256:<hex>` FIRST: 200 means the room
+    already has these bytes and nothing needs sending.
     """
-    data = await request.body()
-    if not data:
-        raise HTTPException(status_code=400, detail="empty body: nothing to store")
-    info = ASSET_STORE.put(data, media_type)
+    from . import uploads
+
+    # The token BEFORE the body: a refused caller must not cost a disk write.
     principal = authenticator.require_token(request)
     author = None if principal.get("em_dev_mode") else identity_of(principal)
+    wanted = expected_sha256 or request.headers.get("x-em-expected-sha256")
+    expected = uploads.normalise_sha256(wanted) if wanted else None
+    if wanted and expected is None:
+        raise HTTPException(status_code=400,
+                            detail=f"expected_sha256 is not a sha256: {wanted!r}")
+
+    temp = uploads.SESSIONS.temp_file()
+    hasher = hashlib.sha256()
+    try:
+        size, _over = await uploads.receive_stream(request.stream(), temp,
+                                                   hasher=hasher)
+        if not size:
+            raise HTTPException(status_code=400,
+                                detail="empty body: nothing to store")
+        digest = hasher.hexdigest()
+        if expected and digest != expected:
+            raise HTTPException(
+                status_code=422,
+                detail=f"the bytes that arrived are sha256:{digest}, not the "
+                       f"sha256:{expected} the client declared — nothing was "
+                       f"stored; send them again")
+        info = await _store_file(temp, digest, size, media_type)
+    finally:
+        temp.unlink(missing_ok=True)
     _record_home(info["ref"], room_id, author)
     return AssetInfo(**info, author=author)
+
+
+async def _store_file(path: pathlib.Path, digest: str, size: int,
+                      media_type: str) -> Dict[str, Any]:
+    """Hand a file to the asset store without reading it into memory — in a
+    worker thread, because a store write (a rename, a multipart upload to MinIO)
+    blocks, and an event loop blocked for the length of a 2 GB upload is a
+    relay that stops relaying for everybody else in every room."""
+    from starlette.concurrency import run_in_threadpool
+
+    store = ASSET_STORE
+    put_file = getattr(store, "put_file", None)
+    if put_file is not None:
+        return await run_in_threadpool(put_file, path, digest, size, media_type)
+    # a store without the capability: correct, only heavy
+    return await run_in_threadpool(lambda: store.put(path.read_bytes(), media_type))
 
 
 def _record_home(ref: str, room_id: str, author: Optional[str]) -> None:
@@ -952,6 +1014,206 @@ def _record_home(ref: str, room_id: str, author: Optional[str]) -> None:
     proved they hold them, and their room becomes one more home."""
     from . import asset_homes
     asset_homes.ASSET_HOMES.record(ref, room_id, author)
+
+
+# ── resumable uploads (U1) ─────────────────────────────────────────────────
+#
+# For a file that may not arrive in one go — a 2 GB scan over a site's Wi-Fi, a
+# folder of raw photographs. The shape is tus's, without the library: declare
+# the size, send pieces at an offset, ask the offset after a cut. The partial
+# file on disk is the whole state (`app/uploads.py`), so a server restart
+# resumes as well as a client one.
+#
+# The client's order, the one EMStudio and EMtools follow:
+#
+#   1. HEAD /v1/rooms/{room}/asset/sha256:<hex>   200 → done, nothing to send
+#   2. POST /v1/rooms/{room}/uploads {size, sha256, media_type} → upload_id
+#   3. PATCH …/uploads/{id}  Upload-Offset: n   <raw piece>   → {offset}
+#      …repeated; after a cut: HEAD …/uploads/{id} → Upload-Offset, go on
+#   4. the PATCH that brings offset to size answers {complete: true, asset}
+
+
+class UploadIn(BaseModel):
+    size: int = Field(gt=0, description="the whole file's length in bytes")
+    sha256: Optional[str] = Field(
+        default=None, description="the whole file's digest (`<hex>` or "
+                                  "`sha256:<hex>`): checked at completion")
+    media_type: str = Field(default="application/octet-stream")
+
+
+class UploadOut(BaseModel):
+    upload_id: str
+    room_id: str
+    size: int
+    #: how many bytes the server HAS — the offset of the next PATCH
+    offset: int
+    media_type: str
+    sha256: Optional[str] = None
+    created_at: Optional[str] = None
+    #: True on the PATCH that delivered the last byte, with the stored asset
+    complete: bool = False
+    asset: Optional[AssetInfo] = None
+
+
+def _upload_out(record: Dict[str, Any], **extra: Any) -> UploadOut:
+    return UploadOut(**{k: record.get(k) for k in (
+        "upload_id", "room_id", "size", "offset", "media_type", "sha256",
+        "created_at")}, **extra)
+
+
+def _caller_of_upload(request: Request) -> tuple:
+    principal = authenticator.require_token(request)
+    dev_mode = bool(principal.get("em_dev_mode"))
+    return (None if dev_mode else identity_of(principal)), dev_mode
+
+
+def _session_for(room_id: str, upload_id: str, request: Request) -> Dict[str, Any]:
+    """The session — if it is THIS caller's, in THIS room. Anything else is a
+    404, not a 403: an upload id is somebody's half-sent file, and confirming
+    that it exists to somebody else would be telling them so."""
+    from . import uploads
+
+    who, dev_mode = _caller_of_upload(request)
+    record = uploads.SESSIONS.get(upload_id)
+    if (record is None or record.get("room_id") != room_id
+            or (not dev_mode and record.get("author") != who)):
+        raise HTTPException(status_code=404, detail=f"no upload {upload_id!r} here")
+    return record
+
+
+@v1.post("/rooms/{room_id}/uploads", response_model=UploadOut, status_code=201,
+         tags=["assets"])
+async def start_upload(room_id: str, body: UploadIn, request: Request) -> UploadOut:
+    """Open a resumable upload. Nothing is stored until the last byte arrives
+    and its sha256 checks out; the same door rules as `PUT …/asset` (a token —
+    the uploader is the token's identity, recorded for D-C)."""
+    from . import uploads
+
+    who, _dev = _caller_of_upload(request)
+    declared = None
+    if body.sha256:
+        declared = uploads.normalise_sha256(body.sha256)
+        if declared is None:
+            raise HTTPException(status_code=422,
+                                detail=f"sha256 is not a sha256: {body.sha256!r}")
+    record = uploads.SESSIONS.create(room_id=room_id, size=body.size,
+                                     media_type=body.media_type,
+                                     sha256=declared, author=who)
+    return _upload_out(record)
+
+
+@v1.api_route("/rooms/{room_id}/uploads/{upload_id}", methods=["GET", "HEAD"],
+              tags=["assets"], response_model=UploadOut)
+async def upload_status(room_id: str, upload_id: str, request: Request):
+    """Where an upload is: `Upload-Offset` (and `Upload-Length`) in the headers
+    — the question a client asks after a cut, before sending the next piece.
+    GET adds the same as JSON."""
+    record = _session_for(room_id, upload_id, request)
+    headers = {"Upload-Offset": str(record["offset"]),
+               "Upload-Length": str(record["size"]), "Cache-Control": "no-store"}
+    if request.method == "HEAD":
+        return Response(status_code=200, headers=headers)
+    return JSONResponse(_upload_out(record).model_dump(), headers=headers)
+
+
+@v1.patch("/rooms/{room_id}/uploads/{upload_id}", response_model=UploadOut,
+          tags=["assets"])
+async def continue_upload(room_id: str, upload_id: str, request: Request):
+    """Append one piece. `Upload-Offset` must be where the server IS.
+
+    * offset ≠ the server's → **409**, with the server's offset in the body and
+      in `Upload-Offset`: the client resumes from there, no guessing;
+    * a piece that would go past the declared size → **413**, and nothing past
+      the size is written;
+    * another PATCH on the same upload still running → **409** (two writers
+      appending to one file would interleave their bytes);
+    * the client goes away in the middle → whatever arrived is kept: the next
+      HEAD says how much;
+    * the piece that completes the file → the whole file is hashed, checked
+      against the declared sha256 (mismatch → **422** and the upload is
+      DISCARDED: those bytes are not the file, and resuming them would only
+      finish the wrong thing), stored with `put_file`, recorded as the room's
+      (D-C), and the answer is `complete: true` with the `asset`.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from starlette.requests import ClientDisconnect
+
+    from . import uploads
+
+    record = _session_for(room_id, upload_id, request)
+    raw = request.headers.get("upload-offset")
+    try:
+        claimed = int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400,
+                            detail="send the piece's position as `Upload-Offset: "
+                                   "<bytes already on the server>`") from None
+    if not uploads.SESSIONS.claim(upload_id):
+        return JSONResponse(status_code=409, headers={
+            "Upload-Offset": str(record["offset"])}, content={
+            "detail": "another piece of this upload is being written right now",
+            "offset": record["offset"]})
+    try:
+        record = uploads.SESSIONS.get(upload_id) or record   # the offset NOW
+        offset, size = int(record["offset"]), int(record["size"])
+        if claimed != offset:
+            return JSONResponse(status_code=409, headers={
+                "Upload-Offset": str(offset)}, content={
+                "detail": f"the server has {offset} bytes of this upload, not "
+                          f"{claimed}: resume from {offset}",
+                "offset": offset})
+        part = uploads.SESSIONS.part(upload_id)
+        over = False
+        try:
+            _written, over = await uploads.receive_stream(
+                request.stream(), part, append=True, limit=size - offset)
+        except ClientDisconnect:
+            # the bytes that arrived are on disk; there is nobody to answer
+            raise HTTPException(status_code=400,
+                                detail="the client went away mid-piece") from None
+        record = uploads.SESSIONS.get(upload_id) or record
+        offset = int(record["offset"])
+        headers = {"Upload-Offset": str(offset), "Upload-Length": str(size)}
+        if over:
+            return JSONResponse(status_code=413, headers=headers, content={
+                "detail": f"the piece goes past the declared size ({size} bytes):"
+                          f" the server kept the first {offset}",
+                "offset": offset})
+        if offset < size:
+            return JSONResponse(_upload_out(record).model_dump(), headers=headers)
+
+        # ── the last byte: verify, store, remember the room ─────────────────
+        digest = await run_in_threadpool(uploads.sha256_of_file, part)
+        declared = record.get("sha256")
+        if declared and digest != declared:
+            uploads.SESSIONS.drop(upload_id)
+            raise HTTPException(
+                status_code=422,
+                detail=f"the {size} bytes received are sha256:{digest}, not the "
+                       f"declared sha256:{declared} — the upload was discarded; "
+                       f"start a new one")
+        info = await _store_file(part, digest, size, record["media_type"])
+        _record_home(info["ref"], room_id, record.get("author"))
+        uploads.SESSIONS.drop(upload_id)
+        asset = AssetInfo(**info, author=record.get("author"))
+        return JSONResponse(_upload_out(record, complete=True,
+                                        asset=asset).model_dump(),
+                            headers=headers)
+    finally:
+        uploads.SESSIONS.release(upload_id)
+
+
+@v1.delete("/rooms/{room_id}/uploads/{upload_id}", status_code=204,
+           tags=["assets"])
+async def abandon_upload(room_id: str, upload_id: str, request: Request) -> Response:
+    """Give up an upload: the partial bytes are deleted. Idempotent only for
+    the owner of the session — anybody else gets the 404 they would get for an
+    id that never existed."""
+    from . import uploads
+
+    _session_for(room_id, upload_id, request)
+    uploads.SESSIONS.drop(upload_id)
+    return Response(status_code=204)
 
 
 def _byte_range(header: Optional[str], size: int):
