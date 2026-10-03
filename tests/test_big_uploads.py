@@ -275,3 +275,19 @@ def test_a_malformed_declared_sha256_is_refused_up_front(client, node, be):
     assert answer.status_code == 422
     assert client.post("/v1/rooms/scavo/uploads", headers=AUTH,
                        json={"size": 0}).status_code == 422
+
+
+def test_a_browser_may_send_the_pieces_and_read_the_offset(client):
+    """U1 from a page: the preflight lets PATCH and `Upload-Offset` through, and
+    the offset the server answers with is readable by the page (exposed).
+    Measured: before this, the preflight refused both — a resumable upload that
+    worked from Python and could not start from EMStudio."""
+    pre = client.options("/v1/rooms/r/uploads/u", headers={
+        "Origin": "http://localhost:5199",
+        "Access-Control-Request-Method": "PATCH",
+        "Access-Control-Request-Headers": "authorization,upload-offset,content-type"})
+    assert pre.status_code == 200, pre.text
+    assert "PATCH" in pre.headers["access-control-allow-methods"]
+    assert "upload-offset" in pre.headers["access-control-allow-headers"].lower()
+    got = client.get("/v1/health", headers={"Origin": "http://localhost:5199"})
+    assert "upload-offset" in got.headers.get("access-control-expose-headers", "").lower()

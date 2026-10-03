@@ -221,13 +221,21 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS,
     allow_credentials=False,
-    allow_methods=["GET", "HEAD", "PUT", "POST", "DELETE", "OPTIONS"],
+    # PATCH: a resumable upload's pieces (U1). A browser client — EMStudio —
+    # preflights it, and a method left out here is an upload that works from
+    # Python and fails from the page with nothing but a CORS line in a console
+    allow_methods=["GET", "HEAD", "PUT", "POST", "PATCH", "DELETE", "OPTIONS"],
     # `Range`/`If-Range`: a `.3tz` read from another origin asks for its tail
-    # first, and a browser preflights a Range it does not consider simple
-    allow_headers=["Authorization", "Content-Type", "Range", "If-Range"],
+    # first, and a browser preflights a Range it does not consider simple.
+    # `Upload-Offset` and `X-EM-Expected-SHA256`: the two headers of U1
+    allow_headers=["Authorization", "Content-Type", "Range", "If-Range",
+                   "Upload-Offset", "X-EM-Expected-SHA256"],
+    # …and the client must be able to READ where the server is: a 409 or a
+    # HEAD that answers with an offset the page cannot see resumes nothing
     expose_headers=["ETag", "X-EM-License", "X-EM-License-Default",
                     "X-EM-Embargo", "X-EM-Author", "X-EM-Authz",
-                    "Content-Range", "Accept-Ranges", "Content-Length"],
+                    "Content-Range", "Accept-Ranges", "Content-Length",
+                    "Upload-Offset", "Upload-Length"],
 )
 
 #: Every endpoint hangs off this router, so the prefix is declared once and cannot
