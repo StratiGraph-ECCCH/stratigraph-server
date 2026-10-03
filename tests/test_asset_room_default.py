@@ -197,14 +197,20 @@ def test_bytes_with_no_known_home_belong_to_the_door(client, node, be):
         "an invented room grants nothing: no bootstrap on the way to a file"
 
 
-def test_dedup_makes_the_second_room_a_home_too(client, node, be):
-    """CARLA uploads the same bytes into `sua`: she has proved she holds them,
-    and her room becomes one more home — no second object in the store."""
+def test_dedup_does_not_make_a_second_home(client, node, be):
+    """CARLA uploads the same bytes into `sua`: she has proved she holds them
+    and reads them back — but `sua` is NOT a second home (F1, E.D. 3 Oct
+    evening: one file, one room). The answer says where the file lives."""
     ref = _upload(client, be, ANNA, "scavo", PHOTO)
-    again = _upload(client, be, CARLA, "sua", PHOTO)
-    assert again == ref and node["assets"].count() == 1
+    be(CARLA)
+    again = client.put("/v1/rooms/sua/asset?media_type=image/jpeg",
+                       content=PHOTO, headers=AUTH).json()
+    assert again["ref"] == ref and node["assets"].count() == 1
+    assert again["home"] == "scavo" and again["created"] is False
     assert _get(client, be, CARLA, "sua", ref).status_code == 200
-    assert set(asset_homes.ASSET_HOMES.homes(ref)) == {"scavo", "sua"}
+    assert asset_homes.ASSET_HOMES.home(ref) == "scavo"
+    assert set(asset_homes.ASSET_HOMES.homes(ref)) == {"scavo", "sua"}, \
+        "who uploaded through which room is still remembered"
 
 
 def test_the_record_of_homes_survives_the_process(tmp_path):
@@ -215,4 +221,5 @@ def test_the_record_of_homes_survives_the_process(tmp_path):
     homes.record(ref, "sua", None)              # dev mode: a room, nobody named
     again = DirectoryAssetHomes(tmp_path).homes(ref)
     assert again == {"scavo": [ANNA], "sua": []}
+    assert DirectoryAssetHomes(tmp_path).home(ref) == "scavo"
     assert DirectoryAssetHomes(tmp_path).homes("not-a-digest") == {}

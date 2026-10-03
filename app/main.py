@@ -235,7 +235,7 @@ app.add_middleware(
     expose_headers=["ETag", "X-EM-License", "X-EM-License-Default",
                     "X-EM-Embargo", "X-EM-Author", "X-EM-Authz",
                     "Content-Range", "Accept-Ranges", "Content-Length",
-                    "Upload-Offset", "Upload-Length"],
+                    "Upload-Offset", "Upload-Length", "X-EM-Home-Room"],
 )
 
 #: Every endpoint hangs off this router, so the prefix is declared once and cannot
@@ -931,6 +931,10 @@ class AssetInfo(BaseModel):
     created: bool = True
     #: who uploaded — the TOKEN's identity, never a field the client filled in
     author: Optional[str] = None
+    #: THE room these bytes belong to (F1: one home). Not the room of this
+    #: request when the same bytes were already at home elsewhere: they were
+    #: not given a second home, and «Move here» is the gesture that moves them
+    home: Optional[str] = None
 
 
 @v1.put("/rooms/{room_id}/asset", response_model=AssetInfo, tags=["assets"])
@@ -995,8 +999,8 @@ async def put_asset(room_id: str, request: Request,
         info = await _store_file(temp, digest, size, media_type)
     finally:
         temp.unlink(missing_ok=True)
-    _record_home(info["ref"], room_id, author)
-    return AssetInfo(**info, author=author)
+    home = _record_home(info["ref"], room_id, author)
+    return AssetInfo(**info, author=author, home=home)
 
 
 async def _store_file(path: pathlib.Path, digest: str, size: int,
@@ -1015,13 +1019,199 @@ async def _store_file(path: pathlib.Path, digest: str, size: int,
     return await run_in_threadpool(lambda: store.put(path.read_bytes(), media_type))
 
 
-def _record_home(ref: str, room_id: str, author: Optional[str]) -> None:
+def _record_home(ref: str, room_id: str, author: Optional[str]) -> Optional[str]:
     """Remember the room these bytes came in through, and who brought them — the
     D-C gate's answer for an asset no graph cites yet (`app/asset_homes.py`).
     Recorded on EVERY upload, dedup included: whoever sends the same bytes has
-    proved they hold them, and their room becomes one more home."""
+    proved they hold them and may read them back. The FIRST room is their home,
+    and a later room is not a second one (F1): → the home."""
     from . import asset_homes
-    asset_homes.ASSET_HOMES.record(ref, room_id, author)
+    return asset_homes.ASSET_HOMES.record(ref, room_id, author)
+
+
+def _home_of(ref: str) -> Optional[str]:
+    from . import asset_homes
+    try:
+        return asset_homes.ASSET_HOMES.home(_digest_of(ref))
+    except Exception:  # noqa: BLE001 — unread record: no home known
+        return None
+
+
+# ── F1 · one home per file: «Move here» ─────────────────────────────────────
+#
+# E.D., 3 October 2026, evening: «un file sta in UNA stanza; se serve altrove si
+# SPOSTA di stanza (con i diritti della stanza nuova), mai condiviso tra
+# stanze». A «Bring into a room» that finds a file already at home elsewhere
+# (HEAD answers `X-EM-Home-Room`) asks here first — which rooms cite it, what
+# becomes of them — and then, on an explicit yes, moves it: the home and so the
+# rights change, the bytes do not travel again. The rooms whose graphs cite it
+# keep their nodes, which now point at bytes kept in another room: a reference,
+# readable to whoever is a participant of the new home.
+#
+# WHO MAY MOVE (chosen here, and said in the refusal): an **owner or admin of
+# the room the file leaves** — moving takes the bytes away from that room's
+# participants, a decision over who sees what in it, which is what those roles
+# already decide for its members — **and an editor or above of the room it goes
+# to**, the same right as uploading there. Dev mode has no identities and may.
+
+
+class AssetHomeIn(BaseModel):
+    #: the home the client SAW when it asked: a move against a stale view is a
+    #: 409, not a silent move of something that has moved since
+    from_room: Optional[str] = None
+    #: the explicit yes — after reading the rooms that cite the file
+    confirm: bool = False
+
+
+class AssetHomeOut(BaseModel):
+    sha256: str
+    #: THE room the bytes belong to; None when unknown or from before the rule
+    home: Optional[str] = None
+    #: rooms recorded before the one-home rule, with no single home among them
+    legacy_homes: List[str] = Field(default_factory=list)
+    #: True when `home` is the room of this request
+    here: bool = False
+    #: the rooms whose graphs cite the digest: `{room, your_role}`
+    citing_rooms: List[Dict[str, Any]] = Field(default_factory=list)
+    #: the citing rooms that hold — or would hold — a reference, not the file
+    references: List[str] = Field(default_factory=list)
+    can_move: bool = False
+    why_not: str = ""
+    moved: bool = False
+    previous: Optional[str] = None
+    moves: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+async def _asset_home_view(room_id: str, ref: str, request: Request
+                           ) -> AssetHomeOut:
+    """What the home is, who cites the file, and whether THIS caller may move
+    it here. Refused (403) to somebody who may not read the bytes either: the
+    home and the citing rooms are facts about a file they cannot see."""
+    from . import asset_homes
+
+    if not asset_ref_valid(ref):
+        raise HTTPException(status_code=400, detail=f"not an asset reference: {ref!r}")
+    if ASSET_STORE.head(ref) is None:
+        raise HTTPException(status_code=404, detail=f"no asset {ref}")
+    principal = authenticator.require_token(request)
+    dev_mode = bool(principal.get("em_dev_mode")) or not authenticator.settings.enforcing
+    me = None if dev_mode else identity_of(principal)
+    digest = _digest_of(ref)
+    record = asset_homes.ASSET_HOMES
+    home = record.home(digest)
+    legacy = record.legacy_homes(digest)
+    uploaders = record.homes(digest)
+
+    async def role(room: str):
+        if dev_mode:
+            return Role.OWNER
+        try:
+            return await _role_without_bootstrap(room, me, request)
+        except Exception:  # noqa: BLE001 — a room that will not read grants nothing
+            return None
+
+    sources = [home] if home else legacy
+    if not dev_mode:
+        knows = bool(me and any(me in (who or []) for who in uploaders.values()))
+        for room in sources:
+            if knows:
+                break
+            knows = (await role(room)) is not None
+        if not knows and sources:
+            raise HTTPException(
+                status_code=403,
+                detail=f"this file is kept in the room {', '.join(sources)}: only "
+                       f"its participants, or whoever uploaded it, may ask where "
+                       f"it lives")
+
+    citing: List[Dict[str, Any]] = []
+    for candidate in _rooms_holding(digest):
+        try:
+            said = await _asset_rights(candidate, ref)
+        except Exception:  # noqa: BLE001 — listed as unreadable, not dropped
+            citing.append({"room": candidate, "your_role": None, "unreadable": True})
+            continue
+        if said is None:
+            continue
+        mine = await role(candidate)
+        citing.append({"room": candidate,
+                       "your_role": mine.value if mine is not None else None})
+
+    can, why = True, ""
+    if home == room_id:
+        can, why = False, "the file is already at home in this room"
+    else:
+        here = await role(room_id)
+        if here is None or not here.can_write:
+            can, why = False, (f"moving a file into {room_id} takes editor or above "
+                               f"there")
+        for room in sources:
+            if not can:
+                break
+            there = await role(room)
+            if there is None or not there.can_manage:
+                can, why = False, (f"the file is kept in {room}: only its owner or "
+                                   f"an admin there may move it out — the move "
+                                   f"takes it away from that room's participants")
+    return AssetHomeOut(
+        sha256=f"sha256:{digest}", home=home, legacy_homes=legacy,
+        here=home == room_id,
+        citing_rooms=citing,
+        references=[c["room"] for c in citing if c["room"] != room_id],
+        can_move=can, why_not=why, moves=record.moves(digest))
+
+
+@v1.get("/rooms/{room_id}/asset-home/{ref}", response_model=AssetHomeOut,
+        tags=["assets"])
+async def get_asset_home(room_id: str, ref: str, request: Request) -> AssetHomeOut:
+    """Where this file lives, which rooms' graphs cite it, and whether you may
+    move it into this room — the question «Move here» asks before the yes.
+
+    `references` names the rooms that would hold a reference after the move
+    (every citing room but this one): there the file becomes «in another room»,
+    and whoever is not a participant of this room will not see its bytes."""
+    return await _asset_home_view(room_id, ref, request)
+
+
+@v1.post("/rooms/{room_id}/asset-home/{ref}", response_model=AssetHomeOut,
+         tags=["assets"])
+async def move_asset_home(room_id: str, ref: str, body: AssetHomeIn,
+                          request: Request) -> AssetHomeOut:
+    """«Move here»: this room becomes the file's ONLY home. No bytes travel.
+
+    Needs `confirm: true` (400 otherwise, with the rooms that cite it) and the
+    `from_room` the caller saw (409 when the home changed since). Moving to the
+    room that is already home is a no-op answered 200 with `moved: false`."""
+    from datetime import datetime, timezone
+    from . import asset_homes
+
+    view = await _asset_home_view(room_id, ref, request)
+    if view.here:
+        return view
+    if (body.from_room or None) != (view.home or None):
+        raise HTTPException(
+            status_code=409,
+            detail=f"the file's home is {view.home or 'not recorded'}, not "
+                   f"{body.from_room or 'none'}: ask again before moving it")
+    if not view.can_move:
+        raise HTTPException(status_code=403, detail=view.why_not)
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail=("say confirm: the file leaves "
+                    f"{view.home or ', '.join(view.legacy_homes) or 'no room'}; "
+                    "the graphs of " + (", ".join(view.references) or "no other room")
+                    + " will hold a reference, and whoever is not a participant of "
+                    f"{room_id} will not see its bytes"))
+    principal = authenticator.require_token(request)
+    by = None if principal.get("em_dev_mode") else identity_of(principal)
+    done = asset_homes.ASSET_HOMES.move(
+        _digest_of(ref), room_id, by,
+        at=datetime.now(timezone.utc).replace(microsecond=0).isoformat())
+    after = await _asset_home_view(room_id, ref, request)
+    after.moved = True
+    after.previous = done["previous"]
+    return after
 
 
 # ── resumable uploads (U1) ─────────────────────────────────────────────────
@@ -1201,9 +1391,9 @@ async def continue_upload(room_id: str, upload_id: str, request: Request):
                        f"declared sha256:{declared} — the upload was discarded; "
                        f"start a new one")
         info = await _store_file(part, digest, size, record["media_type"])
-        _record_home(info["ref"], room_id, record.get("author"))
+        home = _record_home(info["ref"], room_id, record.get("author"))
         uploads.SESSIONS.drop(upload_id)
-        asset = AssetInfo(**info, author=record.get("author"))
+        asset = AssetInfo(**info, author=record.get("author"), home=home)
         return JSONResponse(_upload_out(record, complete=True,
                                         asset=asset).model_dump(),
                             headers=headers)
@@ -1341,6 +1531,12 @@ async def get_asset(room_id: str, ref: str, request: Request) -> Response:
 
     etag = f'"{ref}"'
     headers = {"ETag": etag, "Accept-Ranges": "bytes"}
+    # F1 · where these bytes LIVE. Said to whoever passed the gates, so a «Bring
+    # into a room» that asks HEAD learns, with the same question, that the file
+    # is at home in another room and can offer to move it instead of sending it
+    home_room = _home_of(ref)
+    if home_room:
+        headers["X-EM-Home-Room"] = home_room
     # The licence TRAVELS WITH THE BYTES. Not enforcement — a share-alike cannot
     # be imposed by an HTTP header, and pretending otherwise would be worse than
     # saying nothing. What this does is remove the excuse: whoever downloads
@@ -1760,11 +1956,17 @@ async def _participants_gate(room_id: str, ref: str, request: Request, *,
     from . import asset_homes
     try:
         homes = asset_homes.ASSET_HOMES.homes(_digest_of(ref))
-    except Exception:  # noqa: BLE001 — a record that only grants: unread = none
-        homes = {}
+        home = asset_homes.ASSET_HOMES.home(_digest_of(ref))
+    except Exception:  # noqa: BLE001 — a record that will not read: no home known
+        homes, home = {}, None
     if me and any(me in (who or []) for who in homes.values()):
         return
-    rooms_of_the_bytes = list(dict.fromkeys(list(citing) + list(homes)))
+    # F1 · ONE home: when the record names it, its participants and nobody
+    # else's — a graph in another room that cites these bytes holds a reference
+    # to them, not a key. Without a recorded home (bytes from before the rule),
+    # the old reading: the citing rooms and the rooms they came in through.
+    rooms_of_the_bytes = ([home] if home else
+                          list(dict.fromkeys(list(citing) + list(homes))))
     if not rooms_of_the_bytes:
         rooms_of_the_bytes = [room_id]       # no home known: the door is the home
     for candidate in rooms_of_the_bytes:

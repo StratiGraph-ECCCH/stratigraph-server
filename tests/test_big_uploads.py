@@ -100,7 +100,7 @@ def test_the_put_never_holds_the_whole_body(client, node, be, monkeypatch):
     info = answer.json()
     assert info == {"ref": f"sha256:{DIGEST}", "sha256": DIGEST,
                     "media_type": "image/tiff", "size": len(BIG),
-                    "created": True, "author": ANNA}
+                    "created": True, "author": ANNA, "home": "scavo"}
     assert node.get(info["ref"]) == BIG
     again = client.put("/v1/rooms/scavo/asset?media_type=image/tiff",
                        content=BIG, headers=AUTH).json()
