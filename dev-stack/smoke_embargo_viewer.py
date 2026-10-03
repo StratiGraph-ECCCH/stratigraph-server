@@ -217,7 +217,7 @@ def main() -> int:
     status, body, _ = request(f"{server}/v1/rooms/{room}/asset/{digest}",
                               headers=viewer)
     ok("D-C: a stranger to the room → 403 before any embargo",
-       status == 403 and b"embargo" not in body, f"{status} {body[:80]!r}")
+       status == 403 and b"under embargo" not in body, f"{status} {body[:80]!r}")
 
     # …so the viewer is made a VIEWER of the room, which is what lets the next
     # measures be about the embargo: a participant who may read, refused only
