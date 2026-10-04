@@ -25,4 +25,14 @@
 # 2026-09-18, two literals in one package, free to diverge. It now imports this
 # one. `pyproject.toml` necessarily repeats the string (it is static metadata),
 # and `tests/test_version.py` refuses a disagreement.
+#
+# THE THIRD SEGMENT MOVES WITH THE RELEASES (W3, 4 Oct 2026). Measured that day:
+# `/v1/health` said `1.6.0.dev1` while the s3dgraphy pin had gone from dev17 to
+# dev35 — a literal nobody moved is not a coordinate. `bump-s3dgraphy.sh`, which
+# `./em.sh release` runs when it moves the pin, now counts one more iteration
+# here and in pyproject.toml, once per commit; the release commits it with the
+# pin. Not the git commit instead: the image cannot see it (`.dockerignore`
+# leaves `.git/` out, and three builders — the dev stack, the installer, the
+# GHCR workflow — would each have to pass it), while this line is COPIED into
+# every image by `COPY app ./app`.
 __version__ = "1.6.0.dev1"

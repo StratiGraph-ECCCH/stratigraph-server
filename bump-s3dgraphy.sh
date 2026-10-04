@@ -5,6 +5,8 @@
 # `ARG S3DGRAPHY_VERSION=` nel Dockerfile e l'anchor `x-s3dgraphy-version` del
 # compose del dev-stack —, mostra il diff, e — con --build — ricostruisce
 # e riavvia StratiGraph Server nel dev-stack (il bump della versione fa da cache-bust del layer).
+# Quando sposta il pin conta anche un'iterazione del server stesso (devN → devN+1,
+# una volta per commit): è il numero che `/v1/health` dice in `version`.
 #
 #   ./bump-s3dgraphy.sh 1.6.0.dev15            # imposta questa versione
 #   ./bump-s3dgraphy.sh --latest              # prende l'ultima da PyPI (pre comprese)
@@ -44,7 +46,38 @@ echo "$VER" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(\.dev[0-9]+)?$' \
 for f in pyproject.toml Dockerfile dev-stack/docker-compose.dev.yml; do
   [ -f "$f" ] || { echo "✗ $f non trovato — sei in stratigraph-server?"; exit 1; }
 done
+# LA VERSIONE DEL SERVER SEGUE I RELEASE (W3, 4 ottobre 2026). `/v1/health`
+# diceva `"version": "1.6.0.dev1"` da settembre, mentre il pin andava da dev17 a
+# dev35: un numero che nessuno muoveva. Ora, quando QUESTO script sposta il pin,
+# il server conta un'iterazione in più — `1.6.0.devN` → `devN+1` in
+# `app/__init__.py` e nel `version` di pyproject.toml, le due righe che
+# `tests/test_version.py` tiene uguali. Una sola volta per commit: se la
+# versione nel working tree è già diversa da quella in HEAD, è già stata
+# contata. Se s3Dgraphy cambia lingua (1.6 → 1.7), il server riparte da
+# `<lingua>.0.dev1`: le prime due cifre sono quelle della lingua.
+OLD_PIN=$(sed -nE 's/.*"s3dgraphy(\[[a-z,]*\])?==([^"]+)".*/\2/p' pyproject.toml | head -1)
+OWN=""
+[ -f app/__init__.py ] && OWN=$(sed -nE 's/^__version__ = "([^"]+)"/\1/p' app/__init__.py)
+OWN_HEAD=$(git --no-pager show HEAD:app/__init__.py 2>/dev/null | sed -nE 's/^__version__ = "([^"]+)"/\1/p' || true)
+NEXT=""
+if [ "$OLD_PIN" != "$VER" ] && [ -n "$OWN" ] && { [ -z "$OWN_HEAD" ] || [ "$OWN" = "$OWN_HEAD" ]; }; then
+  LANG_V=$(echo "$VER" | cut -d. -f1-2); LANG_OWN=$(echo "$OWN" | cut -d. -f1-2)
+  if [ "$LANG_V" != "$LANG_OWN" ]; then
+    NEXT="$LANG_V.0.dev1"
+  elif echo "$OWN" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+$'; then
+    NEXT="${OWN%.dev*}.dev$(( ${OWN##*.dev} + 1 ))"
+  else
+    echo "⚠ la versione del server ($OWN) non è una .devN: contala a mano in app/__init__.py e pyproject.toml"
+  fi
+fi
+
 sed -E -i.bak "s/(s3dgraphy(\[[a-z,]*\])?==)[0-9][A-Za-z0-9.]*/\1${VER}/g" pyproject.toml
+if [ -n "$NEXT" ]; then
+  sed -E -i.bak "s/^version = \"[^\"]*\"/version = \"${NEXT}\"/" pyproject.toml
+  sed -E -i.bak "s/^__version__ = \"[^\"]*\"/__version__ = \"${NEXT}\"/" app/__init__.py
+  rm -f app/__init__.py.bak
+  echo "▶ il server conta un'iterazione: $OWN → $NEXT (app/__init__.py + pyproject.toml)"
+fi
 # le due copie: il default dell'ARG e l'anchor del compose
 sed -E -i.bak "s/^(ARG S3DGRAPHY_VERSION=).*/\1${VER}/" Dockerfile
 sed -E -i.bak "s/^(x-s3dgraphy-version: &s3dgraphy_version \"\\\$\{S3DGRAPHY_VERSION:-)[^}]*(\}\")/\1${VER}\2/" \
@@ -54,12 +87,14 @@ rm -f pyproject.toml.bak Dockerfile.bak dev-stack/docker-compose.dev.yml.bak
 echo "▶ pin aggiornato a s3dgraphy[geo,rdf]==$VER. Diff:"
 # --no-pager (dev29, C1): dentro ./em.sh release un pager aperto qui fermava
 # il release su «:» finché non si premeva q
-git --no-pager diff -- pyproject.toml Dockerfile dev-stack/docker-compose.dev.yml 2>/dev/null || echo "  (git non disponibile: controlla i file a mano)"
+git --no-pager diff -- pyproject.toml Dockerfile dev-stack/docker-compose.dev.yml app/__init__.py 2>/dev/null || echo "  (git non disponibile: controlla i file a mano)"
 
 # la guardia che tiene le tre righe una: se un sed non ha preso, lo dice qui
 if [ -x .venv/bin/python ]; then
   .venv/bin/python -m pytest -q -p no:cacheprovider tests/test_s3dgraphy_pin.py -k "not what_is_installed" \
     || { echo "✗ le tre righe non coincidono: guarda il diff qui sopra"; exit 1; }
+  .venv/bin/python -m pytest -q -p no:cacheprovider tests/test_version.py -k "pyproject_and_the_package_agree" \
+    || { echo "✗ app/__init__.py e pyproject.toml non dicono la stessa versione del server"; exit 1; }
 fi
 
 if [ "$BUILD" = "yes" ]; then
