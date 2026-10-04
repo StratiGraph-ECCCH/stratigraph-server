@@ -256,3 +256,76 @@ sg_reaches() {
     *)  echo muto; return 1 ;;
   esac
 }
+
+# ════════════════════════════════════════════════════════════════════════════
+# ## L'ANNUNCIO SULLA RETE LOCALE (`_stratigraph._tcp`)
+#
+# Misurato il 4 ottobre 2026: il Pi pubblica con avahi il NOME `fcn.local`, non
+# un servizio, e il cercatore di nodi di s3Dgraphy (`tools/node_finder`,
+# `dns-sd -B` / `avahi-browse -rpt _stratigraph._tcp`) non lo trovava. Il nodo
+# personale (`scripts/personal_node.py --lan`) si annuncia già così; qui lo
+# stesso meccanismo per lo stack, e SOLO quando `fcn-up.sh` riceve un host
+# primario (cioè è stato aperto «per l'altro computer").
+#
+# La porta è quella di Caddy (https) e l'API sta sotto `/em`: il TXT lo dice
+# (`scheme=https path=/em`), e `node_finder.url_of` lo legge — senza, il
+# cercatore avrebbe costruito `http://host:8443`, che non risponde mai.
+# Nessuna dipendenza nuova: `dns-sd` c'è su macOS, `avahi-publish` sui Linux
+# con avahi (il Pi); senza nessuno dei due si dice e si va avanti.
+
+SG_ANNOUNCE_SERVICE="_stratigraph._tcp"
+
+#: Dove sta il pid dell'annuncio: fuori dal repository, sotto `$HOME` (le prove
+#: girano con un `HOME` finto, quindi non possono fermare un annuncio vero), e
+#: lo legge `fcn-down.sh`. `SG_ANNOUNCE_PIDFILE` lo sostituisce.
+sg_announce_pidfile() { echo "${SG_ANNOUNCE_PIDFILE:-${HOME:-/tmp}/.cache/stratigraph/fcn-announce.pid}"; }
+
+#: Il comando che annuncia, una parola per riga; ritorna 1 (e non stampa
+#: niente) se questa macchina non ha né `dns-sd` né `avahi-publish`.
+#:   sg_announce_cmd NOME PORTA PERCORSO SCHEMA
+sg_announce_cmd() {
+  local name="$1" port="$2" path="${3:-/}" scheme="${4:-https}"
+  if command -v dns-sd >/dev/null 2>&1; then
+    printf '%s\n' dns-sd -R "$name" "$SG_ANNOUNCE_SERVICE" local. "$port" \
+      "path=$path" "scheme=$scheme"
+  elif command -v avahi-publish >/dev/null 2>&1; then
+    printf '%s\n' avahi-publish -s "$name" "$SG_ANNOUNCE_SERVICE" "$port" \
+      "path=$path" "scheme=$scheme"
+  else
+    return 1
+  fi
+}
+
+#: Ferma l'annuncio acceso da un `fcn-up.sh` precedente (se c'è). Silenzioso
+#: quando non c'è niente da fermare; ritorna 0 sempre.
+sg_announce_stop() {
+  local pf pid
+  pf="$(sg_announce_pidfile)"
+  [ -f "$pf" ] || return 0
+  pid="$(cat "$pf" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    echo "· annuncio ${SG_ANNOUNCE_SERVICE} fermato (pid $pid)."
+  fi
+  rm -f "$pf"
+  return 0
+}
+
+#: Accende l'annuncio in background e scrive il pid. Stampa una frase in ogni
+#: caso: annunciato, o perché no.
+#:   sg_announce_start NOME PORTA PERCORSO SCHEMA
+sg_announce_start() {
+  local cmd=() line pid
+  sg_announce_stop >/dev/null
+  while IFS= read -r line; do cmd+=("$line"); done < <(sg_announce_cmd "$@" || true)
+  if [ "${#cmd[@]}" -eq 0 ]; then
+    echo "· nessun annuncio sulla rete locale: questa macchina non ha né dns-sd né"
+    echo "  avahi-publish (gli altri ti trovano solo scrivendo l'indirizzo)."
+    return 0
+  fi
+  nohup "${cmd[@]}" >/dev/null 2>&1 &
+  pid=$!
+  mkdir -p "$(dirname "$(sg_announce_pidfile)")" 2>/dev/null || true
+  echo "$pid" > "$(sg_announce_pidfile)"
+  echo "· annunciato sulla rete locale come «$1» (${SG_ANNOUNCE_SERVICE}, ${cmd[0]}, pid $pid)."
+}

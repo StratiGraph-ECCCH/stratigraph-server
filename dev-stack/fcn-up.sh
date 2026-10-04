@@ -4,6 +4,7 @@
 #
 #   ./fcn-up.sh                 # locale: https://em.localhost:8443 (+ serve anche il nome mDNS .local)
 #   ./fcn-up.sh mac.local       # host PRIMARIO = un hostname risolvibile (per l'altro computer)
+#                               #   …e si annuncia sulla rete locale (_stratigraph._tcp; lo ferma fcn-down)
 #   ./fcn-up.sh --demo          # …e POPOLA: studi, stanze, immagini IIIF. Idempotente.
 #   ./fcn-up.sh --local-s3d     # s3Dgraphy dal CHECKOUT LOCALE (editi e testi live)
 #   ./fcn-up.sh mac.local --local-s3d
@@ -219,6 +220,20 @@ if [ -n "$mancanti" ]; then
 fi
 
 "${COMPOSE[@]}" --profile https up -d --build
+
+# ── 4-ter · L'ANNUNCIO SULLA RETE LOCALE ─────────────────────────────────────
+#
+# Solo se il nodo è stato aperto «per l'altro computer», cioè con un host
+# primario: senza argomenti il nodo è di questa macchina e non si annuncia
+# (e un annuncio rimasto da un avvio precedente si spegne). La porta è quella
+# di Caddy e l'API sta sotto `/em`: il TXT lo dice, `node_finder` lo legge.
+# In background; lo ferma `./fcn-down.sh`. Vedi `sg_announce_*` in platform.sh.
+if [ "$PRIMARY" != "em.localhost" ]; then
+  nome_annuncio="${BONJOUR%.local}"; nome_annuncio="${nome_annuncio:-${PRIMARY%.local}}"
+  sg_announce_start "StratiGraph (${nome_annuncio})" "$HTTPS_PORT" /em https
+else
+  sg_announce_stop
+fi
 
 # ── 4-bis · --demo: aspetta, poi popola ──────────────────────────────────────
 #

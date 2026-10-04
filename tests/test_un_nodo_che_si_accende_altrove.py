@@ -83,7 +83,11 @@ def _finti(tmp_path, *, docker_ok: bool, nomi=(),
     vero = shutil.which("docker-compose") or shutil.which("docker") or ""
     for nome in ("docker", "colima", "sudo", "security", "scutil", "hostname",
                  "update-ca-certificates", "update-ca-trust", "certutil",
-                 "cmd.exe", "wslpath", "getent", "ip", "route", *extra,
+                 "cmd.exe", "wslpath", "getent", "ip", "route",
+                 #: l'annuncio `_stratigraph._tcp`: `fcn-up.sh <host>` lo
+                 #: accende, e su questo Mac `dns-sd` è vero — senza il finto
+                 #: ogni prova con un host annuncerebbe sulla rete di chi prova
+                 "dns-sd", "avahi-publish", *extra,
                  *nomi):
         script = ["#!/usr/bin/env bash",
                   f'echo "{nome} $*" >> "{log}"']

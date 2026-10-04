@@ -34,6 +34,11 @@ for a in "$@"; do
   esac
 done
 
+#: L'annuncio `_stratigraph._tcp` acceso da `fcn-up.sh <host>`: un nodo spento
+#: (o in pausa) non deve restare trovabile sulla rete. PRIMA di `wipe`, che chiede
+#: conferma: anche se la conferma non arriva, un annuncio fermato non fa danni.
+sg_announce_stop
+
 case "$MODE" in
   stop)
     echo "⏸  fermo i container (li tengo, ripartenza in secondi)…"
