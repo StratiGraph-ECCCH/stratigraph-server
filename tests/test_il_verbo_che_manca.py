@@ -80,9 +80,10 @@ def _implementazioni():
 
 def test_IL_PROTOCOLLO_TROVA_LE_SUE_IMPLEMENTAZIONI():
     nomi = sorted(c.__name__ for c in _implementazioni())
+    # N2 (4 ottobre 2026): il quarto, lo store del nodo personale (per riferimento)
     assert nomi == ["DirectoryAssetStore", "InMemoryAssetStore",
-                    "MinioAssetStore"], nomi
-    #: …e tutte e tre rispondono a tutti e quattro i verbi
+                    "MinioAssetStore", "ReferenceAssetStore"], nomi
+    #: …e tutti rispondono a tutti e quattro i verbi
     for classe in _implementazioni():
         for verbo in ("put", "get", "head", "delete"):
             assert callable(getattr(classe, verbo, None)), (classe.__name__, verbo)
