@@ -829,3 +829,18 @@ def test_every_archive_endpoint_goes_THROUGH_the_registry():
         f"{len(doors)} archive doors and {calls} calls through the registry — "
         "every door must pass through `RoomRegistry.archive`, which is the one "
         "place that asks whether the graph found another home")
+
+
+def test_a_new_room_names_its_graph_after_its_title(instance):
+    """G2 · measured on 4 Oct 2026: «Templu Mare Q11» showed its graph in EMStudio
+    as `templu-mare-q11` — the seeding ops carry nodes and edges, never the
+    graph's name, so the name the empty room is born with is the one it keeps."""
+    import asyncio
+    instance.create("templu-mare-q12", title="Templu Mare Q12", created_by=ANNA)
+    room = asyncio.run(instance.get("templu-mare-q12"))
+    graph = room.document["graphs"]["templu-mare-q12"]
+    assert graph["graph_id"] == "templu-mare-q12"
+    assert graph["name"] == "Templu Mare Q12"
+    # a room with no title of its own keeps its id as the name
+    room = asyncio.run(instance.get("senza-titolo"))
+    assert room.document["graphs"]["senza-titolo"]["name"] == "senza-titolo"

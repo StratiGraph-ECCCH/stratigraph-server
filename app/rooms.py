@@ -942,7 +942,8 @@ class RoomRegistry:
                 snapshot = self.store.get(ref)
                 if snapshot is not None:
                     break
-            document = deep_copy(snapshot) if snapshot else _empty_container(room_id)
+            document = (deep_copy(snapshot) if snapshot
+                        else _empty_container(room_id, descriptor.title))
             # IL REGISTRO ACCOMPAGNA IL DOCUMENTO: sta accanto agli snapshot, e
             # non c'è quando lo store è in memoria (vedi `oplog.journal_for`).
             room = Room(room_id, document, journal=journal_for(self.store, room_id))
@@ -961,16 +962,20 @@ class RoomRegistry:
         return sorted(self._rooms)
 
 
-def _empty_container(room_id: str) -> Dict[str, Any]:
+def _empty_container(room_id: str, title: str = "") -> Dict[str, Any]:
     """A room nobody has ever written: an empty container-of-one.
 
     A container, not a bare graph, because that is what an em.json IS since the
     multigraph decision — a relay that invented a different starting shape would
     hand its first client a document the rest of the ecosystem does not read.
+
+    Its graph is named after the room's TITLE: measured on 4 Oct 2026, the room
+    «Templu Mare Q11» showed its graph in EMStudio as `templu-mare-q11`, because
+    the seeding ops carry nodes and edges and never the graph's name.
     """
     return {
         "header": {"format": "em.json", "version": "1.0"},
-        "graphs": {room_id: {"graph_id": room_id, "name": room_id,
+        "graphs": {room_id: {"graph_id": room_id, "name": (title or room_id),
                              "nodes": [], "edges": []}},
         "active_graph_id": room_id,
     }
