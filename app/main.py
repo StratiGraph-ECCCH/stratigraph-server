@@ -1048,11 +1048,12 @@ def _home_of(ref: str) -> Optional[str]:
 # keep their nodes, which now point at bytes kept in another room: a reference,
 # readable to whoever is a participant of the new home.
 #
-# WHO MAY MOVE (chosen here, and said in the refusal): an **owner or admin of
-# the room the file leaves** — moving takes the bytes away from that room's
-# participants, a decision over who sees what in it, which is what those roles
-# already decide for its members — **and an editor or above of the room it goes
-# to**, the same right as uploading there. Dev mode has no identities and may.
+# WHO MAY MOVE (D4, decided by E.D. 4 Oct 2026, and said in the refusal): ONE
+# person who is the **owner of the room the file leaves** — moving takes the
+# bytes away from that room's participants, and an admin hands out roles but
+# does not decide what the room keeps — **and an editor or above of the room it
+# goes to**, the same right as uploading there. Until 4 Oct an admin of the
+# room left could move too. Dev mode has no identities and may.
 
 
 class AssetHomeIn(BaseModel):
@@ -1149,10 +1150,10 @@ async def _asset_home_view(room_id: str, ref: str, request: Request
             if not can:
                 break
             there = await role(room)
-            if there is None or not there.can_manage:
-                can, why = False, (f"the file is kept in {room}: only its owner or "
-                                   f"an admin there may move it out — the move "
-                                   f"takes it away from that room's participants")
+            if there is not Role.OWNER:
+                can, why = False, (f"the file is kept in {room}: only its owner may "
+                                   f"move it out — the move takes it away from that "
+                                   f"room's participants")
     return AssetHomeOut(
         sha256=f"sha256:{digest}", home=home, legacy_homes=legacy,
         here=home == room_id,

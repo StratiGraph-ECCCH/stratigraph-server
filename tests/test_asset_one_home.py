@@ -15,8 +15,9 @@ What these tests hold:
   ones that would hold a reference after the move;
 * `POST …/asset-home/{ref}` moves it only with `confirm` and the `from_room`
   the caller saw; after it the home is the new room and ONLY it;
-* who may move: owner/admin of the room the file leaves AND editor+ of the
-  room it goes to;
+* who may move (D4, E.D. 4 Oct 2026): ONE person, OWNER of the room the file
+  leaves (an admin no more) AND editor+ of the room it goes to — tried with
+  dev, editor, viewer and admin;
 * the old room's participants who are not in the new one lose the bytes; the
   uploader keeps reading back what they sent.
 """
@@ -260,3 +261,55 @@ def test_the_move_survives_the_process(tmp_path):
     assert again.home(ref) == "tempio-b"
     assert again.moves(ref)[0]["from"] == "tempio-a"
     assert again.homes(ref) == {"tempio-a": [ANNA], "tempio-b": [ANNA]}
+
+
+# ── D4 (E.D., 4 Oct 2026) · one person: owner of the room left, editor+ of the
+#    room reached — tried with dev, editor, viewer, and an admin ──────────────
+
+DARIO = "0000-0002-3843-3472"    # ADMIN of `tempio-a`, editor of `tempio-b`
+
+
+def test_d4_an_admin_of_the_room_left_may_not_move_the_file(client, node, be):
+    ws_module.ACL_STORE.put("tempio-a", Acl(owner=ANNA, members={
+        BRUNO: "viewer", ELENA: "editor", DARIO: "admin"}).as_dict())
+    ws_module.ACL_STORE.put("tempio-b", Acl(owner=ANNA, members={
+        ELENA: "editor", DARIO: "editor"}).as_dict())
+    ref = _upload(client, be, ANNA, "tempio-a")["ref"]
+    view = _view(client, be, DARIO, "tempio-b", ref).json()
+    assert view["can_move"] is False and "only its owner" in view["why_not"]
+    assert _move(client, be, DARIO, "tempio-b", ref, from_room="tempio-a",
+                 confirm=True).status_code == 403
+    assert asset_homes.ASSET_HOMES.home(ref) == "tempio-a"
+
+
+@pytest.mark.parametrize("who,status", [(ELENA, 403), (BRUNO, 403), (ANNA, 200)])
+def test_d4_editor_viewer_owner(client, node, be, who, status):
+    """ELENA editor in both, BRUNO viewer in A (and nobody in B), ANNA owner of
+    A and B: only the owner moves."""
+    ref = _upload(client, be, ANNA, "tempio-a")["ref"]
+    answer = _move(client, be, who, "tempio-b", ref, from_room="tempio-a", confirm=True)
+    assert answer.status_code == status, answer.text
+    assert asset_homes.ASSET_HOMES.home(ref) == ("tempio-b" if status == 200 else "tempio-a")
+
+
+def test_d4_dev_mode_has_no_identities_and_may(client, node, monkeypatch):
+    """The development node (no Keycloak): nobody has an identity, so nobody is
+    refused — the rule is a rule between persons."""
+    class Open:
+        enforcing = False
+
+        def describe(self):
+            return "dev"
+
+    for module in (ws_module, main_module):
+        monkeypatch.setattr(module.authenticator, "settings", Open())
+        monkeypatch.setattr(module.authenticator, "verify",
+                            lambda token: {"em_dev_mode": True})
+    put = client.put("/v1/rooms/tempio-a/asset?media_type=image/jpeg", content=PHOTO,
+                     headers=AUTH)
+    assert put.status_code == 200, put.text
+    ref = put.json()["ref"]
+    moved = client.post(f"/v1/rooms/tempio-b/asset-home/{ref}",
+                        json={"from_room": "tempio-a", "confirm": True}, headers=AUTH)
+    assert moved.status_code == 200, moved.text
+    assert asset_homes.ASSET_HOMES.home(ref) == "tempio-b"
