@@ -28,6 +28,7 @@ checksum follows: a bare hex string is unreadable in two years.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
 import threading
@@ -592,6 +593,121 @@ def _minio_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
     return found
 
 
+class ReferenceAssetStore:
+    """N2 · the store of a PERSONAL node (decided by E.D., 4 Oct 2026).
+
+    A node on one's own computer runs the web tools and the rooms; it does
+    **not keep the files**. «Upload to the room» of a file inside the project's
+    standard tree (``root``) registers it BY REFERENCE — its sha256 and its path
+    in the tree — and copies no byte: the real custody stays the folder tree,
+    which belongs on a backed-up disk. Reading follows the reference and checks
+    the digest: a file changed since is no longer these bytes, and answers None.
+
+    Bytes that arrive by a normal upload (a file from outside the tree, a photo
+    from the phone) go to ``fallback``, a directory store, and that is said by
+    :func:`describe`.
+    """
+
+    INDEX = "references.json"
+
+    def __init__(self, root: str | os.PathLike[str], fallback: "DirectoryAssetStore") -> None:
+        self.root = pathlib.Path(root).resolve()
+        self.fallback = fallback
+        self._index_path = pathlib.Path(fallback.root) / self.INDEX
+        try:
+            self._index: Dict[str, str] = json.loads(self._index_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self._index = {}
+
+    def _save(self) -> None:
+        tmp = self._index_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._index, indent=1, sort_keys=True), encoding="utf-8")
+        tmp.replace(self._index_path)
+
+    def register(self, path: str | os.PathLike[str], sha256: Optional[str] = None,
+                 media_type: str = "application/octet-stream") -> Dict[str, Any]:
+        """Record a file of the tree by reference. Refused outside ``root``, and
+        when the bytes are not the ``sha256`` the client said."""
+        full = pathlib.Path(path).resolve()
+        if self.root not in full.parents:
+            raise PermissionError(f"{full} is not inside the project tree {self.root}")
+        if not full.is_file():
+            raise FileNotFoundError(str(full))
+        h = hashlib.sha256()
+        with full.open("rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
+        digest = h.hexdigest()
+        if sha256 and sha256.split(":")[-1].lower() != digest:
+            raise ValueError(f"the file is sha256:{digest}, not {sha256}")
+        rel = str(full.relative_to(self.root))
+        created = self._index.get(digest) != rel
+        self._index[digest] = rel
+        self._save()
+        return {"ref": f"{DIGEST_PREFIX}:{digest}", "sha256": digest, "media_type": media_type,
+                "size": full.stat().st_size, "created": created, "by_reference": True,
+                "path": rel}
+
+    def _referenced(self, ref: str) -> Optional[pathlib.Path]:
+        rel = self._index.get(ref.split(":", 1)[-1])
+        if not rel:
+            return None
+        full = self.root / rel
+        return full if full.is_file() else None
+
+    def put(self, data: bytes, media_type: str) -> Dict[str, Any]:
+        return self.fallback.put(data, media_type)
+
+    def put_file(self, path, sha256: str, size: int, media_type: str) -> Dict[str, Any]:
+        return self.fallback.put_file(path, sha256, size, media_type)
+
+    def get(self, ref: str) -> Optional[bytes]:
+        full = self._referenced(ref)
+        if full is not None:
+            data = full.read_bytes()
+            return data if content_id(data) == ref else None
+        return self.fallback.get(ref)
+
+    def read_range(self, ref: str, start: int, length: int) -> Optional[bytes]:
+        full = self._referenced(ref)
+        if full is not None:
+            with full.open("rb") as fh:
+                fh.seek(start)
+                return fh.read(length)
+        return self.fallback.read_range(ref, start, length)
+
+    def head(self, ref: str) -> Optional[Dict[str, Any]]:
+        full = self._referenced(ref)
+        if full is not None:
+            import mimetypes
+            return {"ref": ref, "sha256": ref.split(":", 1)[1],
+                    "media_type": mimetypes.guess_type(full.name)[0] or "application/octet-stream",
+                    "size": full.stat().st_size, "by_reference": True}
+        return self.fallback.head(ref)
+
+    def delete(self, ref: str) -> Dict[str, Any]:
+        digest = ref.split(":", 1)[-1]
+        if self._index.pop(digest, None) is not None:
+            self._save()
+            return {"ref": ref, "deleted": True, "by_reference": True}
+        return self.fallback.delete(ref)
+
+    def stored_bytes(self) -> int:
+        """What the NODE holds (the fallback directory), not what it references."""
+        total = 0
+        for p in pathlib.Path(self.fallback.root).rglob("*"):
+            if p.is_file() and p.name != self.INDEX:
+                total += p.stat().st_size
+        return total
+
+
+def node_profile(environ: Optional[Dict[str, str]] = None) -> str:
+    """``personal`` (a node on one's own computer: files by reference) or
+    ``node`` (it keeps the bytes it is given)."""
+    env = environ if environ is not None else os.environ
+    return "personal" if env.get("EM_NODE_PROFILE") == "personal" else "node"
+
+
 def asset_store_from_env(environ: Optional[Dict[str, str]] = None) -> AssetStore:
     """The asset store this process should use, chosen by configuration.
 
@@ -605,6 +721,12 @@ def asset_store_from_env(environ: Optional[Dict[str, str]] = None) -> AssetStore
        deployment, which is why `/v1/health` reports which one is in use.
     """
     env = environ if environ is not None else os.environ
+    if node_profile(env) == "personal" and env.get("EM_PERSONAL_ROOT"):
+        # N2 · a personal node references the tree; what is uploaded from
+        # elsewhere stays beside it
+        fallback_dir = env.get("EM_ASSET_DIR") or os.path.join(
+            env.get("EM_SNAPSHOT_DIR") or ".", "assets")
+        return ReferenceAssetStore(env["EM_PERSONAL_ROOT"], DirectoryAssetStore(fallback_dir))
     minio = _minio_settings(env)
     if minio:
         return MinioAssetStore(endpoint=minio["endpoint"],
@@ -645,4 +767,6 @@ def describe(store: AssetStore) -> str:
     return {
         "InMemoryAssetStore": "memory (not durable — dies with the process)",
         "DirectoryAssetStore": "directory (local only — not for replicas)",
+        "ReferenceAssetStore": (f"personal: files by reference in {getattr(store, 'root', '?')} "
+                                f"— the node keeps no copy; keep the folders on a backed-up disk"),
     }.get(type(store).__name__, type(store).__name__)

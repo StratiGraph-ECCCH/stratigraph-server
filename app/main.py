@@ -330,6 +330,11 @@ class Health(BaseModel):
     #: nobody reads: this way "is this deployment actually protected?" is one
     #: unauthenticated GET away, for the operator and for the client alike.
     auth: str = "dev-no-auth"
+    #: N2 (4 Oct 2026) · `personal` (a node on one's own computer: the files
+    #: stay in the project's folders, registered by reference) or `node`
+    profile: str = "node"
+    #: …and the sentence a desk shows about it
+    custody: str = ""
     #: WHAT WAS ACTUALLY REACHED, and when. Every other field on this model is a
     #: description of the configuration: `asset_store` says «minio at
     #: http://minio:9000» whether or not anything is listening there. This one is
@@ -709,6 +714,16 @@ def node_offers() -> NodeOffers:
     )
 
 
+#: N2 · what a personal node says about the files, in the desks' words
+_PERSONAL_CUSTODY = ("Personal node: the files stay in your folders; keep them on a "
+                     "backed-up disk.")
+
+
+def _profile() -> str:
+    from .assets import node_profile
+    return node_profile()
+
+
 @v1_public.get("/health", response_model=Health, tags=["meta"])
 def health() -> Health:
     """Liveness, version, and what this build can do.
@@ -738,6 +753,8 @@ def health() -> Health:
             "resolve_authority": bool(em.authority_facets()),
         },
         auth=authenticator.settings.describe(),
+        profile=_profile(),
+        custody=(_PERSONAL_CUSTODY if _profile() == "personal" else ""),
         snapshot_store=snapshot_describe(snapshot_store()),
         asset_store=asset_describe(ASSET_STORE),
         acl_store=acl_describe(ACL_STORE),
@@ -1001,6 +1018,43 @@ async def put_asset(room_id: str, request: Request,
         temp.unlink(missing_ok=True)
     home = _record_home(info["ref"], room_id, author)
     return AssetInfo(**info, author=author, home=home)
+
+
+class AssetReferenceIn(BaseModel):
+    #: the file inside the project tree of this personal node
+    path: str
+    sha256: Optional[str] = None
+    media_type: str = "application/octet-stream"
+
+
+@v1.post("/rooms/{room_id}/asset-reference", response_model=AssetInfo, tags=["assets"])
+async def put_asset_reference(room_id: str, body: AssetReferenceIn,
+                              request: Request) -> AssetInfo:
+    """N2 · «Upload to the room» on a PERSONAL node: the file of the project's
+    tree is registered BY REFERENCE (sha256 + path) and no byte is copied —
+    the node's storage does not grow; the folder tree keeps the file. Refused
+    (409) on a node that keeps the bytes: upload them there."""
+    from starlette.concurrency import run_in_threadpool
+    from .assets import ReferenceAssetStore
+
+    principal = authenticator.require_token(request)
+    author = None if principal.get("em_dev_mode") else identity_of(principal)
+    store = ASSET_STORE
+    if not isinstance(store, ReferenceAssetStore):
+        raise HTTPException(status_code=409,
+                            detail="this node keeps the bytes it is given: upload the "
+                                   "file (PUT …/asset), a reference is for a personal node")
+    try:
+        info = await run_in_threadpool(store.register, body.path, body.sha256, body.media_type)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"no such file: {exc}") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    home = _record_home(info["ref"], room_id, author)
+    return AssetInfo(**{k: v for k, v in info.items() if k in AssetInfo.model_fields},
+                     author=author, home=home)
 
 
 async def _store_file(path: pathlib.Path, digest: str, size: int,
