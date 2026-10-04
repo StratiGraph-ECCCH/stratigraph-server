@@ -773,6 +773,11 @@ services:
       # Caddy would make the server's ability to validate depend on its own proxy.
       OIDC_JWKS_URI: "http://keycloak:8080/auth/realms/${DEV_REALM}/protocol/openid-connect/certs"
       OIDC_AUDIENCE: "${DEV_CLIENT_ID}"
+      # The client a NATIVE app signs in as (EM Tools in Blender): `em-tools` in
+      # the dev realm, public, PKCE, return on `http://127.0.0.1/` — Keycloak
+      # 24.0.4 ignores the port on the loopback (measured 4 Oct 2026). Named in
+      # `/v1/auth-config` as `native_client_id`.
+      EM_NATIVE_CLIENT_ID: "${EM_NATIVE_CLIENT_ID:-em-tools}"
       # --- the object store: the PRODUCTION implementation -------------------
       MINIO_ENDPOINT: "http://minio:9000"
       MINIO_ACCESS_KEY: "${MINIO_ROOT_USER}"

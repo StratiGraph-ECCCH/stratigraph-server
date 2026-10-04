@@ -464,6 +464,13 @@ class AuthConfig(BaseModel):
     #: who attests an identity signed in with the node's password (see
     #: `/v1/whoami`). Empty when the node never said its name
     node_name: str = ""
+    #: 4 Oct 2026 · the PUBLIC client a NATIVE app signs in as (EM Tools in
+    #: Blender): Authorization Code + PKCE with its return on the loopback,
+    #: `http://127.0.0.1:<port>/` (RFC 8252). `EM_NATIVE_CLIENT_ID`; empty when
+    #: the realm has none, and then a native app says so instead of opening a
+    #: browser on a «redirect_uri» refusal. Not `client_id`: that one's returns
+    #: are pages, and a loopback URI does not belong on it
+    native_client_id: str = ""
 
 
 @v1_public.get("/auth-config", response_model=AuthConfig, tags=["meta"])
@@ -504,6 +511,8 @@ def auth_config() -> AuthConfig:
         orcid_idp_ready=ready,
         orcid_idp_why=why,
         node_name=node_name(),
+        native_client_id=(os.environ.get("EM_NATIVE_CLIENT_ID", "").strip()
+                          if issuer else ""),
     )
 
 
