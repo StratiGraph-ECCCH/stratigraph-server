@@ -942,6 +942,36 @@ class RoomRegistry:
                 return room.room_id
         return None
 
+    def containers(self) -> Optional[set]:
+        """The containers the snapshot store holds, asked once — or None when the
+        store cannot enumerate (then `has_container` asks one by one)."""
+        listing = getattr(self.store, "rooms", None)
+        return set(listing()) if callable(listing) else None
+
+    def has_container(self, room_id: str,
+                      known: Optional[set] = None) -> bool:
+        """Whether the store holds a container under this name."""
+        if known is not None:
+            return room_id in known
+        return self.store.get(room_id) is not None
+
+    def listable_implicit(self, room_id: str,
+                          known: Optional[set] = None) -> bool:
+        """Whether a room with no record may be listed as IMPLICIT.
+
+        **Only when its container exists, and never when a record exists.**
+        Measured on the dev node, 5 October 2026: `GET /v1/rooms` brought back
+        42 rooms as implicit, 38 of them with no container — rooms that had only
+        an ACL, written by the door when somebody (a smoke, a wrong name) asked
+        for them, many of them test rooms the person had just archived. An
+        implicit room is a container that predates the register: without the
+        container there is nothing to describe, and listing it invents a room.
+        A room with a record — archived or not — is declared, and it comes back
+        as what its record says, never as implicit."""
+        if self.rooms_store.get(room_id):
+            return False
+        return self.has_container(room_id, known)
+
     def declared(self) -> List[RoomDescriptor]:
         """Every DECLARED room, by id — the register, enumerated. Rooms that only
         exist as a snapshot are not in here: they were never declared, and

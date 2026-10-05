@@ -3575,6 +3575,13 @@ async def list_rooms(request: Request) -> List[RoomOut]:
     A person who entered a room must find it in «Le tue». So the ACL store is
     walked too, and a room found only there comes back with `implicit: true`.
 
+    **…and only when its container exists** (2026-10-06). An ACL alone is not a
+    room: the door writes one for whoever asks for a name, and on 5 October this
+    listing brought back 42 such rooms, 38 with no container, many archived by
+    the person a moment before. An implicit room is listed when the snapshot
+    store holds its container and no record exists; a room with a record —
+    archived included — is listed once, as its record says.
+
     What is still NOT invented: a room that exists only as a snapshot, with no
     ACL. Nobody has a recorded grant in it, so listing it would be a guess about
     who it belongs to; the first authenticated entry writes the ACL, and from
@@ -3614,8 +3621,13 @@ async def list_rooms(request: Request) -> List[RoomOut]:
     acl_ids = getattr(_ws.ACL_STORE, "ids", None)
     if callable(acl_ids):
         seen = {d.room_id for d in declared}
+        known = registry.containers()
         for room_id in acl_ids():
             if room_id in seen:
+                continue
+            # an ACL alone is not a room: the container must exist, and a room
+            # with a record is never listed implicit (see `listable_implicit`)
+            if not registry.listable_implicit(room_id, known):
                 continue
             role = _role_here(room_id)
             if role is None:
@@ -4142,13 +4154,21 @@ async def archive_room(room_id: str, body: ArchiveIn,
     if role is None or not role.can_manage:
         raise HTTPException(status_code=403,
                             detail="archiving a room needs admin or owner")
-    descriptor = rooms().descriptor(room_id)
+    registry = rooms()
+    descriptor = registry.descriptor(room_id)
     if descriptor.implicit:
-        raise HTTPException(
-            status_code=404,
-            detail=f"room {room_id!r} has no record to archive: it predates the "
-                   f"register (declare it with POST /v1/rooms first)")
-    return _describe_room(rooms().archive(room_id, archived=body.archived),
+        if not body.archived:
+            raise HTTPException(
+                status_code=404,
+                detail=f"room {room_id!r} has no record and is not archived: "
+                       f"there is nothing to bring back")
+        # A room listed as implicit is archived like any other, and stays so.
+        # Until 6 October 2026 this was a 404 ("declare it first"): the person
+        # archived, the room had no mark to keep, and the next listing showed it
+        # again. Declared as itself — the same thing the operator's door does,
+        # and what the implicit descriptor already says — then marked.
+        registry.declare(descriptor)
+    return _describe_room(registry.archive(room_id, archived=body.archived),
                           role=role, with_members=True)
 
 

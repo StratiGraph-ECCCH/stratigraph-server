@@ -258,8 +258,11 @@ def test_a_room_entered_by_name_is_in_its_owners_list(client, enforcing):
     entered a room must find it in «Le tue»; one it was shared with, in
     «Condivise con te», with the role. The split is `your_role`, nothing else."""
     enforcing(CARLA)
-    # entering by name: no record, no snapshot — the door makes CARLA the owner
+    # entering by name: no record — the door makes CARLA the owner. Listed once
+    # the room has a container (6 Oct 2026: an ACL alone is not a room), here
+    # the first save of what she wrote.
     assert client.get("/v1/rooms/Scavo-2026", headers=AUTH).status_code == 200
+    ws_module.SNAPSHOT_STORE.put("Scavo-2026", container("Scavo-2026"))
     mine = {r["room_id"]: r for r in client.get("/v1/rooms", headers=AUTH).json()}
     assert set(mine) == {"Scavo-2026"}
     assert mine["Scavo-2026"]["implicit"] is True, \
@@ -333,14 +336,64 @@ def test_an_orphan_is_reported_and_archived_never_deleted(client, enforcing,
                          headers=AUTH).status_code in (404, 405)
 
 
-def test_a_room_without_a_record_cannot_be_archived(client, enforcing):
-    """An implicit room has nothing to mark. Said as a 404 with the remedy rather
-    than by inventing a record somebody never declared."""
+def test_an_implicit_room_archived_stays_archived(client, enforcing, instance):
+    """Until 6 October 2026 archiving an implicit room was a 404 («declare it
+    first»): the person archived, nothing kept the mark, and the next listing
+    showed the room again. Now it is declared as itself — what the implicit
+    descriptor already said, and what the operator's door does — and marked; the
+    listing gives it back archived, declared, once."""
+    enforcing(ANNA)
+    client.get("/v1/rooms/scavo-a", headers=AUTH)            # she goes in
+    filed = client.post("/v1/rooms/scavo-a/archive", headers=AUTH,
+                        json={"archived": True})
+    assert filed.status_code == 200, filed.text
+    assert filed.json()["archived_at"] and filed.json()["implicit"] is False
+    record = instance.descriptor("scavo-a")
+    assert record.implicit is False and record.title == "scavo-a"
+    assert record.container_refs == ["scavo-a"]
+    for _ in range(2):                                       # list, list again
+        listed = [r for r in client.get("/v1/rooms", headers=AUTH).json()
+                  if r["room_id"] == "scavo-a"]
+        assert len(listed) == 1
+        assert listed[0]["archived_at"] and listed[0]["implicit"] is False
+
+
+def test_an_implicit_room_with_no_record_has_nothing_to_bring_back(client,
+                                                                    enforcing):
     enforcing(ANNA)
     refused = client.post("/v1/rooms/scavo-a/archive", headers=AUTH,
-                          json={"archived": True})
+                          json={"archived": False})
     assert refused.status_code == 404
-    assert "predates the register" in refused.json()["detail"]
+    assert "nothing to bring back" in refused.json()["detail"]
+
+
+def test_an_acl_without_a_container_is_not_a_room(client, enforcing):
+    """Measured on the dev node, 5 October 2026: 42 rooms came back implicit,
+    38 of them with no container — the door had written an ACL for a name that
+    was asked for (smokes, a wrong name) and the listing took the ACL for a
+    room. An implicit room is listed only when its container exists."""
+    enforcing(ANNA)
+    for name in ("smoke-1791200000", "nome-sbagliato"):
+        assert client.get(f"/v1/rooms/{name}", headers=AUTH).status_code == 200
+    client.get("/v1/rooms/scavo-b", headers=AUTH)           # a real container
+    listed = {r["room_id"]: r for r in client.get("/v1/rooms", headers=AUTH).json()}
+    assert set(listed) == {"scavo-b"}
+    assert listed["scavo-b"]["implicit"] is True
+
+
+def test_an_archived_room_is_never_listed_implicit(client, enforcing, instance):
+    """A room with a record comes back as its record says, whatever the ACL
+    store and the snapshots hold — even when its container is gone."""
+    enforcing(ANNA)
+    client.post("/v1/rooms", headers=AUTH,
+                json={"room_id": "prova-x", "container_refs": ["altrove"]})
+    client.post("/v1/rooms/prova-x/archive", headers=AUTH,
+                json={"archived": True})
+    assert instance.listable_implicit("prova-x") is False
+    listed = [r for r in client.get("/v1/rooms", headers=AUTH).json()
+              if r["room_id"] == "prova-x"]
+    assert len(listed) == 1
+    assert listed[0]["archived_at"] and listed[0]["implicit"] is False
 
 
 # ── the invitation link ─────────────────────────────────────────────────────
