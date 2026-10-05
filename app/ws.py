@@ -910,6 +910,29 @@ async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
     return {"applied": len(applied), "refused": refused, "kept": info}
 
 
+async def keep_study_access(room, *, visibility: Optional[str] = None,
+                            embargo: Optional[str] = None) -> None:
+    """Write who sees the study into its header, and KEEP it — here, because
+    this module is the one that saves a room (`test_write_paths`).
+
+    `visibility` None leaves it; `embargo` None leaves it, "" clears it. Under
+    the room's lock, like every other write of the document."""
+    async with room.lock:
+        header = room.document.setdefault("header", {})
+        if visibility is not None:
+            header["visibility"] = visibility
+        if embargo is not None:
+            header.pop("embargo_until", None)
+            if embargo:
+                header["embargo"] = embargo
+            else:
+                header.pop("embargo", None)
+        # the room remembered its embargo (`Room.embargo`): read it again
+        from .rooms import _UNREAD
+        room._embargo = _UNREAD
+        room.snapshot(SNAPSHOT_STORE, gc=False)
+
+
 async def _send(websocket: WebSocket, payload: Dict[str, Any]) -> bool:
     """Manda, e **dice se ci è riuscito**.
 

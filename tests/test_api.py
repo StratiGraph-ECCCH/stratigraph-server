@@ -278,6 +278,15 @@ def test_the_openapi_schema_is_served():
                       # the DELETE is of the link's validity, not of the fact that
                       # somebody was once invited.
                       ("DELETE", "/v1/rooms/{room_id}/invites/{token_id}"),
+                      # …and WHO SEES THE STUDY (2026-10-05, C1 of
+                      # MICRO-DOVE-LAVORI): its visibility and its embargo.
+                      # They live in the study's header because they travel
+                      # with it (`Room.visibility`), but they are the same kind
+                      # of thing as a role — who may read — and not the record
+                      # of what was found: no node, no field of a unit, nothing
+                      # an operation could carry. Managers only (`can_manage`),
+                      # the same policy that hands out the roles.
+                      ("PUT", "/v1/rooms/{room_id}/study-access"),
                       # …and keeping an opaque `.blend` SNAPSHOT, which is the
                       # same kind of write as publishing an asset and for the
                       # same reason: content-addressed, so the same bytes are the

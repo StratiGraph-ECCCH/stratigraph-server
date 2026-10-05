@@ -844,3 +844,46 @@ def test_a_new_room_names_its_graph_after_its_title(instance):
     # a room with no title of its own keeps its id as the name
     room = asyncio.run(instance.get("senza-titolo"))
     assert room.document["graphs"]["senza-titolo"]["name"] == "senza-titolo"
+
+
+# ── who sees the study (C1 of MICRO-DOVE-LAVORI, 5 Oct 2026) ─────────────────
+
+def test_who_sees_the_study_is_written_in_its_header_by_its_managers(client, enforcing):
+    """Visibility and embargo had readers (`Room.visibility`, `Room.embargo`)
+    and no writer: EM Tools' «Create a collaborative room…» asks who sees, and
+    the answer lands in the study's header, kept at once."""
+    enforcing(ANNA)
+    assert client.post("/v1/rooms", headers=AUTH,
+                       json={"room_id": "chi-vede", "title": "Chi vede"}).status_code == 201
+    got = client.get("/v1/rooms/chi-vede/study-access", headers=AUTH).json()
+    assert got["visibility"] == "restricted" and got["embargo"] is None
+    put = client.put("/v1/rooms/chi-vede/study-access", headers=AUTH,
+                     json={"visibility": "public", "embargo": "2027-06-30"})
+    assert put.status_code == 200, put.text
+    assert put.json() == {"room_id": "chi-vede", "visibility": "public",
+                          "embargo": "2027-06-30"}
+    kept = ws_module.SNAPSHOT_STORE.get("chi-vede")
+    assert kept["header"]["visibility"] == "public"
+    assert kept["header"]["embargo"] == "2027-06-30"
+    # the room reads it again (it remembered its embargo)
+    assert main_module.rooms().peek("chi-vede").embargo == "2027-06-30"
+    cleared = client.put("/v1/rooms/chi-vede/study-access", headers=AUTH,
+                         json={"embargo": ""}).json()
+    assert cleared["embargo"] is None and cleared["visibility"] == "public"
+    bad = client.put("/v1/rooms/chi-vede/study-access", headers=AUTH,
+                     json={"visibility": "secret"})
+    assert bad.status_code == 400 and "restricted or public" in bad.text
+    assert client.put("/v1/rooms/chi-vede/study-access", headers=AUTH,
+                      json={"embargo": "soon"}).status_code == 400
+
+
+def test_an_editor_does_not_decide_who_sees(client, enforcing):
+    enforcing(ANNA)
+    client.post("/v1/rooms", headers=AUTH, json={"room_id": "chi-vede-2"})
+    client.put(f"/v1/rooms/chi-vede-2/members/{BRUNO}", headers=AUTH,
+               json={"role": "editor"})
+    enforcing(BRUNO)
+    assert client.get("/v1/rooms/chi-vede-2/study-access", headers=AUTH).status_code == 200
+    no = client.put("/v1/rooms/chi-vede-2/study-access", headers=AUTH,
+                    json={"visibility": "public"})
+    assert no.status_code == 403 and "admin or owner" in no.text

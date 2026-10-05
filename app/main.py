@@ -4259,6 +4259,75 @@ async def revoke_invite(room_id: str, token_id: str,
     return _invite_out(invite)
 
 
+# ── WHO SEES THE STUDY: its visibility and its embargo, in its header ───────
+#
+# C1 of MICRO-DOVE-LAVORI (5 Oct 2026): «Create a collaborative room…» in EM
+# Tools asks three things — the name, who takes part, who sees — and the third
+# has no door until now. `Room.visibility` and `Room.embargo` READ the header
+# of the study (`rooms.py`); nothing wrote it but a file somebody prepared. The
+# room's managers (admin, owner) write it here; the document is kept at once.
+
+class StudyAccessIn(BaseModel):
+    visibility: Optional[str] = Field(
+        default=None, description="restricted (the default) or public")
+    #: an ISO date; "" clears it; absent leaves it as it is
+    embargo: Optional[str] = Field(default=None)
+
+
+class StudyAccessOut(BaseModel):
+    room_id: str
+    visibility: str
+    embargo: Optional[str] = None
+
+
+def _study_access(room_id: str, room) -> StudyAccessOut:
+    header = room.document.get("header") or {}
+    embargo = header.get("embargo") or header.get("embargo_until") or None
+    return StudyAccessOut(room_id=room_id, visibility=room.visibility,
+                          embargo=str(embargo) if embargo else None)
+
+
+@v1.get("/rooms/{room_id}/study-access", response_model=StudyAccessOut,
+        tags=["access"])
+async def get_study_access(room_id: str, request: Request) -> StudyAccessOut:
+    """Who sees this study: its visibility and its embargo. Any role."""
+    _acl, room, role, _who = await _acting_role(room_id, request)
+    if role is None:
+        raise HTTPException(status_code=403, detail="you have no role in this room")
+    return _study_access(room_id, room)
+
+
+@v1.put("/rooms/{room_id}/study-access", response_model=StudyAccessOut,
+        tags=["access"])
+async def set_study_access(room_id: str, body: StudyAccessIn,
+                           request: Request) -> StudyAccessOut:
+    """Write who sees the study into its header: admin and owner only, the same
+    managers who hand out roles. `restricted` stays the default and anything
+    else than `public` is refused, not guessed."""
+    _acl, room, role, _who = await _acting_role(room_id, request)
+    if role is None or not role.can_manage:
+        raise HTTPException(status_code=403,
+                            detail="who sees the study is decided by its admin or owner")
+    visibility = None
+    if body.visibility is not None:
+        visibility = str(body.visibility).strip().lower()
+        if visibility not in ("restricted", "public"):
+            raise HTTPException(status_code=400,
+                                detail=f"unknown visibility {body.visibility!r}: "
+                                       f"expected restricted or public")
+    embargo = None if body.embargo is None else str(body.embargo).strip()
+    if embargo:
+        import datetime as _dt
+        try:
+            _dt.date.fromisoformat(embargo[:10])
+        except ValueError:
+            raise HTTPException(status_code=400,
+                                detail=f"the embargo {embargo!r} is not a date "
+                                       f"(YYYY-MM-DD)") from None
+    await _ws.keep_study_access(room, visibility=visibility, embargo=embargo)
+    return _study_access(room_id, room)
+
+
 @v1.post("/join", response_model=JoinOut, tags=["rooms"])
 async def join_by_link(body: JoinIn, request: Request) -> JoinOut:
     """Accept an invitation: the link says which room, the token says who invited
