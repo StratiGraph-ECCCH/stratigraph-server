@@ -35,4 +35,4 @@
 # leaves `.git/` out, and three builders — the dev stack, the installer, the
 # GHCR workflow — would each have to pass it), while this line is COPIED into
 # every image by `COPY app ./app`.
-__version__ = "1.6.0.dev3"
+__version__ = "1.6.0.dev4"
