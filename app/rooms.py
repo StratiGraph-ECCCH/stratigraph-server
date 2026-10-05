@@ -31,6 +31,7 @@ in a component that just gained state.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -42,6 +43,21 @@ from s3dgraphy import api as em
 from . import presence
 from .oplog import journal_for
 from .store import RoomStore, SnapshotStore, deep_copy, room_store_from_env
+
+#: s3Dgraphy from dev39 takes the STUDY beside the section, and refuses an edge
+#: towards a node of another graph (`crdt.edge_outside_graph`, B3). Asked once,
+#: so a node still on an older pin keeps working — without that refusal.
+_APPLY_TAKES_STUDY = "study" in inspect.signature(em.apply_op).parameters
+
+#: B1 · the sentence of a refusal for a graph the study does not have. A
+#: refusal, not a fallback: until 5 Oct 2026 an unknown `graph_id` fell
+#: silently on the active graph, and a routing mistake became a write into the
+#: wrong graph.
+UNKNOWN_GRAPH = "unknown_graph"
+
+
+def unknown_graph_sentence(graph_id: str) -> str:
+    return f"the graph '{graph_id}' is not in this study"
 
 #: How many recent operations a room keeps so a late arrival can catch up
 #: without a fresh snapshot. Bounded on purpose: an unbounded log is a memory
@@ -362,11 +378,21 @@ class Room:
 
     # ── the op-log ───────────────────────────────────────────────────────────
 
-    def record(self, op: Dict[str, Any]) -> None:
+    def record(self, op: Dict[str, Any], graph_id: Optional[str] = None) -> None:
         # UN SOLO POSTO CONTA, ed è questo perché è l'unico che tutte e due le
         # vie di scrittura attraversano: il socket (`ws.py`) e la porta dei
         # connettori. Contare nei due chiamanti sarebbe stato due contatori che
         # si allontanano il giorno che ne arriva un terzo.
+        #
+        # B2 · …E IL GRAFO CON L'OPERAZIONE. Il grafo sta nella busta e non nel
+        # corpo, e il registro teneva solo il corpo: un replay finiva nel grafo
+        # attivo. La riga del registro porta adesso `graph_id`, il grafo in cui
+        # l'operazione È ANDATA (risolto da `apply`, non quello dichiarato), e
+        # il replay lo rimette nella busta (`replay_entry`).
+        entry = dict(op)
+        if graph_id:
+            entry["graph_id"] = graph_id
+        op = entry
         self.unsaved += 1
         self.oplog.append(op)
         if len(self.oplog) > OPLOG_LIMIT:
@@ -418,6 +444,41 @@ class Room:
             # il cursore cade dentro la finestra: il disco direbbe la stessa cosa
             return in_memoria
         return self.journal.since(since)
+
+    def replay_entry(self, row: Dict[str, Any]) -> tuple:
+        """Una riga del registro → `(corpo, graph_id)`, come il filo la vuole.
+
+        B2 · LE RIGHE VECCHIE. Prima del 5 ottobre 2026 una riga non diceva il
+        suo grafo. Misurato: si ricostruisce dal nodo che l'operazione tocca —
+        un UUID sta in un grafo solo dello studio — e solo quando nessun grafo
+        lo ha (un'operazione su un nodo poi compattato) resta il grafo attivo,
+        che è dove il replay di allora l'avrebbe messa. Ricostruito alla
+        lettura e non riscritto: il registro sul disco resta com'era.
+        """
+        body = {k: v for k, v in row.items() if k != "graph_id"}
+        graph_id = row.get("graph_id")
+        if graph_id:
+            return body, str(graph_id)
+        return body, self._graph_of_old_row(body)
+
+    def _graph_of_old_row(self, op: Dict[str, Any]) -> Optional[str]:
+        graphs = self.document.get("graphs") or {}
+        wanted = [str(op.get(k)) for k in ("node_id", "id", "source")
+                  if op.get(k)]
+        node = op.get("node")
+        if isinstance(node, dict) and node.get("id"):
+            wanted.insert(0, str(node["id"]))
+        for node_id in wanted:
+            for gid, section in graphs.items():
+                if not isinstance(section, dict):
+                    continue
+                if any(str(n.get("id")) == node_id
+                       for n in section.get("nodes") or []):
+                    return str(section.get("graph_id") or gid)
+                if any(str(e.get("id")) == node_id
+                       for e in section.get("edges") or []):
+                    return str(section.get("graph_id") or gid)
+        return self._section_id(None)
 
     def read_since(self, since: Optional[str]) -> List[Dict[str, Any]]:
         """Le operazioni dopo `since`, **da leggere e non da rigiocare**.
@@ -474,23 +535,51 @@ class Room:
         operation — `em.apply_op` does, with the same code the offline merge and
         EMStudio's own copy run. A stale operation comes back `applied: False`,
         and the relay does not re-broadcast it as if it were news.
+
+        B1 · `graph_id` names the graph of the study the operation is for. None
+        is the active graph (a client that does not name graphs: D-A); a name
+        the study does not have is REFUSED with a sentence, never sent to the
+        active graph. The answer carries `graph_id`, the graph it went to, which
+        is what the log keeps and the fan-out names.
         """
-        section = self._section(graph_id)
+        target = self._section_id(graph_id)
+        if graph_id and target is None:
+            return {"applied": False, "reason": unknown_graph_sentence(graph_id),
+                    "code": UNKNOWN_GRAPH, "graph_id": graph_id}
+        section = (self.document.get("graphs") or {}).get(target) if target else None
         if section is None:
             return {"applied": False, "reason": "no such graph in this room"}
-        result = em.apply_op(section, op)
+        if _APPLY_TAKES_STUDY:
+            result = em.apply_op(section, op, study=self.document)
+        else:                                   # pragma: no cover — older pin
+            result = em.apply_op(section, op)
+        result["graph_id"] = str(section.get("graph_id") or target)
         if result.get("applied"):
             self.touch()
         return result
 
-    def _section(self, graph_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _section_id(self, graph_id: Optional[str]) -> Optional[str]:
+        """The key of the section an operation goes to, or None.
+
+        Named → that graph, if the study has it (by key or by its `graph_id`),
+        otherwise None: B1 refuses, it does not guess. Not named → the active
+        graph, else the first."""
         graphs = self.document.get("graphs") or {}
-        if graph_id and graph_id in graphs:
-            return graphs[graph_id]
+        if graph_id:
+            if graph_id in graphs:
+                return graph_id
+            for key, section in graphs.items():
+                if isinstance(section, dict) and section.get("graph_id") == graph_id:
+                    return key
+            return None
         active = self.document.get("active_graph_id")
         if active and active in graphs:
-            return graphs[active]
-        return next(iter(graphs.values()), None)
+            return active
+        return next(iter(graphs), None)
+
+    def _section(self, graph_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        key = self._section_id(graph_id)
+        return (self.document.get("graphs") or {}).get(key) if key else None
 
     # ── snapshot + GC ────────────────────────────────────────────────────────
 

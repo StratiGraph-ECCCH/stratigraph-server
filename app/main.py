@@ -3436,6 +3436,63 @@ class RoomRefIn(BaseModel):
     container_refs: List[str] = Field(
         default_factory=list,
         description="the em.json containers it works on (default: the room id)")
+    graphs: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="G2 · the sections of the study the room is born with, "
+                    "EMPTY: `{graph_id, name, data}` for each graph and for the "
+                    "shelf. The content comes afterwards as operations, each "
+                    "naming its graph. Absent: one empty graph named after the "
+                    "room, as before.")
+    active_graph_id: Optional[str] = Field(
+        default=None, description="which of `graphs` is in front")
+
+
+#: G2 · how many sections a room may be born with. A study with more graphs
+#: than this is not a case anybody has: the largest measured (Templu Mare, 5
+#: Oct 2026) has two and a shelf.
+ROOM_BIRTH_SECTIONS_MAX = 64
+
+
+def _born_with(body: "RoomRefIn", room_id: str) -> Optional[Dict[str, Any]]:
+    """The empty container a room is born with when its creator names the
+    study's sections, or None (then `rooms._empty_container`, as before).
+
+    SECTIONS, NOT CONTENT. Content enters a room only as operations (the five
+    verbs and their merge); a section with nodes in it would be a sixth door.
+    What is declared here is what an operation cannot say: that a graph exists,
+    its name and its header — the shelf marker among them.
+    """
+    if not body.graphs:
+        return None
+    if len(body.graphs) > ROOM_BIRTH_SECTIONS_MAX:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{len(body.graphs)} sections, and a room is born with at "
+                   f"most {ROOM_BIRTH_SECTIONS_MAX}")
+    graphs: Dict[str, Any] = {}
+    for item in body.graphs:
+        gid = str((item or {}).get("graph_id") or "").strip()
+        if not gid:
+            raise HTTPException(status_code=400,
+                                detail="every section a room is born with needs "
+                                       "its graph_id")
+        if gid in graphs:
+            raise HTTPException(status_code=400,
+                                detail=f"the graph {gid!r} is named twice")
+        if item.get("nodes") or item.get("edges"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"the section {gid!r} is not empty: a room is born with "
+                       f"its sections, and their content comes as operations")
+        section: Dict[str, Any] = {"graph_id": gid,
+                                   "name": str(item.get("name") or gid),
+                                   "nodes": [], "edges": []}
+        if isinstance(item.get("data"), dict):
+            section["data"] = dict(item["data"])
+        graphs[gid] = section
+    active = body.active_graph_id if body.active_graph_id in graphs else next(iter(graphs))
+    return {"header": {"format": "em.json", "version": "1.0"},
+            "graphs": graphs, "active_graph_id": active}
 
 
 class RoomOut(BaseModel):
@@ -3459,6 +3516,9 @@ class RoomOut(BaseModel):
     #: REPORTED, never raised: a workspace whose container was moved still exists,
     #: and the honest answer is the name of what is missing.
     missing_refs: List[str] = Field(default_factory=list)
+    #: G2 · the sections the room was born with, when its creator named them:
+    #: the graphs an operation may name from the first one on.
+    born_with: List[str] = Field(default_factory=list)
 
 
 def _describe_room(descriptor: RoomDescriptor, *, role: Optional[Role] = None,
@@ -3612,6 +3672,7 @@ async def create_room(body: RoomRefIn, request: Request) -> RoomOut:
                     f"work on it, or create a room of your own with its own "
                     f"container."))
 
+    born = _born_with(body, room_id)
     descriptor = rooms().create(room_id, title=body.title,
                                container_refs=body.container_refs or None,
                                created_by=orcid)
@@ -3620,7 +3681,14 @@ async def create_room(body: RoomRefIn, request: Request) -> RoomOut:
         if not acl.owner:
             acl.owner = orcid
             save_acl(room_id, acl)
-    return _describe_room(descriptor, role=Role.OWNER)
+    # Described BEFORE the sections are written: `missing_refs` is the answer to
+    # «had this room anything to lose?», which a client reads to decide whether
+    # to seed it — and the sections are ours, not somebody's work.
+    described = _describe_room(descriptor, role=Role.OWNER)
+    if born is not None and descriptor.primary_ref in described.missing_refs:
+        rooms().store.put(descriptor.primary_ref, born)
+        described.born_with = list(born["graphs"])
+    return described
 
 
 @v1.get("/rooms/{room_id}", response_model=RoomOut, tags=["rooms"])

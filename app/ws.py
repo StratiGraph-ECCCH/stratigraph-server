@@ -548,10 +548,13 @@ async def room_socket(websocket: WebSocket, room_id: str,
     # …E SOLO SE IL SERVER LO CONCEDE. Il piano è stato deciso alla porta e
     # annunciato in `host_info`; qui si obbedisce. Un client che ignora
     # l'annuncio non ottiene niente di diverso, che è il punto.
-    for op in (room.replay_since(since) if plan["granted"] else []):
+    for row in (room.replay_since(since) if plan["granted"] else []):
         # wrapped like any other op frame: what a client missed must arrive in
         # the SAME shape it would have had live, or a replay needs its own reader
-        await _send(websocket, envelope("op", op, source="em-server"))
+        # — B2: the graph included, as the live fan-out names it
+        op, graph_id = room.replay_entry(row)
+        await _send(websocket, envelope("op", op, source="em-server",
+                                        graph_id=graph_id))
     if since and not plan["granted"]:
         log.info("room %s refused a replay from %s: %s",
                  room_id, since, plan["reason"])
@@ -709,18 +712,27 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
             result = room.apply(op, graph_id)
             if not result.get("applied"):
                 # stale / idempotent / refused: it is NOT news, and re-broadcasting
-                # it would hand the other clients a regression to re-apply
-                await _send(websocket, envelope(
-                    "op_result",
-                    {"applied": False, "reason": result.get("reason", ""), "op": op},
-                    source="em-server"))
+                # it would hand the other clients a regression to re-apply.
+                # B1 · a graph the study does not have says so by name (`code`,
+                # `graph_id`), so a client can put the sentence in its language
+                refusal = {"applied": False, "reason": result.get("reason", ""),
+                           "op": op}
+                for key in ("code", "graph_id"):
+                    if result.get(key):
+                        refusal[key] = result[key]
+                await _send(websocket, envelope("op_result", refusal,
+                                                source="em-server"))
                 return
-            room.record(op)
+            # B2 · the graph it WENT to, named in the log and in the fan-out —
+            # also when the client did not name it (the active graph)
+            graph_id = result.get("graph_id") or graph_id
+            room.record(op, graph_id)
             outbound = envelope("op", op, source="em-server", graph_id=graph_id)
         await _fanout(room, outbound, skip=member.connection_id)
         await _send(websocket, envelope(
             "op_result",
-            {"applied": True, "reason": result.get("reason", ""), "op": op},
+            {"applied": True, "reason": result.get("reason", ""), "op": op,
+             "graph_id": graph_id},
             source="em-server"))
         # LA RETE, DOPO AVER RISPOSTO. Ultima riga e fuori dal lock: chi ha
         # scritto ha già il suo `op_result` e gli altri hanno già l'operazione,
@@ -875,11 +887,15 @@ async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
             entry.setdefault("ts", now_iso())
             outcome = room.apply(entry, graph_id)
             if outcome.get("applied"):
-                room.record(entry)
-                applied.append(entry)
+                went = outcome.get("graph_id") or graph_id
+                room.record(entry, went)
+                applied.append((entry, went))
             else:
-                refused.append({"op": entry.get("op"), "id": entry.get("id"),
-                                "reason": outcome.get("reason", "")})
+                refusal = {"op": entry.get("op"), "id": entry.get("id"),
+                           "reason": outcome.get("reason", "")}
+                if outcome.get("code"):
+                    refusal["code"] = outcome["code"]
+                refused.append(refusal)
         # KEPT, and inside the lock: this is the one place in the process that
         # writes a room, and it stays the one place.
         info = room.snapshot(SNAPSHOT_STORE) if applied else None
@@ -887,8 +903,8 @@ async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
     # ANNOUNCED, outside the lock and to everybody: there is no origin to skip —
     # a job is not a member of the room (the roster is for people), so nobody in
     # it has already seen these.
-    for op in applied:
-        await _fanout(room, envelope("op", op, source=source, graph_id=graph_id))
+    for op, went in applied:
+        await _fanout(room, envelope("op", op, source=source, graph_id=went))
     if info is not None:
         await _fanout(room, envelope("snapshot_written", info, source=source))
     return {"applied": len(applied), "refused": refused, "kept": info}
