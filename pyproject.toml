@@ -7,7 +7,7 @@ name = "stratigraph-server"
 # Kept in step with `app/__init__.py.__version__` — static metadata cannot
 # import, so this is the one unavoidable repetition, and a test refuses a
 # disagreement. See that module for what the number means.
-version = "1.6.0.dev4"
+version = "1.6.0.dev5"
 description = "The s3Dgraphy access API over HTTP — thin FastAPI wrapper (StratiGraph)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -37,7 +37,7 @@ dependencies = [
     # compose anchor `x-s3dgraphy-version` are COPIES of it: `bump-s3dgraphy.sh`
     # writes all of them in one go, and `tests/test_s3dgraphy_pin.py` refuses a
     # build where any of them disagrees with this line.
-    "s3dgraphy[geo,rdf]==1.6.0.dev38",
+    "s3dgraphy[geo,rdf]==1.6.0.dev39",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     # P1 auth: verify the realm's RS256 tokens against its published JWKS.
@@ -58,9 +58,9 @@ dependencies = [
 # Kept as NAMES for the capabilities they buy, even though the base pin already
 # carries both: `pip install stratigraph-server[geo]` reads as intent, and the day the base
 # pin is loosened these are the knobs that stay meaningful.
-rdf = ["s3dgraphy[rdf]==1.6.0.dev38"]      # /v1/export-ttl
-geo = ["s3dgraphy[geo]==1.6.0.dev38"]      # /v1/reproject (pyproj bundles PROJ)
-all = ["s3dgraphy[rdf,geo]==1.6.0.dev38"]
+rdf = ["s3dgraphy[rdf]==1.6.0.dev39"]      # /v1/export-ttl
+geo = ["s3dgraphy[geo]==1.6.0.dev39"]      # /v1/reproject (pyproj bundles PROJ)
+all = ["s3dgraphy[rdf,geo]==1.6.0.dev39"]
 # The object store. Optional because a deployment that keeps its assets on a
 # volume (one instance, `EM_ASSET_DIR`) does not need an S3 client — and because
 # a missing client must fail at construction with a sentence, which is only

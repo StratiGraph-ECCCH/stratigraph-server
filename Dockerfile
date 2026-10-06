@@ -56,7 +56,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # and `[rdf]` are what make /v1/reproject and /v1/export-ttl work rather than
 # answer 501. A service may choose what it needs; it may not move the version by
 # itself.
-ARG S3DGRAPHY_VERSION=1.6.0.dev38
+ARG S3DGRAPHY_VERSION=1.6.0.dev39
 ARG S3DGRAPHY_EXTRAS="geo,rdf"
 
 WORKDIR /srv/em-server
