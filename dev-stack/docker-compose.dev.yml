@@ -39,7 +39,7 @@ name: em-dev
 # `tests/test_s3dgraphy_pin.py` fails when the two — or the Dockerfile default —
 # disagree. It stays HERE as well because the chatbot and the catalogue build
 # from their own repositories and read the version from this anchor.
-x-s3dgraphy-version: &s3dgraphy_version "${S3DGRAPHY_VERSION:-1.6.0.dev39}"
+x-s3dgraphy-version: &s3dgraphy_version "${S3DGRAPHY_VERSION:-1.6.0.dev40}"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # I REPOSITORY FRATELLI — dove stanno, e questo è l'unico posto che lo dice.
