@@ -412,6 +412,18 @@ def test_a_batch_over_the_cap_is_a_413_that_says_why(client, store, whoever,
     assert _nodes(store) == {}, "a refused batch applied part of itself"
 
 
+def test_the_health_says_the_cap_before_the_413(client, monkeypatch):
+    """`/v1/health` and the unversioned `/health` publish the cap, so a client
+    sizes its pages before the call instead of re-paging from a 413's detail
+    (s3Dgraphy#25). The value is the one the door enforces, read at call time."""
+    for path in ("/v1/health", "/health"):
+        answer = client.get(path)
+        assert answer.status_code == 200, answer.text
+        assert answer.json()["limits"]["ops_batch_max"] == main_module.OPS_BATCH_MAX
+    monkeypatch.setattr(main_module, "OPS_BATCH_MAX", 2)
+    assert client.get("/v1/health").json()["limits"] == {"ops_batch_max": 2}
+
+
 def test_an_empty_delivery_is_fine(client, store, whoever):
     """A site with no units is a correct answer from an adapter, not an error.
 

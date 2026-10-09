@@ -325,6 +325,12 @@ class Health(BaseModel):
     #: which optional ops this build can actually perform. A client that reads
     #: this does not have to discover a 501 by trying.
     capabilities: Dict[str, bool] = Field(default_factory=dict)
+    #: the node's LIMITS, read before a call instead of discovered by a refusal.
+    #: `ops_batch_max` is the most operations one `POST /v1/rooms/{id}/ops`
+    #: accepts (`OPS_BATCH_MAX`, 413 above it): a client sizes its pages from
+    #: here rather than re-paging from the 413's detail (Enzo Cocca,
+    #: s3Dgraphy#25, 7 Oct 2026).
+    limits: Dict[str, int] = Field(default_factory=dict)
     #: `keycloak` when tokens are enforced, `dev-no-auth` when every /v1 route is
     #: open. Reported because a warning that only exists in a log is a warning
     #: nobody reads: this way "is this deployment actually protected?" is one
@@ -761,6 +767,8 @@ def health() -> Health:
             "reproject": importable("pyproj"),
             "resolve_authority": bool(em.authority_facets()),
         },
+        # read at call time: the constant is defined with the ops door below
+        limits={"ops_batch_max": OPS_BATCH_MAX},
         auth=authenticator.settings.describe(),
         profile=_profile(),
         custody=(_PERSONAL_CUSTODY if _profile() == "personal" else ""),
