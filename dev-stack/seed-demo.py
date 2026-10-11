@@ -13,7 +13,8 @@ This is the other half: a **populator**. It asserts nothing about itself, it
 leaves everything it makes, and it prints the URLs to click. Two properties make
 that safe:
 
-* **idempotent** — keyed on each study's `em_id`. Run it ten times and there are
+* **idempotent** — keyed on each study's `code` (the study's code, E.D. 11 Oct
+  2026: the same value the retired `em_id` held). Run it ten times and there are
   still two studies. A demo you are afraid to re-run is a demo that rots;
 * **no cleanup, ever** — the whole point. `fcn-down.sh --wipe` is how you get
   back to nothing, and the last line says so.
@@ -143,6 +144,10 @@ def build_study(*, graph_id, title, author, orcid, units, chapters,
 
     root = materialize_graph_scope(graph, author=author, license="CC-BY-4.0",
                                    em_id=graph_id.upper(), orcid=orcid)
+    # the code is the study's (E.D., 11 Oct 2026); the em_id above stays for
+    # whoever still reads it, with the same value
+    from s3dgraphy.hdto import declare_hdto
+    declare_hdto(graph, study={"name": title, "code": graph_id.upper()})
     if site:
         root.data["site_position"] = {"lat": site[0], "lon": site[1],
                                       "crs": "EPSG:4326"}
@@ -233,19 +238,20 @@ def chapters_for(units, *, with_image: bool, activity_ref: str):
 
 # ── the seed ────────────────────────────────────────────────────────────────
 
-def existing_by_em_id(catalog: str, em_id: str, auth: dict) -> str | None:
+def existing_by_code(catalog: str, code: str, auth: dict) -> str | None:
     """The study this seed already made, if it did. **This is the idempotence.**
 
-    Keyed on `em_id` — which the container carries and the catalogue's card
-    exposes — rather than on a study id the catalogue mints: the whole point is
-    that a second run recognises its own earlier work, and it cannot do that by
-    an identity it did not choose.
+    Keyed on the study's `code` — which the container carries and the
+    catalogue's card exposes — rather than on a study id the catalogue mints:
+    the whole point is that a second run recognises its own earlier work, and
+    it cannot do that by an identity it did not choose. A card written by an
+    earlier seed has only `em_id`, with the same value: it is found too.
     """
     status, body = request(f"{catalog}/catalog/studies", headers=auth)
     if status != 200:
         return None
     for study in json.loads(body).get("studies", []):
-        if study.get("em_id") == em_id:
+        if code in (study.get("code"), study.get("em_id")):
             return study.get("id")
     return None
 
@@ -303,7 +309,7 @@ def main() -> int:
     # ── 3 · the two studies ─────────────────────────────────────────────────
     studies = [
         {
-            "em_id": "PORTICO-2026",
+            "code": "PORTICO-2026",
             "doc": build_study(
                 graph_id="portico-2026", title="Portico · campagna 2026",
                 author="Emanuel Demetrescu", orcid="0000-0002-1825-0097",
@@ -319,7 +325,7 @@ def main() -> int:
         {
             # The same monument, another campaign — so the HDT view has two
             # studies to group, which is the thing that view exists to show.
-            "em_id": "PORTICO-1978",
+            "code": "PORTICO-1978",
             "doc": build_study(
                 graph_id="portico-1978", title="Portico · campagna 1978",
                 author="Tizia Caia", orcid=None,
@@ -334,19 +340,19 @@ def main() -> int:
 
     registered = []
     for study in studies:
-        already = existing_by_em_id(catalog, study["em_id"], auth)
+        already = existing_by_code(catalog, study["code"], auth)
         query = f"?study_id={urllib.parse.quote(already)}" if already else ""
         status, body = request(
             f"{catalog}/catalog/studies{query}", method="POST",
             data=json.dumps(study["doc"]).encode(),
             headers={**auth, "Content-Type": "application/json"})
         if status != 201:
-            print(f"lo studio {study['em_id']} non è stato registrato "
+            print(f"lo studio {study['code']} non è stato registrato "
                   f"({status}): {body[:200].decode(errors='replace')}")
             return 1
         answer = json.loads(body)
         registered.append(answer)
-        say(f"studio {study['em_id']}",
+        say(f"studio {study['code']}",
             f"{answer['id']} · {'aggiornato' if already else 'nuovo'}")
 
     public_study = registered[0]["id"]
