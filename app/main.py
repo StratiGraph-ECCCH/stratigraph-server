@@ -903,6 +903,11 @@ def _probe_for(store: Any):
         return None
     if hasattr(store, "_client") and hasattr(store, "bucket"):
         return reach_module.probe_minio(store)
+    # Postgres PRIMA della directory: lo store dei documenti ha anche una
+    # directory (`journal_root`, l'oplog), e sondare quella direbbe «raggiunto»
+    # di una casa che non è dove stanno i documenti.
+    if hasattr(store, "pool") and hasattr(store, "dsn"):
+        return reach_module.probe_postgres(store)
     root = getattr(store, "root", None)
     if root is not None:
         return reach_module.probe_directory(str(root))

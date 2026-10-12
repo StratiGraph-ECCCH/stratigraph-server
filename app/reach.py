@@ -137,6 +137,26 @@ def probe_minio(store: Any) -> Callable[[], str]:
     return go
 
 
+def probe_postgres(store: Any) -> Callable[[], str]:
+    """`select 1` su una connessione del pool, nient'altro.
+
+    Il pool è quello del processo, non una connessione aperta apposta: è la
+    strada che prende un `get` vero, e una prova che ne aprisse una sua
+    dimostrerebbe che il database c'è, non che questo processo ci arriva. Il
+    timeout è quello del pool: se il pool è pieno o il server tace, la prova
+    solleva e il motivo finisce nel `detail`.
+    """
+    def go() -> str:
+        pool = getattr(store, "pool")
+        with pool.connection(timeout=3) as conn:
+            row = conn.execute("SELECT 1").fetchone()
+        if not row or row[0] != 1:
+            raise RuntimeError(f"select 1 answered {row!r}")
+        from .documents import redact_dsn
+        return f"{redact_dsn(getattr(store, 'dsn', ''))} · select 1"
+    return go
+
+
 def probe_jwks(uri: str) -> Callable[[], str]:
     def go() -> str:
         import json

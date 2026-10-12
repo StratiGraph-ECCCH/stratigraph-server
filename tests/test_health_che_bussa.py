@@ -168,3 +168,75 @@ def test_lo_stesso_elenco_per_lavvio_e_per_la_richiesta():
     assert source.count("def knock(") == 1
     assert 'knock("startup")' in source
     assert 'knock("request")' in source
+
+
+# ── Postgres, la casa dei documenti ─────────────────────────────────────────
+#
+# Misurato il 12 ottobre: con `EM_DOCUMENTS_*` presenti `/v1/health` diceva
+# `snapshot_store: off` — «absent by configuration» — nella stessa risposta che
+# dichiarava «postgres (…) — every revision a row», con 134 righe in tabella.
+# `_probe_for` conosceva memoria, MinIO e directory; Postgres no.
+
+class _Conn:
+    def __init__(self, answer):
+        self.answer = answer
+        self.sql = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, *args):
+        self.sql.append(sql)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        answer = self.answer
+
+        class _Cursor:
+            def fetchone(self):
+                return answer
+        return _Cursor()
+
+
+class _Pool:
+    def __init__(self, answer):
+        self.conn = _Conn(answer)
+
+    def connection(self, timeout=None):
+        return self.conn
+
+
+def _store(answer, journal_root=None):
+    """Lo store VERO, con un pool finto: è la classe che `_probe_for` deve
+    riconoscere, non una sua imitazione. Il pool è marcato come già migrato,
+    così `ensure_schema_once` non gli parla. Con `journal_root`, la directory
+    dell'oplog che NON va sondata al posto del database."""
+    from app import documents
+    from app.store import PostgresSnapshotStore
+    pool = _Pool(answer)
+    setattr(pool, documents._SCHEMA_MARK, True)
+    return PostgresSnapshotStore(
+        "postgresql://em:segreto@postgres:5432/em_documents",
+        journal_root=journal_root, pool=pool)
+
+
+def test_postgres_raggiunto_col_suo_tempo(tmp_path):
+    store = _store((1,), journal_root=str(tmp_path))
+    probe = main_module._probe_for(store)
+    assert probe is not None, "Postgres non è una funzione spenta"
+    knock = reach.knock("snapshot_store", "postgres", probe)
+    assert knock.state == reach.REACHED
+    assert knock.ms is not None
+    assert "select 1" in knock.detail
+    assert "segreto" not in knock.detail, "la parola d'ordine non si stampa"
+    assert store.pool.conn.sql == ["SELECT 1"]
+
+
+def test_postgres_che_tace_dice_perche():
+    store = _store(ConnectionError("connection refused"))
+    knock = reach.knock("snapshot_store", "postgres",
+                        main_module._probe_for(store))
+    assert knock.state == reach.UNREACHABLE
+    assert "connection refused" in knock.detail
