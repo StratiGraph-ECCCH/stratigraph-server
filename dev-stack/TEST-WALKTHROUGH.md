@@ -54,8 +54,12 @@ EMStudio non è nella stack: è il client. Serve una stanza da aprire, un token,
 
     python3 dev-stack/seed_rooms.py     # crea `basilica-demo`: 6 US e 5 rapporti
 
-Idempotente, e la stanza di lavoro **non viene sovrascritta** se c'è già (`--force` per rifarla): le altre due
-(`mostra`/`scavo`) sono fixture, questa è dove si lavora.
+Passa dalla porta del server (`POST /v1/rooms`, poi le operazioni): la stanza è nella casa dei documenti
+(Postgres) e un client la vede appena il seme finisce, senza riavvii. Idempotente, e la stanza di lavoro
+**non viene toccata** se ha già un contenuto: le altre due (`mostra`/`scavo`) sono fixture, questa è dove si
+lavora. `--force` **riafferma** il seme per operazioni — nomi e rapporti tornano come il seme li scrive, ciò
+che qualcuno ha aggiunto resta, la storia pure. `--room=<nome>` semina la sola stanza di lavoro sotto un
+altro nome (per una prova; poi `POST /v1/rooms/<nome>/archive`).
 
 **2 · il token** (700 caratteri, non si digita):
 
@@ -72,16 +76,29 @@ Dura un'ora: se la stanza smette di accettarlo, è la scadenza, non un guasto.
 Nell'app, in quest'ordine:
 - **Impostazioni ▸ Live sync** → `URL` = `https://em.localhost:8443/em` (la BASE, non l'endpoint: il
   `/v1/rooms/<stanza>/ws` lo compone `hub.ts`), `Stanza` = `basilica-demo`;
-- poi il pulsante **Mode ▸ Hub** nella toolbar: **è lì che l'app chiede il token**, con un prompt del browser.
-  Non è un campo delle impostazioni di proposito — il token vive in memoria per la sessione e non viene scritto
-  da nessuna parte (`main.ts:4813`, `hubToken`).
+- poi **Mode ▾ → «In a room»** («In una stanza» con l'interfaccia in italiano) nella toolbar: **è lì che
+  l'app chiede il token**. Il vecchio pulsante `#btn-mode-hub` («Mode ▸ Hub») esiste ancora ma sta in un menu
+  nascosto. Non è un campo delle impostazioni di proposito — il token vive in memoria per la sessione e non
+  viene scritto da nessuna parte (`hubToken` in `main.ts`).
+
+**La stanza si salva da sola.** Nessuno deve premere «salva»: il server tiene il documento dopo 2 s di quiete,
+ogni 64 operazioni, quando esce l'ultimo scrittore e allo spegnimento (misurato il 12 ottobre: `request_save`
+→ revisione in 4 ms). Il client lo legge in `host_info.keeping` — `after_ops`, `after_quiet_seconds`,
+`unsaved_ops`, `snapshot_at`, `at_risk`.
 
 **4 · la prova senza mani** (da `EMStudio/frontend`, usa il client VERO — `SyncClient` e `roomUrl`):
 
-    node scripts/check-room-live.mjs    # due client, un edit, la presenza: 17 check
+    node scripts/check-room-live.mjs    # due client, un edit, la presenza: 18 check
 
 Prende il token da `dev-stack/token.sh` e la CA da `~/caddy-em-root.crt` da sé. Per provare la porta diretta
 invece di Caddy: `EM_HUB_BASE=http://localhost:8000 node scripts/check-room-live.mjs`.
+
+**La prova del tavolo** (12 ottobre 2026): quattro client nella stessa stanza — due EMStudio, Blender,
+StratiField — guidati da script, con un registro dei frame e delle latenze. Gli strumenti stanno in
+`~/Documents/GitHub/_datasets/_tavolo/lavoro/` (`tavolo.py` è il client ws, `crea_stanza.py` la stanza
+fatta per l'API) e restano lì: sono un **esempio** di come si prova la stanza da fuori, non una suite di
+questo repo. La stanza la crea ora `seed_rooms.py --room=<nome>`; il token per la parte StratiField è quello
+di `token.sh` (vedi CHEATSHEET §1-ter, «la prova senza mani»).
 
 **5 · la geometria che scende (DP-76, metà che consuma)**: in Blender, pannello
 **EM ▸ EMStudio Sync**, dentro una stanza → **«Materialize geometry from the

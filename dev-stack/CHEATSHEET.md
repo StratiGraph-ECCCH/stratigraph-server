@@ -88,15 +88,43 @@ python dev-stack/smoke_photogrammetry.py --images ~/photos/US12 --wait 1800
 
 ## 1-ter · Point the field assistant at a room
 
-By default the assistant writes to **its own container** on a volume, not to a
-room. That is the honest default rather than a shortcut: it refuses to start with
-a room configured and no token (`writer.py`: *the assistant writes as a verified
-person or it does not write*), a compose file cannot call `token.sh`, and a JWT
-pasted into `.env.dev` would be a credential dressed up as configuration — living
-there long after the reason it was issued.
+**A scribe per person, per room** (`stratigraph-chatbot/app/scrivani.py`). The
+assistant no longer writes into a room with one node-wide token: each person who
+writes gets their own scribe, built with **their** token on their first request
+for that room, so in the room the author is whoever wrote and the permissions are
+theirs. Nothing about "where" is configured on the node — the browser holds the
+place and sends it with every request.
 
-When you want the writes to land in a room, put a **fresh** token in the
-environment for that run:
+How a person sits down — what StratiField does after the browser login, and what
+you can do by hand:
+
+```bash
+# 1 · sit: the door answers with YOUR role in that room (403 with the room's own
+#     sentence if you are not a member; 502 if the room does not answer)
+curl -sk -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  https://em.localhost:8443/chat/v1/room \
+  -d '{"server":"https://em.localhost:8443/em","room":"tavolo-2026-10-12"}'
+# → 200 … "role":"editor","seated":true,"message":"Scrivo nella stanza «…» … a nome tuo."
+
+# 2 · every request after that carries the place in two headers
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  -H 'X-StratiGraph-Server: https://em.localhost:8443/em' \
+  -H 'X-StratiGraph-Room: tavolo-2026-10-12' \
+  https://em.localhost:8443/chat/v1/room
+```
+
+`$TOKEN` must name the `em-chatbot` audience (the chatbot checks it) and the
+server must be one the node named in `EM_ROOM_SERVERS` — the person's token is
+presented to no other (the compose maps the public `…/em` to the internal
+`http://stratigraph-server:8000`).
+
+**What `EM_CHATBOT_TOKEN` still does.** It seats the **node** — a headless
+service with no person behind it — in `EM_CHATBOT_ROOM`. Measured on 12 October:
+with it in the environment the presence shows the node (e.g. «Editor Uno»), but a
+card filed from a browser **without** the person's token and the two headers is
+refused with *«Non posso scrivere senza sapere chi sei: serve un'identità
+verificata.»* The node's token is the node's presence, not a signature for the
+people using it. It is still started the same way, when you want it:
 
 ```bash
 cd stratigraph-server/dev-stack
@@ -107,13 +135,31 @@ EM_CHATBOT_TOKEN="$(./token.sh)" \
     up -d --force-recreate stratigraph-chatbot
 ```
 
-The URL is the **internal** one (`stratigraph-server:8000`): the assistant dials
-it from inside the compose network, and routing it back out through Caddy would
-make it depend on the proxy to reach a service beside it. `/chat/health` reports
-which of the two it is on.
+A JWT in `.env.dev` would be a credential dressed up as configuration, which is
+why the token comes from the shell for that run and expires with it.
 
-Dev tokens are short-lived. When it stops writing, the token expired — re-run the
-command. Persisting a session is a decision of its own and is not made here.
+**The proof without hands.** Since 12 October the dev realm puts `em-chatbot` on
+the `em-server` client too (`keycloak/README.md`), so one `token.sh` token opens
+both the room and `/chat/`:
+
+```bash
+curl -sk -H "Authorization: Bearer $(./dev-stack/token.sh --user=editor)" \
+  -H 'X-StratiGraph-Server: https://em.localhost:8443/em' \
+  -H 'X-StratiGraph-Room: tavolo-2026-10-12' \
+  https://em.localhost:8443/chat/v1/room          # → 200, "role":"editor"
+```
+
+That needs the realm re-imported once (Keycloak recreated, new signing keys):
+
+```bash
+cd stratigraph-server/dev-stack
+docker-compose --env-file .env.dev -f docker-compose.dev.yml up -d --force-recreate --no-build keycloak
+```
+
+Until then — or on a stack whose realm predates it — the same proof runs with the
+short-lived client, which already carries both audiences:
+`DEV_CLIENT_ID=stratifield-breve ./dev-stack/token.sh --user=editor` (60 s tokens:
+mint one per command).
 
 ## 1-quater · The dev loop is not lost
 

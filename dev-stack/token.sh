@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A dev access token, on stdout and nothing else.
 #
-# EMStudio asks for a token when you join a room (Mode ▸ Hub), and the answer is
+# EMStudio asks for a token when you join a room (Mode ▾ → In a room), and the answer is
 # a 700-character JWT nobody is going to type. So: print it, and let the shell
 # put it on the clipboard.
 #
