@@ -106,7 +106,8 @@
       "fullScopeAllowed": true,
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "access.token.lifespan": "900"
+        "access.token.lifespan": "900",
+        "post.logout.redirect.uris": "+##org.extendedmatrix.emstudio:/oidc-logout"
       },
       "redirectUris": [
         "http://localhost:8000/admin/*",
