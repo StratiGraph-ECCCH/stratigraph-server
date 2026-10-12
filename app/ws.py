@@ -706,6 +706,9 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
         # 13): the access mode a client declares is written over by the one the
         # relay read at the door, in every place an op can carry one.
         op = _stamp_auth(room, op, member.auth, who=author)
+        # …and so is the hand and the mode of a node's BIRTH, when the payload
+        # brings one of its own (12 Oct 2026)
+        op = _stamp_birth(room, op, member.auth, who=author)
         op.setdefault("ts", now_iso())
         graph_id = message.get("graph_id")
         async with room.lock:
@@ -855,6 +858,49 @@ def _stamp_auth(room, op: Dict[str, Any], auth: Optional[Dict[str, Any]], *,
     return stamped
 
 
+def _stamp_birth(room, op: Dict[str, Any], auth: Optional[Dict[str, Any]], *,
+                 who: Optional[str]) -> Dict[str, Any]:
+    """The op with the birth of its node signed by the sender: ``created_by``
+    is the token's identity and ``created_auth`` the token's mode.
+
+    MEASURED (12 Oct 2026): an ``add_node`` from the desktop with the token of
+    `editor` carried ``data.created_by`` of the Dev User, and the CRDT keeps a
+    payload's birth when it declares one (``_stamp_payload`` writes it only on
+    a payload without ``created_at``). The node said the node had attested a
+    hand that was not the token's — while ``modified_by`` and the field clocks
+    were the token's. So a payload that brings its own birth gets the token's
+    hand and mode written over it; one that brings none is left to the CRDT,
+    which stamps it from the op. A different hand is counted on the room.
+
+    Only the ops of a live client pass here: a seeded or imported em.json is a
+    snapshot, and its stamps are kept as written.
+    """
+    if op.get("op") != "add_node":
+        return op
+    payload = op.get("node") if isinstance(op.get("node"), dict) else (
+        op.get("data") if isinstance(op.get("data"), dict) else None)
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict) or not (
+            "created_by" in data or "created_at" in data):
+        return op
+    declared = data.get("created_by")
+    data = dict(data)
+    # a mode with no hand beside it is nobody's mode
+    for key, value in (("created_by", who), ("created_auth", auth if who else None)):
+        if value:
+            data[key] = dict(value) if isinstance(value, dict) else value
+        else:
+            data.pop(key, None)
+    op = dict(op)
+    op["node" if isinstance(op.get("node"), dict) else "data"] = {**payload,
+                                                                  "data": data}
+    if declared and declared != who:
+        room.birth_corrected += 1
+        log.info("room %s: an add_node from %s declared %s as the hand of its "
+                 "birth; the token's was written", room.room_id, who, declared)
+    return op
+
+
 async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
                                source: str,
                                graph_id: Optional[str] = None,
@@ -884,6 +930,7 @@ async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
                 entry["author"] = author
             # the caller's access mode, as the socket does (dev28)
             entry = _stamp_auth(room, entry, auth, who=author)
+            entry = _stamp_birth(room, entry, auth, who=author)
             entry.setdefault("ts", now_iso())
             outcome = room.apply(entry, graph_id)
             if outcome.get("applied"):

@@ -146,6 +146,70 @@ def test_the_rest_door_stamps_the_same(relay, token, client):
     assert ws_module.ROOMS.peek(ROOM).auth_corrected == 1
 
 
+# ── la nascita (12 ott 2026) ─────────────────────────────────────────────────
+#
+# MISURATO: un `add_node` dal desktop col token di `editor` portava nel payload
+# `data.created_by` del Dev User, e il nodo nasceva con quella mano accanto al
+# modo del token. La nascita di un nodo la firma il relay, come l'autore.
+
+DEV_USER = "0000-0002-1825-0097"
+
+
+def _born_by(node_id, who, at=T):
+    op = _add(node_id)
+    op["payload"]["node"]["data"].update({"created_by": who, "created_at": at,
+                                          "created_auth": {"mode": "orcid"}})
+    return op
+
+
+def test_a_birth_signed_by_another_hand_is_the_token_s(relay, token, client):
+    token(em_auth_reported=True)
+    with client.websocket_connect(f"/v1/rooms/{ROOM}/ws?token=t") as elisa:
+        _drain_join(elisa)
+        elisa.send_json(_born_by("US54", DEV_USER))
+        assert elisa.receive_json()["payload"]["applied"] is True
+    data = _node("US54")["data"]
+    assert data["created_by"] == ELISA
+    assert data["created_auth"] == FIELD
+    assert ws_module.ROOMS.peek(ROOM).birth_corrected == 1
+
+
+def test_a_birth_without_a_mode_takes_the_token_s_too(relay, token, client):
+    token(em_idp="orcid", em_auth_reported=True)
+    with client.websocket_connect(f"/v1/rooms/{ROOM}/ws?token=t") as elisa:
+        _drain_join(elisa)
+        op = _add("US55")
+        op["payload"]["node"]["data"].update({"created_by": ELISA,
+                                              "created_at": T})
+        elisa.send_json(op)
+        elisa.receive_json()
+    data = _node("US55")["data"]
+    assert data["created_by"] == ELISA and data["created_auth"] == {"mode": "orcid"}
+    assert ws_module.ROOMS.peek(ROOM).birth_corrected == 0
+
+
+def test_THE_BREAK_without_the_birth_stamp_the_client_s_hand_would_land(
+        relay, token, client, monkeypatch):
+    monkeypatch.setattr(ws_module, "_stamp_birth", lambda room, op, auth, who: op)
+    token(em_auth_reported=True)
+    with client.websocket_connect(f"/v1/rooms/{ROOM}/ws?token=t") as elisa:
+        _drain_join(elisa)
+        elisa.send_json(_born_by("US56", DEV_USER))
+        elisa.receive_json()
+    assert _node("US56")["data"]["created_by"] == DEV_USER
+
+
+def test_the_rest_door_signs_the_birth_the_same(relay, token, client):
+    token(em_auth_reported=True)
+    body = {"ops": [_born_by("US57", DEV_USER)["payload"]]}
+    res = client.post(f"/v1/rooms/{ROOM}/ops", json=body,
+                      headers={"Authorization": "Bearer t"})
+    assert res.status_code == 200, res.text
+    data = _node("US57")["data"]
+    assert data["created_by"] == ELISA and data["created_auth"] == FIELD
+    assert ws_module.ROOMS.peek(ROOM).birth_corrected == 1
+
+
 # ── il realm in due lingue ───────────────────────────────────────────────────
 
 def test_the_realm_speaks_italian_and_english():

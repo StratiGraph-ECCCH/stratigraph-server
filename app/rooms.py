@@ -219,6 +219,9 @@ class Room:
         #: one the sender's token says, and were corrected by the relay. In
         #: memory: a count to read and to say aloud, not a record
         self.auth_corrected: int = 0
+        #: …and how many `add_node` arrived declaring a birth (`created_by`) by
+        #: another hand than the token's, written over by the relay
+        self.birth_corrected: int = 0
         self.snapshot_at: Optional[str] = None
         self.last_op_at: Optional[str] = None
         #: QUANTE OPERAZIONI SONO STATE APPLICATE DOPO L'ULTIMO SALVATAGGIO.
