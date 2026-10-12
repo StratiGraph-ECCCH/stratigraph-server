@@ -72,8 +72,10 @@ Tokens for the two people you will play:
 python dev-stack/seed_rooms.py
 ```
 
-It writes the demo documents **and** their durable records, then goes through the
-API to do the part a file cannot: the roles and one invitation link.
+It goes through the API for all of it: each room is declared (`POST /v1/rooms`),
+its content arrives as operations, and then come the roles and one invitation
+link. Nothing is written into the volume — the documents live wherever the
+server keeps them (Postgres, on the dev stack).
 
 ```
 [  ok  ] cantiere-demo — record + refs ['basilica-demo', 'scavo'] · owner 0000-0002-1825-0097

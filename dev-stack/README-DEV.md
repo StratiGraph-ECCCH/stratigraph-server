@@ -590,11 +590,10 @@ What does **not** come back, and how to put it back:
 python dev-stack/smoke.py            # re-uploads a test asset, checks the arc
 python dev-stack/smoke_iiif.py       # re-uploads the demonstration IMAGE
 python dev-stack/seed_rooms.py       # the two rooms: mostra (public) / scavo (restricted)
-docker-compose --env-file .env.dev -f docker-compose.dev.yml restart stratigraph-server
 ```
 
-The restart is needed because StratiGraph Server reads a room's document when the room is
-first opened; a room it has already opened keeps what it had.
+No restart: the seed goes through the API (`POST /v1/rooms`, then operations),
+so a room that is open receives the seed as it would any other edit.
 
 Then the visibility rule answers again — this is the check that tells you the
 re-seed worked:

@@ -2,7 +2,9 @@
 """Seed the demonstration rooms — the visibility pair, and the room to work in.
 
     python dev-stack/seed_rooms.py
-    python dev-stack/seed_rooms.py --force     # …overwriting the work room too
+    python dev-stack/seed_rooms.py --force          # …re-asserting the work room too
+    python dev-stack/seed_rooms.py --room=seme-prova-2026-10-12
+                                                    # only the work room, by another name
 
 `mostra` is `visibility: public` and `scavo` is `restricted`. They are the same
 study twice, on purpose: the ONLY difference between them is that one word in the
@@ -11,24 +13,41 @@ without any other variable moving.
 
 `basilica-demo` is a third room, and a different KIND of thing: a small
 stratigraphy for two EMStudio clients to meet in (walkthrough Tappa 4). Which is
-why it is **preserved and not overwritten** on a re-run — the other two are
-fixtures nobody edits, this one is where somebody's editing happens, and a seed
-that silently replaced a morning's work would be the worst kind of idempotent.
-`--force` overwrites it, deliberately and out loud.
+why it is **preserved** on a re-run — the other two are fixtures nobody edits,
+this one is where somebody's editing happens, and a seed that silently replaced a
+morning's work would be the worst kind of idempotent.
 
     curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:8000/v1/rooms/mostra/iiif/img-1/manifest   # 200
     curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:8000/v1/rooms/scavo/iiif/img-1/manifest    # 401
 
-**Why this file exists.** These two rooms were written into the volume by hand
-during the session that built the visibility rule. Hand-seeded state is state
-that dies the first time somebody runs `down -v`, and its loss is discovered as a
-smoke test failing for a reason nobody can reconstruct. A seed you can re-run is
-the difference between a demo and a fixture.
+**Through the door, not into the volume** (12 October 2026). This seed used to
+write `<room>.em.json` into `/srv/em-data/snapshots` with `docker exec`, and to
+decide «it is already there» by testing that file. Since `EM_DOCUMENTS_*` the
+server keeps documents in Postgres (`PostgresSnapshotStore`) and never reads that
+directory for them — measured: the file said 6 units and 5 relations, the table
+had 133 revisions of the room, and a room seeded under a new name was born
+EMPTY. A seed that writes where the server does not read is a seed that only
+looks like it worked.
 
-It writes THROUGH the container (`docker exec`) rather than into a host path,
-because the snapshots live on a named volume and the volume is the only place
-they exist. Nothing here needs StratiGraph Server to be answering — only the container to
-be up — so it also works while the service is restarting.
+So every room is made the way a client makes one: `POST /v1/rooms` (record,
+owner, the graph it is born with), then the content as **operations**
+(`POST /v1/rooms/<id>/ops`, in batches), then `PUT /v1/rooms/<id>/study-access`
+for the one word that is not an operation. «Already there» is asked of the
+server too: `missing_refs` in the room's description says whether its container
+has anything in it, whichever store holds it.
+
+**`--force` re-asserts, it does not erase.** The relay stamps each operation
+with the time it arrives, and a node added again is a MERGE in which the newer
+clock wins field by field. So a forced re-run brings the seed's units, names,
+descriptions and relations back as the seed wrote them — a rename made in the
+room is overwritten, a deleted unit returns — while whatever somebody ADDED stays,
+and so does every revision in the history. A rewrite to a blank page is not
+offered: the history is rows in a table, and the only door into a room is the
+operations, which add to it.
+
+What the document header used to carry and an operation cannot say — the work
+room's `description` («Dato di dimostrazione, non uno scavo.») — no longer
+travels; the room's title says the same.
 
 The image both rooms point at is the one `smoke_iiif.py` uploads; run that first
 (or after — the manifest is what needs it, not the seed).
@@ -45,10 +64,6 @@ import sys
 #: a CONTENT address, so it is the same on every machine that runs that smoke.
 IMAGE_SHA = ("sha256:4239fc67504c2b22c584d4de71b7329e"
              "3c01b2a0b716aaa198ca6c4120b00abe")
-
-CONTAINER = "em-dev-server"
-SNAPSHOT_DIR = "/srv/em-data/snapshots"
-
 
 def document(room_id: str, name: str, visibility: str) -> dict:
     """One room: an image and two annotated regions. Identical but for the word."""
@@ -128,80 +143,64 @@ def work_room(room_id: str, name: str) -> dict:
     }
 
 
-#: `preserve` = written only when the room is not there yet. See the module
-#: docstring: a fixture is meant to be rewritten, a room somebody works in is not.
+#: `preserve` = left as it is when the room already has content. See the module
+#: docstring: a fixture is meant to be re-asserted, a room somebody works in is not.
 ROOMS = (
     ("mostra", "Mostra (dissemination)", "public", document, False),
     ("scavo", "Scavo (in corso)", "restricted", document, False),
     ("basilica-demo", "Basilica · saggio dimostrativo", None, work_room, True),
 )
 
+#: Operations per request. The server takes up to `OPS_BATCH_MAX` (1000) and
+#: holds the room's lock for the whole batch; these rooms are a handful of
+#: operations, so the cap only matters to whoever reuses this for a big study.
+BATCH = 200
 
-def exists(room_id: str) -> bool:
-    """Is this room already written? Asked of the VOLUME, which is where it is."""
-    return subprocess.run(
-        ["docker", "exec", CONTAINER, "test", "-f",
-         f"{SNAPSHOT_DIR}/{room_id}.em.json"], capture_output=True).returncode == 0
+#: The reasons the relay gives when an operation changed nothing because the
+#: room already had it — `s3dgraphy.crdt.NOT_NEWS`, copied because this script
+#: imports nothing that is not the standard library.
+NOT_NEWS = ("stale", "idempotent", "already removed, not older")
 
 
-def record(room_id: str, title: str) -> dict:
-    """The room's DURABLE record — `rooms.RoomDescriptor`, as JSON.
+def ops_of(doc: dict, graph_id: str) -> list:
+    """The document as the operations that build it: a node, then an edge.
 
-    Seeded beside the container, because since the register exists a room is a
-    place with a name and not just a document somebody happened to open. Thin on
-    purpose: no members here — the ACL is the one place that says who may work in
-    a room, and a second list in this file would be a second answer.
+    No `ts` and no `author`: the relay stamps the first with the moment the
+    operation arrives and writes the second from the token — an author in the
+    payload would be dropped anyway. That arrival clock is what makes `--force`
+    win against an older edit (see the module docstring).
 
-    `created_by: null` is honest: a seed script is not a person. The first
-    authenticated arrival still becomes the owner (`access.claim_owner`), which is
-    the behaviour these demo rooms had before and keeps having.
+    `data.lang` = `it`, because every word in these rooms is Italian and an
+    `add_node` since s3dgraphy dev28 carries its language in the operation
+    rather than having the study's guessed for it.
     """
-    return {"room_id": room_id, "title": title,
-            "container_refs": [room_id], "created_by": None,
-            "created_at": "2026-08-23T00:00:00Z", "archived_at": None}
+    graph = doc["graphs"][graph_id]
+    ops = []
+    for node in graph["nodes"]:
+        node = json.loads(json.dumps(node))
+        node.setdefault("data", {}).setdefault("lang", "it")
+        ops.append({"op": "add_node", "id": node["id"], "node": node})
+    for edge in graph["edges"]:
+        ops.append({"op": "add_edge", "id": edge["id"], "source": edge["source"],
+                    "target": edge["target"], "edge_type": edge["edge_type"]})
+    return ops
 
 
-def seed_record(room_id: str, title: str) -> bool:
-    """Write `<room>.room.json` next to the snapshot. True when it landed."""
-    target = f"{SNAPSHOT_DIR}/{room_id}.room.json"
-    payload = json.dumps(record(room_id, title), ensure_ascii=False)
-    result = subprocess.run(
-        ["docker", "exec", "-i", "-u", "0", CONTAINER, "sh", "-c",
-         f"cat > {target} && chown --reference={SNAPSHOT_DIR} {target}"],
-        input=payload.encode("utf-8"), capture_output=True)
-    if result.returncode != 0:
-        print(f"[ FAIL ] {room_id} (record): {result.stderr.decode().strip()}")
-        return False
-    return True
+class Api:
+    """The node's `/v1`, with a token from `token.sh`. Nothing else talks to it.
 
-
-# ── the part a file cannot seed: roles and an invitation ─────────────────────
-#
-# The documents and the room records go into the volume directly (above): they are
-# state, and writing them is a copy. Roles and invitation links are ACTS — the ACL
-# is written through the door that checks who is asking, and an invite's secret
-# exists exactly once, in the answer to the request that mints it. So this half
-# goes through the API with a real token, and says so when it cannot.
-
-DEMO = "cantiere-demo"
-
-
-def api_pass() -> bool:
-    """Declare the demo room, seat three people in it, and print a link.
-
-    Best-effort by design: no stack, no token, no realm → it says what it skipped
-    and the file-seeded rooms above are still there. A seed that failed loudly
-    over an optional half would stop somebody from getting the part that worked.
+    The dev stack's TLS is its own internal CA, so the certificate is not
+    checked: this script runs against `em.localhost` and nowhere else.
     """
-    import ssl
-    import urllib.error
-    import urllib.request
 
-    base = f"https://{env_domain()}:{env_https_port()}/em/v1"
-    tls = ssl.create_default_context()
-    tls.check_hostname = False
-    tls.verify_mode = ssl.CERT_NONE       # the dev stack's own internal CA
+    def __init__(self) -> None:
+        import ssl
+        self.base = f"https://{env_domain()}:{env_https_port()}/em/v1"
+        self.tls = ssl.create_default_context()
+        self.tls.check_hostname = False
+        self.tls.verify_mode = ssl.CERT_NONE
 
+    @staticmethod
     def token(user: str | None) -> str | None:
         args = [str(pathlib.Path(__file__).resolve().parent / "token.sh")]
         if user:
@@ -213,8 +212,10 @@ def api_pass() -> bool:
         lines = [l for l in out.stdout.strip().splitlines() if l.strip()]
         return lines[-1] if lines else None
 
-    def call(method: str, path: str, body: dict | None = None,
+    def call(self, method: str, path: str, body: dict | None = None,
              bearer: str | None = None) -> tuple[int, dict]:
+        import urllib.error
+        import urllib.request
         headers = {"Accept": "application/json"}
         if bearer:
             headers["Authorization"] = f"Bearer {bearer}"
@@ -222,10 +223,11 @@ def api_pass() -> bool:
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(base + path, data=data, headers=headers,
-                                         method=method)
+        request = urllib.request.Request(self.base + path, data=data,
+                                         headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, context=tls, timeout=20) as answer:
+            with urllib.request.urlopen(request, context=self.tls,
+                                        timeout=20) as answer:
                 return answer.status, json.loads(answer.read() or b"null")
         except urllib.error.HTTPError as exc:
             try:
@@ -233,8 +235,94 @@ def api_pass() -> bool:
             except ValueError:
                 return exc.code, {}
         except urllib.error.URLError as exc:
-            print(f"[ SKIP ] the API half — {base} not reachable ({exc.reason})")
-            return 0, {}
+            return 0, {"detail": f"{self.base} not reachable ({exc.reason})"}
+
+
+def has_content(api: Api, owner: str, room_id: str, made: tuple) -> bool | None:
+    """Does the room's container already hold something? Asked of the SERVER.
+
+    `missing_refs` names the containers the snapshot store does not have —
+    whichever store that is. The answer to `POST /rooms` carries it when the room
+    was just declared (an implicit room adopted keeps its container); a 409 means
+    a record existed, and then the room's own description is asked.
+    """
+    status, room = made
+    if status != 201:
+        status, room = api.call("GET", f"/rooms/{room_id}", bearer=owner)
+        if status != 200:
+            print(f"[ FAIL ] {room_id}: GET {status} {room.get('detail')}")
+            return None
+    return room_id not in (room.get("missing_refs") or [])
+
+
+def seed_room(api: Api, owner: str, room_id: str, name: str,
+              visibility: str | None, doc: dict, *, preserve: bool,
+              force: bool) -> bool:
+    """One room through the door: record, content as operations, the header word."""
+    made = api.call("POST", "/rooms", {
+        "room_id": room_id, "title": name, "container_refs": [room_id],
+        # born with its graph NAMED: the one thing about a section an
+        # operation cannot say
+        "graphs": [{"graph_id": room_id, "name": name}],
+        "active_graph_id": room_id}, owner)
+    status, answer = made
+    if status == 0 or (status not in (201, 409)) or (
+            status == 409 and "already declared" not in str(answer.get("detail"))):
+        print(f"[ FAIL ] {room_id}: POST /rooms {status} {answer.get('detail')}")
+        return False
+    full = has_content(api, owner, room_id, made)
+    if full is None:
+        return False
+    if full and preserve and not force:
+        print(f"[ kept ] {room_id} — c'era già, non l'ho toccata "
+              f"(--force per riaffermare il seme)")
+        return True
+
+    ops = ops_of(doc, room_id)
+    applied, already, refused = 0, 0, []
+    for start in range(0, len(ops), BATCH):
+        status, out = api.call("POST", f"/rooms/{room_id}/ops",
+                               {"ops": ops[start:start + BATCH],
+                                "graph_id": room_id}, owner)
+        if status != 200:
+            print(f"[ FAIL ] {room_id}: ops {status} {out.get('detail')}")
+            return False
+        applied += out.get("applied", 0)
+        for one in out.get("refused") or []:
+            # «the state already knew» is not a refusal (s3dgraphy's
+            # `NOT_NEWS`): an edge that is there is the seed's answer, too
+            if one.get("reason") in NOT_NEWS:
+                already += 1
+            else:
+                refused.append(one)
+    verb = "riaffermata" if full else "creata"
+    print(f"[  ok  ] {room_id} — {verb}: {applied}/{len(ops)} operazioni"
+          + (f", {already} già lì" if already else "")
+          + (f", RIFIUTATE {refused}" if refused else ""))
+
+    # only when the seed SAYS it: `restricted` is the default, and writing it
+    # into a work room would be one more revision that changes nothing
+    if visibility:
+        status, out = api.call("PUT", f"/rooms/{room_id}/study-access",
+                               {"visibility": visibility}, owner)
+        if status != 200:
+            print(f"[ FAIL ] {room_id}: study-access {status} {out.get('detail')}")
+            return False
+        print(f"[  ok  ] {room_id} — visibility: {out.get('visibility')}")
+    return not refused
+
+
+# ── roles and an invitation ──────────────────────────────────────────────────
+#
+# Roles and invitation links are ACTS — the ACL is written through the door that
+# checks who is asking, and an invite's secret exists exactly once, in the answer
+# to the request that mints it.
+
+DEMO = "cantiere-demo"
+
+
+def api_pass(api: Api, owner: str) -> bool:
+    """Declare the demo room, seat three people in it, and print a link."""
 
     def orcid_of(jwt: str) -> str | None:
         import base64
@@ -247,12 +335,9 @@ def api_pass() -> bool:
         return (claims.get("orcid") or claims.get("preferred_username")
                 or claims.get("sub"))
 
-    owner = token(None)
-    if not owner:
-        print("[ SKIP ] the API half — no token (is Keycloak up?). The rooms and "
-              "their records are seeded; roles and the invite link are not.")
-        return False
-    guest = token("viewer")
+    call = api.call
+    base = api.base
+    guest = api.token("viewer")
     who_owner, who_guest = orcid_of(owner), (orcid_of(guest) if guest else None)
 
     # 1 · the demo WORKSPACE: two containers, because a room references 1..N
@@ -302,66 +387,46 @@ def api_pass() -> bool:
 
 def main() -> int:
     force = "--force" in sys.argv
-    try:
-        subprocess.run(["docker", "inspect", CONTAINER], check=True,
-                       capture_output=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print(f"the container {CONTAINER} is not there. Bring the stack up "
-              f"first:\n  docker-compose --env-file .env.dev "
-              f"-f docker-compose.dev.yml up -d")
+    only = next((a.split("=", 1)[1] for a in sys.argv[1:]
+                 if a.startswith("--room=")), None)
+    api = Api()
+    owner = api.token(None)
+    if not owner:
+        print("no token from ./dev-stack/token.sh — is Keycloak up? Bring the "
+              "stack up first:\n  docker-compose --env-file .env.dev "
+              "-f docker-compose.dev.yml up -d")
+        return 2
+    status, health = api.call("GET", "/health")
+    if status != 200:
+        print(f"the node does not answer at {api.base}: {status} "
+              f"{health.get('detail')}")
         return 2
 
-    for room_id, name, visibility, build, preserve in ROOMS:
-        if preserve and not force and exists(room_id):
-            print(f"[ kept ] {room_id} — c'era già, non l'ho toccata "
-                  f"(--force per riscriverla)")
-            continue
-        payload = json.dumps(
-            build(room_id, name, visibility) if visibility is not None
-            else build(room_id, name), ensure_ascii=False)
-        # `sh -c` with the JSON on stdin: no quoting of a document into an
-        # argv, which is where this kind of script usually breaks.
-        #
-        # `-u 0` and then chown, rather than writing as the app user, because a
-        # snapshot that arrived by an earlier `docker cp` is owned by the HOST
-        # user and the app user cannot truncate it — measured: "Permission
-        # denied" on a file that plainly exists and is plainly world-readable.
-        # The chown hands it back to whoever owns the directory, so StratiGraph Server
-        # keeps being able to rewrite it on its own save.
-        target = f"{SNAPSHOT_DIR}/{room_id}.em.json"
-        result = subprocess.run(
-            ["docker", "exec", "-i", "-u", "0", CONTAINER, "sh", "-c",
-             f"cat > {target} && chown --reference={SNAPSHOT_DIR} {target}"],
-            input=payload.encode("utf-8"), capture_output=True)
-        if result.returncode != 0:
-            print(f"[ FAIL ] {room_id}: {result.stderr.decode().strip()}")
-            return 1
-        print(f"[  ok  ] {room_id} — visibility: {visibility or 'restricted'}")
-        # …and the room's own record, so the room can be LISTED and named before
-        # anybody connects. Same volume as the snapshot and the ACL: an operator
-        # who backs one up finds the others.
-        if not seed_record(room_id, name):
-            return 1
-        print(f"[  ok  ] {room_id} — record: «{name}» → [{room_id}]")
+    rooms = ROOMS
+    if only:
+        # the work room under another name: what a test seeds, and archives after
+        rooms = ((only, f"Seme · {only}", None, work_room, True),)
+    ok = True
+    for room_id, name, visibility, build, preserve in rooms:
+        doc = (build(room_id, name, visibility) if visibility is not None
+               else build(room_id, name))
+        ok = seed_room(api, owner, room_id, name, visibility, doc,
+                       preserve=preserve, force=force) and ok
+    if only:
+        return 0 if ok else 1
 
-    print("\nStratiGraph Server reads a room's document when the room is first opened, so "
-          "a room that was already live in this process keeps what it had.\n"
-          "Restart it if you have just changed a seed:\n"
-          "  docker-compose --env-file .env.dev -f docker-compose.dev.yml "
-          "restart StratiGraph Server")
     print()
-    api_pass()
+    ok = api_pass(api, owner) and ok
 
-    print("\nLe stanze ora hanno un RECORD durevole (`<room>.room.json`): "
-          "esistono\nanche vuote, si elencano con `GET /v1/rooms`, e "
-          "referenziano 1..N container.\nGli inviti (`POST "
-          "/v1/rooms/<id>/invites`) vivono accanto agli ACL.")
+    print("\nLe stanze hanno un RECORD durevole: esistono anche vuote, si "
+          "elencano con\n`GET /v1/rooms`, e referenziano 1..N container. Gli "
+          "inviti (`POST\n/v1/rooms/<id>/invites`) vivono accanto agli ACL.")
     print("\nPer Tappa 4 (EMStudio come client), da incollare in "
           "Impostazioni ▸ Live sync:")
     print(f"  URL     https://{env_domain()}:{env_https_port()}/em")
     print(f"  Stanza  basilica-demo")
-    print("  Token   ./dev-stack/token.sh   (il campo lo chiede Mode ▸ Hub)")
-    return 0
+    print("  Token   ./dev-stack/token.sh   (il campo lo chiede Mode ▾ → In a room)")
+    return 0 if ok else 1
 
 
 def env_domain() -> str:
