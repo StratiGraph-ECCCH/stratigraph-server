@@ -206,7 +206,8 @@ def main() -> int:
     status, _, _ = call("GET",
                         f"{base}/rooms/stanza-inventata-{random.randint(0, 9999)}"
                         f"/asset/{ref}", token=viewer)
-    check(status == 403, f"a room typed into the URL does not open it ({status})")
+    # 404 since 16 Oct 2026: a room nobody created is not even a door
+    check(status == 404, f"a room typed into the URL does not open it ({status})")
 
     # ── 7 · the register reads back: the SLICE for anyone, the WHOLE for a curator
     print("\n7 · GET /v1/corpus")

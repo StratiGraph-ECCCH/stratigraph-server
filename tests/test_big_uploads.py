@@ -40,6 +40,21 @@ from app.assets import DirectoryAssetStore, InMemoryAssetStore  # noqa: E402
 from app.main import app                                 # noqa: E402
 from app.uploads import UploadSessions, receive_stream   # noqa: E402
 
+
+def _a_room_called(monkeypatch, room_id):
+    """A room that EXISTS (its container in the store): since 16 Oct 2026 a
+    read through a room nobody created is a 404 (MICRO-HEAD-NON-APRE-LA-STANZA)."""
+    from app import ws as ws_module
+    from app.rooms import RoomRegistry
+    from app.store import InMemoryRoomStore, InMemorySnapshotStore
+    store = InMemorySnapshotStore()
+    store.put(room_id, {"header": {"format": "em.json", "version": "1.0"},
+                        "graphs": {room_id: {"graph_id": room_id, "nodes": [],
+                                             "edges": []}},
+                        "active_graph_id": room_id})
+    monkeypatch.setattr(ws_module, "SNAPSHOT_STORE", store)
+    monkeypatch.setattr(ws_module, "ROOMS", RoomRegistry(store, InMemoryRoomStore()))
+
 ANNA = "0000-0002-1825-0097"
 DARIO = "0000-0002-9079-593X"
 AUTH = {"Authorization": "Bearer t"}
@@ -54,6 +69,7 @@ def node(monkeypatch, tmp_path):
     monkeypatch.setattr(main_module, "ASSET_STORE", store)
     monkeypatch.setattr(asset_homes, "ASSET_HOMES", InMemoryAssetHomes())
     monkeypatch.setattr(uploads, "SESSIONS", UploadSessions(tmp_path / "up"))
+    _a_room_called(monkeypatch, "scavo")
     return store
 
 

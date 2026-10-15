@@ -1247,6 +1247,7 @@ async def get_asset_home(room_id: str, ref: str, request: Request) -> AssetHomeO
     `references` names the rooms that would hold a reference after the move
     (every citing room but this one): there the file becomes «in another room»,
     and whoever is not a participant of this room will not see its bytes."""
+    await _room_to_read(room_id)
     return await _asset_home_view(room_id, ref, request)
 
 
@@ -1587,6 +1588,7 @@ async def get_asset(room_id: str, ref: str, request: Request) -> Response:
     meta = ASSET_STORE.head(ref)
     if meta is None:
         raise HTTPException(status_code=404, detail=f"no asset {ref}")
+    await _room_to_read(room_id)          # a room never created: 404, not opened
 
     # THE NAMED ROOM FIRST, then everybody else — because the store is shared.
     #
@@ -1832,6 +1834,26 @@ async def fetch_blend_package(room_id: str, sha256: str, request: Request
                              "X-EM-Opaque-Backup": "true"})
 
 
+async def _room_to_read(room_id: str):
+    """The room a READ names — or 404, with nothing opened and nothing kept.
+
+    A HEAD, a GET, a manifest, a «where does this file live» are questions; the
+    answer to a question about a room that was never created is «there is no
+    such room», not an empty working copy built on the way and kept until the
+    process ends (measured 15 Oct 2026, see `RoomRegistry.find`). Rooms are
+    born by `POST /v1/rooms`, or by a session that writes."""
+    try:
+        room = await rooms().find(room_id)
+    except Exception as exc:  # noqa: BLE001 — fail-closed, as `_asset_rights`
+        raise HTTPException(
+            status_code=503,
+            detail=f"cannot tell whether the room {room_id!r} exists right now: "
+                   f"its store will not read ({type(exc).__name__})") from None
+    if room is None:
+        raise HTTPException(status_code=404, detail=f"no room {room_id!r} here")
+    return room
+
+
 async def _asset_rights(room_id: str, ref: str) -> Optional[Dict[str, Any]]:
     """What this room's graph says about these bytes, or None for "nothing".
 
@@ -1852,14 +1874,16 @@ async def _asset_rights(room_id: str, ref: str) -> Optional[Dict[str, Any]]:
     the graph" must not be allowed to answer the question. The failure of a
     store is a reason to say *not now*, never a reason to say *yes*.
 
-    A room nobody has ever written is case (i), not (iii), and that is
-    deliberate: it has no document in which an embargo could be hiding, and the
-    asset store is shared across rooms rather than partitioned by them. Making
-    it a 404 would break the one path that proves this — `smoke.py` uploads to a
-    room it never opens — while protecting nothing, because any room that DOES
-    exist would still serve the same bytes.
+    A room nobody has ever written is case (i), not (iii): it has no document
+    in which an embargo could be hiding. It is answered WITHOUT opening it
+    (`find`): measured on 15 Oct 2026, the working copy a HEAD built here for a
+    room not created yet stayed in memory, hid the sections `POST /v1/rooms`
+    then wrote, and was saved over them at shutdown. The routes that NAME such
+    a room answer 404 before getting here (`_room_to_read`).
     """
-    room = await rooms().get(room_id)      # may raise: the store is not here
+    room = await rooms().find(room_id)     # may raise: the store is not here
+    if room is None:
+        return None
     known, rights = DIGEST_INDEX.rights(room_id, room, _digest_of(ref))
     if known:
         # …from the index, which is rebuilt the moment the room's document
@@ -2160,7 +2184,9 @@ async def _role_in_room(room_id: str, request: Request):
         except Exception:  # noqa: BLE001 — a bad token is simply not an identity
             claims = {}
     orcid = None if claims.get("em_dev_mode") else identity_of(claims)
-    room = await rooms().get(room_id)
+    room = await rooms().find(room_id)
+    if room is None:                    # no room, no role — and none opened
+        return None
     return authorize(room, orcid, dev_mode=bool(claims.get("em_dev_mode")))
 
 
@@ -2570,8 +2596,10 @@ async def _role_without_bootstrap(room_id: str, orcid: Optional[str],
     """
     from . import access
 
+    room = await rooms().find(room_id)
+    if room is None:                    # a name typed into a URL: nobody here
+        return None
     acl = load_acl(room_id)
-    room = await rooms().get(room_id)
     if acl.owner is None:
         declared = access.owner_from_document(room.document)
         if declared:
@@ -2709,7 +2737,7 @@ async def iiif_manifest(room_id: str, target_id: str, request: Request,
                    "?image_base=. A manifest pointing at nothing would look "
                    "like a broken image rather than a missing service.")
 
-    room = await rooms().get(room_id)
+    room = await _room_to_read(room_id)
     if not room.is_public:
         _authorise_manifest(request, token)
     graph, warnings = _room_graph(room)
@@ -3246,7 +3274,10 @@ async def _acting_role(room_id: str, request: Request) -> tuple:
     # maiuscolo avrebbe dato due identità alla stessa persona — una per il
     # socket e una per il REST, cioè due ruoli nella stessa stanza.
     orcid = None if dev_mode else _ws._identity(principal)
-    room = await rooms().get(room_id)
+    # A READ never opens a room that does not exist (see `_room_to_read`); a
+    # write keeps the old door, which opens it.
+    room = (await _room_to_read(room_id)
+            if request.method in ("GET", "HEAD") else await rooms().get(room_id))
     role = authorize(room, orcid, dev_mode=dev_mode)
     return load_acl(room_id), room, role, orcid
 
@@ -3713,6 +3744,13 @@ async def create_room(body: RoomRefIn, request: Request) -> RoomOut:
     if born is not None and descriptor.primary_ref in described.missing_refs:
         rooms().store.put(descriptor.primary_ref, born)
         described.born_with = list(born["graphs"])
+        # …and a working copy opened before the birth (a session that came in
+        # first) would hide these sections and be saved over them: dropped, so
+        # the next opening reads them — unless somebody is in it or it holds
+        # work not yet saved, which are not ours to throw away.
+        stale = rooms().peek(room_id)
+        if stale is not None and not stale.sockets and not stale.unsaved:
+            rooms().forget(room_id)
     return described
 
 

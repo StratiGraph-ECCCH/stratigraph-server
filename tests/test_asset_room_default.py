@@ -140,15 +140,20 @@ def test_another_room_is_not_a_way_around_it(client, node, be):
     """CARLA owns `sua`; naming it in the URL does not make ANNA's photo hers."""
     ref = _upload(client, be, ANNA, "scavo", PHOTO)
     assert _get(client, be, CARLA, "sua", ref).status_code == 403
-    assert _get(client, be, CARLA, "stanza-inventata", ref).status_code == 403
+    # …and a room nobody created is not a door at all (16 Oct 2026)
+    assert _get(client, be, CARLA, "stanza-inventata", ref).status_code == 404
 
 
 def test_the_uploader_reads_back_what_they_sent(client, node, be):
     """DARIO is in no room, uploads through a name nobody ever opened (what
-    `smoke.py` does): his own bytes come back to him, and to nobody else."""
+    `smoke.py` does): his own bytes come back to him, and to nobody else.
+
+    Read back through a room that EXISTS: the name nobody opened is not a room
+    to read through (404 since 16 Oct 2026, MICRO-HEAD-NON-APRE-LA-STANZA)."""
     ref = _upload(client, be, DARIO, "mai-aperta", OLD + b"!")
-    assert _get(client, be, DARIO, "mai-aperta", ref).status_code == 200
-    assert _get(client, be, CARLA, "mai-aperta", ref).status_code == 403
+    assert _get(client, be, DARIO, "mai-aperta", ref).status_code == 404
+    assert _get(client, be, DARIO, "sua", ref).status_code == 200
+    assert _get(client, be, CARLA, "sua", ref).status_code == 403
 
 
 def test_a_cited_asset_with_no_licence_is_still_the_rooms(client, node, be):
@@ -193,8 +198,9 @@ def test_bytes_with_no_known_home_belong_to_the_door(client, node, be):
     ref = node["assets"].put(OLD, "application/octet-stream")["ref"]
     assert _get(client, be, BRUNO, "scavo", ref).status_code == 200
     assert _get(client, be, DARIO, "scavo", ref).status_code == 403
-    assert _get(client, be, DARIO, "invented", ref).status_code == 403, \
+    assert _get(client, be, DARIO, "invented", ref).status_code == 404, \
         "an invented room grants nothing: no bootstrap on the way to a file"
+    assert ws_module.ROOMS.peek("invented") is None
 
 
 def test_dedup_does_not_make_a_second_home(client, node, be):

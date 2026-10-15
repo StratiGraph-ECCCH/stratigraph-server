@@ -1072,6 +1072,28 @@ class RoomRegistry:
             self._rooms[room_id] = room
             return room
 
+    def exists(self, room_id: str) -> bool:
+        """Whether there is a room here to READ: live, declared, or a container
+        in the store (a room that predates the register). Nothing is opened."""
+        if room_id in self._rooms or not self.descriptor(room_id).implicit:
+            return True
+        return self.has_container(room_id)
+
+    async def find(self, room_id: str) -> Optional[Room]:
+        """`get` for a READ: the room if it exists (opened as `get` opens it),
+        else None — and nothing kept.
+
+        Measured on 15 Oct 2026 (s3Dgraphy, room-import, phase C): a HEAD on an
+        asset of a room not created yet went through `get`, which built an
+        empty working copy and KEPT it. The `POST /v1/rooms` that followed wrote
+        the sections into the store, the live copy stayed empty, every seeding
+        op was refused («the graph … is not in this study»), and at shutdown
+        the empty copy was saved over the sections. A read must not be the
+        birth of a room: only a write (`get`: a session, a seed) opens one."""
+        if not self.exists(room_id):
+            return None
+        return await self.get(room_id)
+
     def peek(self, room_id: str) -> Optional[Room]:
         return self._rooms.get(room_id)
 

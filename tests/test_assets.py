@@ -24,6 +24,21 @@ from app.assets import (DirectoryAssetStore, InMemoryAssetStore,  # noqa: E402
                         asset_ref_valid, content_id)
 from app.main import app                                          # noqa: E402
 
+
+def _a_room_called(monkeypatch, room_id):
+    """A room that EXISTS (its container in the store): since 16 Oct 2026 a
+    read through a room nobody created is a 404 (MICRO-HEAD-NON-APRE-LA-STANZA)."""
+    from app import ws as ws_module
+    from app.rooms import RoomRegistry
+    from app.store import InMemoryRoomStore, InMemorySnapshotStore
+    store = InMemorySnapshotStore()
+    store.put(room_id, {"header": {"format": "em.json", "version": "1.0"},
+                        "graphs": {room_id: {"graph_id": room_id, "nodes": [],
+                                             "edges": []}},
+                        "active_graph_id": room_id})
+    monkeypatch.setattr(ws_module, "SNAPSHOT_STORE", store)
+    monkeypatch.setattr(ws_module, "ROOMS", RoomRegistry(store, InMemoryRoomStore()))
+
 MODEL = b"glTF\x02\x00\x00\x00fake binary model bytes"
 OTHER = b"a different model"
 
@@ -32,6 +47,7 @@ OTHER = b"a different model"
 def fresh_assets(monkeypatch):
     store = InMemoryAssetStore()
     monkeypatch.setattr(main_module, "ASSET_STORE", store)
+    _a_room_called(monkeypatch, "scavo")
     return store
 
 

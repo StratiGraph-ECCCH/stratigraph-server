@@ -172,6 +172,16 @@ def main() -> int:
     ok("a dev token was issued", bool(token))
     auth = {"Authorization": f"Bearer {token}"}
 
+    # ── 1b · the room, declared before anything is read through it ──────────
+    # Since 16 Oct 2026 a read through a room nobody created is a 404 and opens
+    # nothing (MICRO-HEAD-NON-APRE-LA-STANZA): 201 the first time, 409 after.
+    status, body, _ = request(
+        f"{server}/v1/rooms", method="POST",
+        data=json.dumps({"room_id": room}).encode(),
+        headers={**auth, "Content-Type": "application/json"})
+    ok("the room is declared (now, or by an earlier run)", status in (201, 409),
+       f"status {status}")
+
     # ── 2 · PUT: the reference IS the digest of what we sent ─────────────────
     payload = b"glTF\x02\x00\x00\x00smoke-test-asset-" + os.urandom(8)
     digest = "sha256:" + hashlib.sha256(payload).hexdigest()

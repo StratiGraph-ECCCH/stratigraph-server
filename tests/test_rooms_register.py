@@ -260,7 +260,11 @@ def test_a_room_entered_by_name_is_in_its_owners_list(client, enforcing):
     enforcing(CARLA)
     # entering by name: no record — the door makes CARLA the owner. Listed once
     # the room has a container (6 Oct 2026: an ACL alone is not a room), here
-    # the first save of what she wrote.
+    # the first save of what she wrote. The door is the SESSION: a GET of a room
+    # nobody created is a 404 and opens nothing (16 Oct 2026).
+    assert client.get("/v1/rooms/Scavo-2026", headers=AUTH).status_code == 404
+    with client.websocket_connect("/v1/rooms/Scavo-2026/ws?token=t") as door:
+        assert door.receive_json()["type"] == "host_info"
     assert client.get("/v1/rooms/Scavo-2026", headers=AUTH).status_code == 200
     ws_module.SNAPSHOT_STORE.put("Scavo-2026", container("Scavo-2026"))
     mine = {r["room_id"]: r for r in client.get("/v1/rooms", headers=AUTH).json()}
@@ -374,7 +378,9 @@ def test_an_acl_without_a_container_is_not_a_room(client, enforcing):
     room. An implicit room is listed only when its container exists."""
     enforcing(ANNA)
     for name in ("smoke-1791200000", "nome-sbagliato"):
-        assert client.get(f"/v1/rooms/{name}", headers=AUTH).status_code == 200
+        # since 16 Oct 2026 the GET does not even write the ACL: 404, nothing
+        assert client.get(f"/v1/rooms/{name}", headers=AUTH).status_code == 404
+        assert not ws_module.ACL_STORE.get(name)
     client.get("/v1/rooms/scavo-b", headers=AUTH)           # a real container
     listed = {r["room_id"]: r for r in client.get("/v1/rooms", headers=AUTH).json()}
     assert set(listed) == {"scavo-b"}

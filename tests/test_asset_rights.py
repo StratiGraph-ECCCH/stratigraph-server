@@ -245,16 +245,18 @@ def test_a_document_that_will_not_read_answers_503_and_not_the_bytes(
     assert PIXELS not in answer.content
 
 
-def test_a_room_nobody_ever_wrote_is_not_a_room_that_cannot_be_read(client, room,
-                                                                    whoever):
-    """Case (i), not case (iii): a room with no document has nowhere for an
-    embargo to hide, and the asset store is shared rather than partitioned by
-    room. `smoke.py` uploads to a room it never opens — that path must keep
-    working, and 404-ing it would protect nothing."""
+def test_a_room_nobody_ever_wrote_is_not_a_room_at_all(client, room, whoever):
+    """It used to be case (i) — «nothing said», bytes served — and the read
+    OPENED the room on the way: measured on 15 Oct 2026, the empty copy a HEAD
+    kept in memory hid the sections a later `POST /v1/rooms` wrote, and was
+    saved over them. A room that was never created answers 404, and nothing is
+    opened (MICRO-HEAD-NON-APRE-LA-STANZA, 16 Oct 2026)."""
     whoever(ANNA)
     answer = client.get(f"/v1/rooms/stanza-mai-aperta/asset/{room['plain']}",
                         headers=HEAD)
-    assert answer.status_code == 200 and answer.content == FREE
+    assert answer.status_code == 404
+    assert FREE not in answer.content
+    assert ws_module.ROOMS.peek("stanza-mai-aperta") is None
 
 
 def test_the_embargo_cannot_be_walked_around_by_naming_another_room(client, room,
@@ -263,6 +265,13 @@ def test_the_embargo_cannot_be_walked_around_by_naming_another_room(client, room
     different room came back 200. A gate you get past by typing another room
     name is not a gate."""
     whoever(BRUNO)                      # viewer in `scavo`, nothing elsewhere
+    # a room that EXISTS and says nothing about the digest (a room that does
+    # not exist is a 404 before any of this: see the test above)
+    ws_module.SNAPSHOT_STORE.put("qualche-altra-stanza", {
+        "header": {"format": "em.json", "version": "1.0"},
+        "graphs": {"qualche-altra-stanza": {"graph_id": "qualche-altra-stanza",
+                                            "nodes": [], "edges": []}},
+        "active_graph_id": "qualche-altra-stanza"})
     through_another = client.get(
         f"/v1/rooms/qualche-altra-stanza/asset/{room['embargoed']}", headers=HEAD)
     assert through_another.status_code == 403

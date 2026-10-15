@@ -139,6 +139,8 @@ def room(monkeypatch):
         async def get(self, room_id):
             return the_room
 
+        find = get                      # a read (16 Oct 2026): the same room
+
         def rooms(self):
             return {the_room.room_id: the_room}
 
@@ -385,6 +387,8 @@ def stored_room(monkeypatch):
     class Registry:
         async def get(self, room_id):
             return the_room
+
+        find = get                      # a read (16 Oct 2026): the same room
 
         def rooms(self):
             return {the_room.room_id: the_room}

@@ -603,7 +603,12 @@ def test_the_corpus_embargo_cannot_be_walked_around_by_naming_another_room(
         "embargo": "2099-01-01"})
 
     whoever(BRUNO)
-    # a room nobody has ever opened: the viewer has no role there either
+    # another room that exists, where the viewer has no role either (a room
+    # that does not exist is a 404 before the gate: MICRO-HEAD, 16 Oct 2026)
+    ws_module.SNAPSHOT_STORE.put("altrove", {
+        "header": {"format": "em.json", "version": "1.0"},
+        "graphs": {"altrove": {"graph_id": "altrove", "nodes": [], "edges": []}},
+        "active_graph_id": "altrove"})
     answer = client.get(f"/v1/rooms/altrove/asset/{assets['picture']}", headers=HEAD)
     assert answer.status_code == 403
 
@@ -648,8 +653,12 @@ def test_an_invented_room_grants_nothing_even_though_it_would_be_owned(
     whoever(BRUNO)
     invented = client.get(f"/v1/rooms/una-stanza-inventata/asset/{assets['picture']}",
                           headers=HEAD)
-    assert invented.status_code == 403, \
+    # since 16 Oct 2026 not even a room: 404, nothing opened, nobody owner
+    assert invented.status_code == 404, \
         "a room name typed into a URL is not a role"
+    assert PIXELS not in invented.content
+    assert ws_module.ROOMS.peek("una-stanza-inventata") is None
+    assert not ws_module.ACL_STORE.get("una-stanza-inventata")
 
 
 def test_a_corpus_that_will_not_read_fails_CLOSED(client, resident, assets,

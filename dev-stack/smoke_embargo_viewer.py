@@ -199,6 +199,14 @@ def main() -> int:
     owner = {"Authorization": f"Bearer {owner_token}"}
     viewer = {"Authorization": f"Bearer {viewer_token}"}
 
+    # the room, DECLARED by `dev` (its owner): since 16 Oct 2026 a read through
+    # a room nobody created is a 404, not a stranger's 403
+    status, body, _ = request(
+        f"{server}/v1/rooms", method="POST",
+        data=json.dumps({"room_id": room}).encode(),
+        headers={**owner, "Content-Type": "application/json"})
+    ok("the room is declared, `dev` its owner", status == 201, str(status))
+
     # ── the asset ────────────────────────────────────────────────────────────
     payload = b"glTF\x02\x00\x00\x00embargo-smoke-" + os.urandom(8)
     digest = "sha256:" + hashlib.sha256(payload).hexdigest()
