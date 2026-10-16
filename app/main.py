@@ -5130,6 +5130,93 @@ async def list_orphan_assets(
     return out
 
 
+#: Extensions for the media types a room actually holds, in case the
+#: interpreter's `mimetypes` table does not know them (it learned `.glb` late).
+_EXTENSIONS = {"model/gltf-binary": ".glb", "model/gltf+json": ".gltf",
+               "model/obj": ".obj", "model/stl": ".stl", "model/3mf": ".3mf",
+               "image/jpeg": ".jpg", "image/png": ".png", "image/tiff": ".tif",
+               "image/webp": ".webp", "application/json": ".json",
+               "application/zip": ".zip", "application/pdf": ".pdf",
+               "text/plain": ".txt", "application/octet-stream": ".bin"}
+
+#: how much of an asset is read from the store per piece of the stream
+_DOWNLOAD_PIECE = 1024 * 1024
+
+
+def _download_name(ref: str, media_type: str) -> str:
+    """`<hex>.<ext>` — or the name the asset's record carries, when it has one
+    (`filename` in the orphan mark or the entry). Nothing writes one today: an
+    upload sends bytes and a media type, and the name lives in the graph."""
+    from . import asset_homes
+    import mimetypes
+
+    try:
+        key = _digest_of(ref)
+        mark = asset_homes.ASSET_HOMES.orphan(key) or {}
+        recorded = str(mark.get("filename") or "").strip()
+    except Exception:  # noqa: BLE001 — a record that will not read: no name
+        recorded = ""
+    safe = "".join(c for c in recorded if c not in '"\\/\r\n')
+    if safe:
+        return safe
+    base = media_type.split(";", 1)[0].strip().lower()
+    ext = _EXTENSIONS.get(base) or mimetypes.guess_extension(base) or ".bin"
+    return f"{ref.split(':', 1)[1]}{ext}"
+
+
+@v1.api_route("/admin/assets/{ref}", methods=["GET", "HEAD"], tags=["node"],
+              responses={400: {"description": "not an asset reference"},
+                         403: {"description": "not an operator"},
+                         404: {"description": "the store does not hold it"}})
+async def download_asset(ref: str, request: Request) -> Response:
+    """**Download** an asset as the node's operator — an orphan above all,
+    which has no room left that could serve it (16 Oct 2026, «Scarica» in
+    EMStudio's orphan list).
+
+    Through no room: no room is read, opened or created, and no graph gate
+    runs — the operator capability is the gate, as for the rest of
+    `/v1/admin/assets`. Streamed from the store in pieces (`read_range`
+    where the store can seek), with `Content-Type` the stored media type,
+    `Content-Length`, `ETag` the reference and `Content-Disposition:
+    attachment`. HEAD answers the same headers with no body."""
+    from fastapi.responses import StreamingResponse
+
+    _require_operator(request)
+    if not asset_ref_valid(ref):
+        raise HTTPException(status_code=400,
+                            detail=f"not an asset reference: {ref!r} "
+                                   f"(expected 'sha256:<hex>')")
+    meta = ASSET_STORE.head(ref)
+    if meta is None:
+        raise HTTPException(status_code=404, detail=f"no asset {ref} in the store")
+    media_type = str(meta.get("media_type") or "") or "application/octet-stream"
+    size = int(meta.get("size") or 0)
+    headers = {"ETag": f'"{ref}"', "Content-Length": str(size),
+               "Content-Disposition":
+                   f'attachment; filename="{_download_name(ref, media_type)}"',
+               "Cache-Control": "no-store"}
+    if request.method == "HEAD":
+        return Response(content=b"", media_type=media_type, headers=headers)
+
+    reader = getattr(ASSET_STORE, "read_range", None)
+
+    def pieces():
+        if reader is None:                  # a store that cannot seek
+            data = ASSET_STORE.get(ref)
+            if data:
+                yield data
+            return
+        offset = 0
+        while offset < size:
+            part = reader(ref, offset, min(_DOWNLOAD_PIECE, size - offset))
+            if not part:
+                return
+            offset += len(part)
+            yield part
+
+    return StreamingResponse(pieces(), media_type=media_type, headers=headers)
+
+
 def _room_ids() -> set:
     """Every room this node knows about, from the three places that know.
 

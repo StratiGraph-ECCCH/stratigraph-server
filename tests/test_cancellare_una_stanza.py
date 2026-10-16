@@ -415,3 +415,57 @@ def test_CARICARLO_IN_UNA_STANZA_CHE_NON_C_E_non_lo_riprende(client, be, node, s
     _delete(client, be, "scavo")
     _upload(client, be, "nessuna", GLB)
     assert [o["ref"] for o in _orphans(client, be)] == [scavo["glb"]]
+
+
+# ═══ 5 · «SCARICA»: L'OPERATORE PRENDE I BYTE DI UN ORFANO, SENZA STANZA ═════
+
+def test_L_OPERATORE_SCARICA_UN_ORFANO(client, be, node, scavo):
+    _delete(client, be, "scavo")
+    be(OSCAR)
+    hex_ = scavo["glb"].split(":", 1)[1]
+    got = client.get(f"/v1/admin/assets/{scavo['glb']}", headers=AUTH)
+    assert got.status_code == 200 and got.content == GLB
+    assert got.headers["content-type"] == "model/gltf-binary"
+    assert got.headers["content-length"] == str(len(GLB))
+    assert got.headers["etag"] == f'"{scavo["glb"]}"'
+    assert got.headers["content-disposition"] == f'attachment; filename="{hex_}.glb"'
+    head = client.head(f"/v1/admin/assets/{scavo['glb']}", headers=AUTH)
+    assert head.status_code == 200 and head.content == b""
+    assert head.headers["content-length"] == str(len(GLB))
+    assert head.headers["content-disposition"] == got.headers["content-disposition"]
+    #: …e nessuna stanza è stata aperta o creata per servirlo
+    assert node["registry"].rooms() == []
+    assert _files_of(node, "scavo") == []
+
+
+def test_SCARICA_IN_PIU_PEZZI_e_senza_tipo(client, be, node, monkeypatch):
+    """Più grande di un pezzo dello stream, e senza tipo registrato."""
+    monkeypatch.setattr(main_module, "_DOWNLOAD_PIECE", 7)
+    data = bytes(range(256)) * 3
+    ref = node["assets"].put(data, "")["ref"]
+    be(OSCAR)
+    got = client.get(f"/v1/admin/assets/{ref}", headers=AUTH)
+    assert got.status_code == 200 and got.content == data
+    assert got.headers["content-type"].startswith("application/octet-stream")
+    assert got.headers["content-disposition"].endswith('.bin"')
+
+
+def test_SCARICA_NIENTE_A_CHI_NON_E_OPERATORE(client, be, node, scavo):
+    for who in (ANNA, ELIO):        # nemmeno alla proprietaria della stanza
+        be(who)
+        for method in ("GET", "HEAD"):
+            answer = client.request(method, f"/v1/admin/assets/{scavo['glb']}",
+                                    headers=AUTH)
+            assert answer.status_code == 403, (who, method)
+    assert client.get(f"/v1/admin/assets/{scavo['glb']}").status_code == 401
+
+
+def test_SCARICA_un_riferimento_storto_400_uno_assente_404(client, be, node):
+    be(OSCAR)
+    assert client.get("/v1/admin/assets/sha256:zz", headers=AUTH).status_code == 400
+    assente = "sha256:" + "a" * 64
+    assert client.get(f"/v1/admin/assets/{assente}", headers=AUTH).status_code == 404
+    assert client.head(f"/v1/admin/assets/{assente}", headers=AUTH).status_code == 404
+    #: …e l'elenco degli orfani resta la sua rotta, non un riferimento storto
+    assert client.get("/v1/admin/assets/orphans", headers=AUTH).status_code == 200
+    assert node["registry"].rooms() == []

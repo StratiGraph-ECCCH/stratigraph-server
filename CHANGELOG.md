@@ -37,6 +37,14 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
   - Un orfano si **riusa** caricando gli stessi byte in una stanza: lo store
     non li riscrive (`created: false`), la stanza diventa la sua casa e il segno
     d'orfano cade. Caricato «in» un nome che non è una stanza resta orfano.
+  - `GET`/`HEAD /v1/admin/assets/{ref}` («Scarica» nella lista degli orfani
+    di EMStudio): l'operatore scarica un asset senza passare da nessuna stanza
+    — un orfano non ne ha una che possa servirlo. Nessuna stanza letta, aperta
+    o creata; i byte in streaming a pezzi (`read_range`), `Content-Type` il
+    tipo registrato (altrimenti `application/octet-stream`), `Content-Length`,
+    `ETag` il riferimento, `Content-Disposition: attachment;
+    filename="<hex>.<ext>"`. 400 riferimento storto, 403 non operatore, 404
+    non nello store.
   - `delete(room_id)` opzionale sugli store per stanza (snapshot ×3, registro,
     ACL, inviti, registro `.blend`), `UploadSessions.for_room`.
   - `tests/test_cancellare_una_stanza.py` (23 prove); `test_api.py` e
