@@ -335,9 +335,11 @@ def test_an_orphan_is_reported_and_archived_never_deleted(client, enforcing,
                        json={"archived": False})
     assert back.json()["archived_at"] is None
 
-    # there is no delete, and that is on purpose
+    # a DELETE is a separate act with a confirmation (16 Oct 2026): without
+    # the room's name repeated it removes nothing, and the room is still there
     assert client.delete("/v1/rooms/stagione-2025",
-                         headers=AUTH).status_code in (404, 405)
+                         headers=AUTH).status_code == 400
+    assert instance.descriptor("stagione-2025").implicit is False
 
 
 def test_an_implicit_room_archived_stays_archived(client, enforcing, instance):

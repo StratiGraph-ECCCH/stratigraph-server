@@ -186,6 +186,13 @@ class InMemoryInviteStore:
         with self._lock:
             return sorted(self._data)
 
+    def delete(self, room_id: str) -> bool:
+        """Forget this room's entry (`DELETE /v1/rooms/{id}`). → whether there
+        was one. Optional beside the interface's methods: a store without it is
+        reported by the deletion as «not removable here», not guessed at."""
+        with self._lock:
+            return self._data.pop(room_id, None) is not None
+
 
 class DirectoryInviteStore:
     """A directory of `<room>.invites.json`, written atomically, beside the ACLs.
@@ -214,6 +221,14 @@ class DirectoryInviteStore:
         tmp.write_text(json.dumps(records, ensure_ascii=False, indent=1,
                                   sort_keys=True), encoding="utf-8")
         tmp.replace(path)
+
+    def delete(self, room_id: str) -> bool:
+        """Remove this room's file (`DELETE /v1/rooms/{id}`). → whether there
+        was one."""
+        path = self._path(room_id)
+        existed = path.is_file()
+        path.unlink(missing_ok=True)
+        return existed
 
     def ids(self) -> List[str]:
         return sorted(p.name[: -len(".invites.json")]

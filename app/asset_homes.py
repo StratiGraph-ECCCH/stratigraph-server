@@ -114,8 +114,13 @@ class _Homes:
         key = _hex(digest)
         return list(self._load(key).get("moves") or []) if key else []
 
-    def record(self, digest: str, room_id: str, who: Optional[str]) -> Optional[str]:
-        """An upload through `room_id`. → the home after it."""
+    def record(self, digest: str, room_id: str, who: Optional[str], *,
+               revive: bool = True) -> Optional[str]:
+        """An upload through `room_id`. → the home after it.
+
+        `revive=False` keeps an orphan mark: the caller knows the room is not
+        one (a name no `POST /v1/rooms` made), and bytes sent «into» it are
+        not taken back by anybody."""
         key = _hex(digest)
         if not key or not room_id:
             return None
@@ -132,6 +137,11 @@ class _Homes:
             people = rooms.setdefault(room_id, [])
             if who and who not in people:
                 people.append(who)
+                changed = True
+            if revive and entry.pop("orphan", None) is not None:
+                # REUSED (E.D., 16 Oct 2026): the same bytes sent into a room
+                # again are no longer an orphan — the store did not take them
+                # twice (content-addressed), and this room is their home now.
                 changed = True
             if changed:
                 self._save(key, entry)
@@ -157,6 +167,94 @@ class _Homes:
         return {"home": to_room, "previous": previous, "previous_legacy": legacy}
 
 
+    # ── a room deleted, and the bytes it leaves behind (16 Oct 2026) ─────────
+    #
+    # `DELETE /v1/rooms/{id}` never deletes an asset: the bytes may have other
+    # roads, be reused, be filtered. What it does here is take the room out of
+    # every record and, when no room is left holding the bytes, write down that
+    # they are an ORPHAN — when, and which room was the last to hold them. The
+    # mark lives in the same per-digest record as the home, because it is the
+    # same kind of fact (where these bytes came from) and it is asked by digest.
+
+    def digests(self) -> List[str]:
+        """Every digest with a record (`<hex>`)."""
+        return sorted(self._keys())
+
+    def _keys(self) -> List[str]:  # pragma: no cover — abstract
+        raise NotImplementedError
+
+    def _drop(self, key: str) -> None:  # pragma: no cover — abstract
+        raise NotImplementedError
+
+    def rooms_of(self, digest: str) -> List[str]:
+        key = _hex(digest)
+        return sorted((self._load(key).get("rooms") or {})) if key else []
+
+    def release_room(self, digest: str, room_id: str, *,
+                     orphan: Optional[Dict[str, Any]] = None,
+                     successor: Optional[str] = None,
+                     by: Optional[str] = None,
+                     at: Optional[str] = None) -> Dict[str, Any]:
+        """A room is gone: out of this record. → the entry after.
+
+        If the room was the HOME, the home passes to `successor` — a room the
+        caller found still holding the bytes — or to nobody (then the gate
+        reads the rooms left in the record, or the graph). `orphan`, when given,
+        is written as the record's orphan mark (`{orphaned_at, origin_room,
+        deleted_by, media_type, size}`); the caller decides it, because only
+        the caller has read every other room's graph."""
+        key = _hex(digest)
+        if not key or not room_id:
+            raise ValueError("a release needs a digest and a room")
+        with self._lock:
+            entry = self._load(key)
+            rooms = entry.setdefault("rooms", {})
+            was_home = self._home_of(entry) == room_id
+            rooms.pop(room_id, None)
+            if was_home:
+                if successor and successor not in rooms:
+                    successor = None
+                if successor:
+                    entry["home"] = successor
+                else:
+                    entry.pop("home", None)
+                entry.setdefault("moves", []).append({
+                    "from": room_id, "from_legacy": [], "to": successor,
+                    "by": by, "at": at, "why": "room deleted"})
+            if orphan is not None:
+                entry["orphan"] = dict(orphan)
+            self._save(key, entry)
+            return json.loads(json.dumps(entry))
+
+    def orphan(self, digest: str) -> Optional[Dict[str, Any]]:
+        """The orphan mark, or None."""
+        key = _hex(digest)
+        mark = self._load(key).get("orphan") if key else None
+        return dict(mark) if isinstance(mark, dict) else None
+
+    def orphans(self) -> Dict[str, Dict[str, Any]]:
+        """`<hex>` → orphan mark, for every record that carries one."""
+        out: Dict[str, Dict[str, Any]] = {}
+        for key in self._keys():
+            mark = self._load(key).get("orphan")
+            if isinstance(mark, dict):
+                out[key] = dict(mark)
+        return out
+
+    def forget(self, digest: str) -> bool:
+        """The bytes were deleted (`DELETE /v1/admin/assets/{ref}`): the
+        record goes with them — a home, uploaders and an orphan mark for bytes
+        that are not there would grant, the day the same bytes come back, a
+        reading to people of a past nobody remembers. → whether there was one."""
+        key = _hex(digest)
+        if not key:
+            return False
+        with self._lock:
+            existed = bool(self._load(key))
+            self._drop(key)
+            return existed
+
+
 class InMemoryAssetHomes(_Homes):
     """Tests and a laptop run; dies with the process, and says so."""
 
@@ -169,6 +267,12 @@ class InMemoryAssetHomes(_Homes):
 
     def _save(self, key: str, entry: Dict[str, Any]) -> None:
         self._data[key] = json.loads(json.dumps(entry))
+
+    def _keys(self) -> List[str]:
+        return list(self._data)
+
+    def _drop(self, key: str) -> None:
+        self._data.pop(key, None)
 
 
 class DirectoryAssetHomes(_Homes):
@@ -203,6 +307,14 @@ class DirectoryAssetHomes(_Homes):
         tmp = path.with_suffix(".part")
         tmp.write_text(json.dumps(entry, ensure_ascii=False, sort_keys=True), "utf-8")
         tmp.replace(path)
+
+    def _keys(self) -> List[str]:
+        """Walked, not indexed — two levels, like the asset directory."""
+        return [p.stem for p in self.root.glob("??/*.json")
+                if _hex(p.stem) == p.stem]
+
+    def _drop(self, key: str) -> None:
+        self._path(key).unlink(missing_ok=True)
 
 
 def asset_homes_from_env(environ: Optional[Dict[str, str]] = None):

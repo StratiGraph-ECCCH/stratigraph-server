@@ -1102,7 +1102,14 @@ def _record_home(ref: str, room_id: str, author: Optional[str]) -> Optional[str]
     proved they hold them and may read them back. The FIRST room is their home,
     and a later room is not a second one (F1): → the home."""
     from . import asset_homes
-    return asset_homes.ASSET_HOMES.record(ref, room_id, author)
+    # An ORPHAN (a deleted room's asset) uploaded again into a room that is
+    # one is relinked — no longer an orphan, this room its home. Into a name
+    # no room answers to, it stays an orphan: nobody has taken it back.
+    try:
+        revive = _room_is_there(room_id)
+    except Exception:  # noqa: BLE001 — a store that will not say: keep the mark
+        revive = False
+    return asset_homes.ASSET_HOMES.record(ref, room_id, author, revive=revive)
 
 
 def _home_of(ref: str) -> Optional[str]:
@@ -4222,6 +4229,332 @@ async def archive_room(room_id: str, body: ArchiveIn,
     return _describe_room(registry.archive(room_id, archived=body.archived),
                           role=role, with_members=True)
 
+# ── deleting a room (MICRO «spazio 3D 2», Parte 6 — E.D., 16 Oct 2026) ───────
+#
+# Until today there was no deletion, on purpose: archiving is a mark, and
+# «Deletion, if it is ever wanted, is a separate act with a separate name and a
+# confirmation» (`RoomRegistry.archive`). This is that act, with those three
+# properties:
+#
+# * **its own name and its own door** — `DELETE /v1/rooms/{id}`, for the room's
+#   OWNER and the NODE OPERATOR (`app/operators.py`) only. A room admin hands
+#   out roles; whether the room exists at all is not theirs to decide;
+# * **a confirmation**, the room id repeated in the body (`{"confirm": id}`),
+#   the same typed confirmation the operator's archive asks;
+# * **the bytes stay.** Assets are content-addressed and shared across rooms
+#   (`app/assets.py`): they may have other roads, be reused or filtered. What the
+#   room leaves behind is written down instead — an asset no other room holds
+#   becomes an ORPHAN in its `asset_homes` record, with the date and the room it
+#   came from, listed by `GET /v1/admin/assets/orphans` and deleted, one at a
+#   time and by a person, through `DELETE /v1/admin/assets/{ref}`.
+#
+# A read never opens a room (`_room_to_read`), and neither does this: the room
+# is found from the DURABLE facts (its record, its container), never through
+# `rooms().get`, so a ghost working copy built by a read in another build is
+# neither what makes a room deletable nor something left behind.
+
+
+class RoomDeleteIn(BaseModel):
+    #: the room id, typed again. Missing or different → 400: a DELETE that a
+    #: stray click or a wrong row can send is not consent.
+    confirm: str = Field(default="", description="the room id, repeated")
+
+
+class RoomDeletedAsset(BaseModel):
+    """One asset the room held, and what became of it — never deleted."""
+
+    ref: str
+    #: True when no other room holds it and the corpus does not document it:
+    #: it is in `GET /v1/admin/assets/orphans` from now
+    orphan: bool = False
+    #: the other rooms that still cite it (graph) or hold it (upload)
+    still_held_by: List[str] = Field(default_factory=list)
+    in_corpus: bool = False
+    #: whether the asset store holds the bytes at all (a cited, missing asset
+    #: is reported and never made an orphan: there is nothing to keep)
+    present: bool = True
+
+
+class RoomDeleted(BaseModel):
+    room_id: str
+    deleted_at: str
+    deleted_by: Optional[str] = None
+    #: `owner` or `operator` — which of the two doors let the caller through
+    deleted_as: str
+    #: True when every piece below went; False → `errors` says which did not
+    complete: bool = True
+    errors: List[str] = Field(default_factory=list)
+    #: what went, piece by piece
+    removed: Dict[str, Any] = Field(default_factory=dict)
+    #: containers this room named that another room still names: kept
+    containers_kept: List[str] = Field(default_factory=list)
+    #: the assets the room held — all of them KEPT in the store
+    assets: List[RoomDeletedAsset] = Field(default_factory=list)
+    orphaned: List[str] = Field(default_factory=list)
+    #: `.blend` backups/packages: the room's register goes, the blobs stay
+    blend_blobs_kept: List[str] = Field(default_factory=list)
+
+
+def _room_is_there(room_id: str, known: Optional[set] = None) -> bool:
+    """A room by its DURABLE facts: a record, or its container in the store.
+    A working copy in memory is not one — it is what a read used to leave."""
+    registry = rooms()
+    if not registry.descriptor(room_id).implicit:
+        return True
+    return registry.has_container(room_id, known)
+
+
+def _cited_in_rooms(exclude: Optional[str] = None) -> Dict[str, set]:
+    """digest → the rooms whose graph cites it: every room's stored document
+    AND its live working copy, which may cite what is not saved yet."""
+    registry = rooms()
+    cited: Dict[str, set] = {}
+    for room_id in sorted(_room_ids()):
+        if room_id == exclude:
+            continue
+        found = _digests_in(snapshot_store().get(
+            registry.descriptor(room_id).primary_ref))
+        live = registry.peek(room_id)
+        if live is not None:
+            found |= _digests_in(live.document)
+        for ref in found:
+            cited.setdefault(ref, set()).add(room_id)
+    return cited
+
+
+def _corpus_digests() -> Optional[set]:
+    """What the resident corpus documents — or None when it will not read,
+    and then nothing may be called an orphan (fail closed, as `_who_mentions`)."""
+    try:
+        return _digests_in(RESIDENT.read())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _delete_piece(errors: List[str], what: str, fn, *args):
+    """One store's part of the deletion; a failure is SAID, the rest goes on."""
+    try:
+        return fn(*args)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"{what}: {type(exc).__name__}: {exc}")
+        return None
+
+
+@v1.delete("/rooms/{room_id}", response_model=RoomDeleted, tags=["rooms"],
+           responses={400: {"description": "confirmation missing or different"},
+                      403: {"description": "neither the owner nor an operator"},
+                      404: {"description": "no such room"},
+                      409: {"description": "somebody is connected to the room"}})
+async def delete_room(room_id: str, request: Request,
+                      body: Optional[RoomDeleteIn] = Body(default=None)
+                      ) -> RoomDeleted:
+    """Delete a room — its record, members, invitations, group grants, pending
+    uploads, op-log, working copy and container — and **keep its assets**.
+
+    Who: the room's **owner**, or the node's **operator**. Anybody else is 403,
+    a room admin included. The body must repeat the id: `{"confirm": "<id>"}`
+    (400 otherwise). A room nobody declared and with no container is 404 —
+    a working copy in memory does not make it one, and none is opened here.
+    A room with somebody connected is 409: their session would write the
+    document back the moment they leave; they leave first.
+
+    What is kept, and said in the answer: the assets (an asset no other room
+    holds becomes an orphan, `GET /v1/admin/assets/orphans`), a container
+    another room still names, and the `.blend` blobs (their register goes).
+    """
+    from . import access as access_module
+    from . import asset_homes
+    from . import uploads
+    from .rooms import now_iso
+
+    principal = authenticator.require_token(request)
+    dev_mode = bool(principal.get("em_dev_mode"))
+    orcid = None if dev_mode else _ws._identity(principal)
+    registry = rooms()
+    descriptor = registry.descriptor(room_id)
+    live = registry.peek(room_id)
+    try:
+        there = _room_is_there(room_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=503,
+            detail=f"cannot tell whether the room {room_id!r} exists right now: "
+                   f"its store will not read ({type(exc).__name__})") from None
+    if not there:
+        # a ghost (an empty copy a read built, before 16 Oct): not a room, and
+        # not left behind either, if nobody is in it and it holds nothing
+        if live is not None and not live.sockets and not live.unsaved:
+            registry.forget(room_id)
+        raise HTTPException(status_code=404, detail=f"no room {room_id!r} here")
+
+    # ── who: the owner, or the node's operator ───────────────────────────────
+    acl = load_acl(room_id)
+    owner = acl.owner
+    if not owner:
+        document = (live.document if live is not None
+                    else snapshot_store().get(descriptor.primary_ref))
+        owner = access_module.owner_from_document(document)
+    is_owner = dev_mode or bool(
+        orcid and owner and access_module._norm(orcid) == access_module._norm(owner))
+    is_operator = ops.is_operator(principal)
+    if not (is_owner or is_operator):
+        raise HTTPException(
+            status_code=403,
+            detail=("deleting a room is for its owner or for the node's "
+                    "operator — a room admin hands out roles, but whether the "
+                    "room exists is not theirs to decide. Archiving "
+                    "(POST …/archive) is the reversible gesture."))
+    confirm = (body.confirm if body is not None else "") or ""
+    if confirm != room_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"confirm the deletion by naming the room: send "
+                    f'{{"confirm": "{room_id}"}}. A room is deleted with its '
+                    f"members, invitations and history; its assets stay."))
+    if live is not None and live.sockets:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"{len(live.sockets)} connection(s) are open on this room: "
+                    f"a session that leaves after the deletion would write the "
+                    f"document back. Leave the room (all of its sessions), then "
+                    f"delete it."))
+
+    at = now_iso()
+    errors: List[str] = []
+    removed: Dict[str, Any] = {}
+
+    # ── 1 · the working copy: stopped, never saved ───────────────────────────
+    live_document = None
+    if live is not None:
+        async with live.lock:
+            if live.sockets:                 # somebody came in meanwhile
+                raise HTTPException(status_code=409,
+                                    detail="somebody entered the room meanwhile: "
+                                           "they leave first")
+            _ws.KEEPER.forget(room_id)
+            _ws.WATCHER.forget(room_id)
+            live_document = live.document
+            live.unsaved = 0                  # nothing for a late timer to keep
+            registry.forget(room_id)
+    DIGEST_INDEX.forget(room_id)
+    removed["working_copy"] = live is not None
+
+    # ── 2 · what the room holds, and who else holds it — asked BEFORE ────────
+    refs = list(descriptor.container_refs or [room_id])
+    held: set = set(_digests_in(live_document))
+    for ref in refs:
+        held |= _digests_in(_delete_piece(errors, f"read container {ref}",
+                                          snapshot_store().get, ref))
+    homes = asset_homes.ASSET_HOMES
+    try:
+        for key in homes.digests():
+            if room_id in homes.rooms_of(key):
+                held.add(f"sha256:{key}")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"asset homes: {type(exc).__name__}: {exc}")
+    cited_elsewhere = _cited_in_rooms(exclude=room_id)
+    corpus = _corpus_digests()
+    known = registry.containers()
+
+    # ── 3 · the room's own state, store by store ─────────────────────────────
+    others = [d for d in registry.declared() if d.room_id != room_id]
+    gone, kept = [], []
+    for ref in refs:
+        named_elsewhere = any(ref in d.container_refs for d in others) or (
+            ref != room_id and (registry.rooms_store.get(ref)
+                                or _ws.ACL_STORE.get(ref)))
+        if named_elsewhere:
+            kept.append(ref)
+            continue
+        delete = getattr(snapshot_store(), "delete", None)
+        if delete is None:
+            errors.append(f"container {ref}: this snapshot store cannot delete")
+            continue
+        if _delete_piece(errors, f"container {ref}", delete, ref) is not None:
+            gone.append(ref)
+    removed["containers"] = gone
+    journal = oplog_module.journal_for(snapshot_store(), room_id)
+    removed["oplog"] = bool(journal is not None and journal.path.is_file())
+    if journal is not None:
+        _delete_piece(errors, "oplog", journal.forget)
+    removed["invites"] = len(_delete_piece(errors, "invites", invites().list,
+                                           room_id) or [])
+    for what, store in (("record", registry.rooms_store),
+                        ("acl", _ws.ACL_STORE), ("invite_store", INVITE_STORE)):
+        delete = getattr(store, "delete", None)
+        if delete is None:
+            errors.append(f"{what}: this store cannot delete")
+            continue
+        done = _delete_piece(errors, what, delete, room_id)
+        if what != "invite_store":
+            removed[what] = bool(done)
+    removed["members"] = len(acl.members)
+    removed["group_grants"] = len(acl.groups)
+    pending = _delete_piece(errors, "uploads", uploads.SESSIONS.for_room,
+                            room_id) or []
+    for upload_id in pending:
+        _delete_piece(errors, f"upload {upload_id}", uploads.SESSIONS.drop,
+                      upload_id)
+    removed["uploads"] = len(pending)
+    blend_records = _delete_piece(errors, "blend register",
+                                  BACKUPS.register.records, room_id) or []
+    delete = getattr(BACKUPS.register, "delete", None)
+    if blend_records and delete is not None:
+        _delete_piece(errors, "blend register", delete, room_id)
+    removed["blend_records"] = len(blend_records)
+
+    # ── 4 · the assets: kept, and the ones nobody holds now are orphans ──────
+    out_assets: List[RoomDeletedAsset] = []
+    orphaned: List[str] = []
+    for ref in sorted(held):
+        try:
+            meta = ASSET_STORE.head(ref)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"asset {ref}: {type(exc).__name__}: {exc}")
+            meta = None
+        holders = set(cited_elsewhere.get(ref, set()))
+        try:
+            recorded = homes.rooms_of(ref)
+        except Exception:  # noqa: BLE001
+            recorded = []
+        holders |= {r for r in recorded
+                    if r != room_id and _room_is_there(r, known)}
+        in_corpus = corpus is None or ref in corpus
+        orphan = bool(meta is not None and not holders and not in_corpus)
+        mark = None
+        if orphan:
+            mark = {"orphaned_at": at, "origin_room": room_id,
+                    "deleted_by": orcid,
+                    "media_type": str(meta.get("media_type") or ""),
+                    "size": int(meta.get("size") or 0)}
+        if mark is not None or room_id in recorded:
+            successor = next((r for r in recorded if r in holders), None)
+            _delete_piece(errors, f"asset home {ref}",
+                          lambda: homes.release_room(ref, room_id, orphan=mark,
+                                                     successor=successor,
+                                                     by=orcid, at=at))
+        if orphan:
+            orphaned.append(ref)
+        out_assets.append(RoomDeletedAsset(
+            ref=ref, orphan=orphan, still_held_by=sorted(holders),
+            in_corpus=bool(corpus is not None and ref in corpus),
+            present=meta is not None))
+
+    import logging
+    logging.getLogger("stratigraph.rooms").info(
+        "room %s deleted by %s (%s): %d asset(s) kept, %d orphaned%s",
+             room_id, orcid or "dev", "owner" if is_owner else "operator",
+             len(out_assets), len(orphaned),
+             f"; errors: {errors}" if errors else "")
+    return RoomDeleted(
+        room_id=room_id, deleted_at=at, deleted_by=orcid,
+        deleted_as="owner" if is_owner else "operator",
+        complete=not errors, errors=errors, removed=removed,
+        containers_kept=kept, assets=out_assets, orphaned=orphaned,
+        blend_blobs_kept=sorted({str(r.get("sha256")) for r in blend_records
+                                 if r.get("sha256")}))
+
+
 
 # ── the invite link ──────────────────────────────────────────────────────────
 #
@@ -4703,8 +5036,98 @@ async def forget_asset(ref: str, request: Request) -> AssetForgotten:
                       "reversible, and it does not touch the bytes — and ask "
                       "again."))
     done = ASSET_STORE.delete(ref)
+    # …and its record goes with the bytes: the home, who uploaded it, and the
+    # orphan mark — so a deleted orphan leaves `GET /v1/admin/assets/orphans`
+    # (16 Oct 2026), and the same bytes uploaded again one day start afresh.
+    from . import asset_homes
+    try:
+        asset_homes.ASSET_HOMES.forget(ref)
+    except Exception:  # noqa: BLE001 — the bytes are gone; the record is a note
+        pass
     return AssetForgotten(ref=ref, removed=bool(done.get("removed")),
                           rooms=[], corpus=False)
+
+
+class OrphanAsset(BaseModel):
+    """An asset no room holds any more — kept in the store, waiting for a
+    person to delete it (`DELETE /v1/admin/assets/{ref}`) or for a room to
+    take it again (the same bytes uploaded: not stored twice, relinked)."""
+
+    ref: str
+    sha256: str
+    media_type: str = ""
+    size: int = 0
+    #: when the LAST room holding it was deleted
+    orphaned_at: str
+    #: …and which room that was
+    origin_room: str
+    #: who deleted that room (None in dev mode)
+    deleted_by: Optional[str] = None
+
+
+@v1.get("/admin/assets/orphans", response_model=List[OrphanAsset], tags=["node"])
+async def list_orphan_assets(
+        request: Request,
+        kind: Optional[str] = Query(
+            default=None, alias="type",
+            description="media type, exact (`model/gltf-binary`) or its family "
+                        "(`model`, `image`)"),
+        since: Optional[str] = Query(
+            default=None, description="orphaned at or after (ISO date or time)"),
+        until: Optional[str] = Query(
+            default=None, description="orphaned at or before (ISO date or "
+                                      "time; a date includes its whole day)"),
+) -> List[OrphanAsset]:
+    """The assets the deletion of a room left with no room — newest first.
+
+    Read from the orphan marks `DELETE /v1/rooms/{id}` writes, and CHECKED
+    against today at every call: an asset a room's graph cites again, one
+    uploaded into a room again, one the resident corpus documents, or one the
+    store no longer holds is not listed. Bytes that were orphans before room
+    deletion existed (stored, cited by nobody, no mark) are in
+    `GET /v1/admin/storage` → `orphan_assets`, without a date or an origin."""
+    from . import asset_homes
+
+    _require_operator(request)
+    marks = asset_homes.ASSET_HOMES.orphans()
+    if not marks:
+        return []
+    cited = _cited_in_rooms()
+    corpus = _corpus_digests()
+    if corpus is None:
+        raise HTTPException(
+            status_code=503,
+            detail="the resident corpus will not read, and an asset it might "
+                   "document cannot be called an orphan: ask again later")
+    known = rooms().containers()
+    wanted = (kind or "").strip().lower().rstrip("/")
+    out: List[OrphanAsset] = []
+    for key, mark in marks.items():
+        ref = f"sha256:{key}"
+        if ref in cited or ref in corpus:
+            continue
+        if any(_room_is_there(r, known)
+               for r in asset_homes.ASSET_HOMES.rooms_of(key)):
+            continue
+        meta = ASSET_STORE.head(ref)
+        if meta is None:
+            continue
+        media = str(meta.get("media_type") or mark.get("media_type") or "")
+        if wanted and not (media.lower() == wanted
+                           or media.lower().startswith(wanted + "/")):
+            continue
+        when = str(mark.get("orphaned_at") or "")
+        if since and when < since:
+            continue
+        if until and when[:len(until)] > until:
+            continue
+        out.append(OrphanAsset(
+            ref=ref, sha256=key, media_type=media,
+            size=int(meta.get("size") or mark.get("size") or 0),
+            orphaned_at=when, origin_room=str(mark.get("origin_room") or ""),
+            deleted_by=mark.get("deleted_by")))
+    out.sort(key=lambda o: (o.orphaned_at, o.ref), reverse=True)
+    return out
 
 
 def _room_ids() -> set:

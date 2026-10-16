@@ -271,6 +271,10 @@ class InMemoryBackupRegister:
     def put(self, room_id: str, records: List[Dict[str, Any]]) -> None:
         self._by_room[room_id] = [dict(r) for r in records]
 
+    def delete(self, room_id: str) -> bool:
+        """The room's records (never the blobs): `DELETE /v1/rooms/{id}`."""
+        return self._by_room.pop(room_id, None) is not None
+
     def rooms(self) -> List[str]:
         return sorted(self._by_room)
 
@@ -304,6 +308,13 @@ class DirectoryBackupRegister:
         tmp = path.with_suffix(".part")
         tmp.write_text(json.dumps(records, ensure_ascii=False, indent=1), "utf-8")
         tmp.replace(path)
+
+    def delete(self, room_id: str) -> bool:
+        """The room's records (never the blobs): `DELETE /v1/rooms/{id}`."""
+        path = self._path(room_id)
+        existed = path.is_file()
+        path.unlink(missing_ok=True)
+        return existed
 
     def rooms(self) -> List[str]:
         return sorted(p.stem for p in self.root.glob("*.json"))

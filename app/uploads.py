@@ -37,7 +37,7 @@ import re
 import tempfile
 import threading
 import uuid
-from typing import Any, AsyncIterator, Dict, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 #: `sha256:<hex>` or `<hex>` → `<hex>`; anything else is not a digest
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -166,6 +166,19 @@ class UploadSessions:
         part = self.part(upload_id)
         record["offset"] = part.stat().st_size if part.is_file() else 0
         return record
+
+    def for_room(self, room_id: str) -> List[str]:
+        """The upload ids opened in this room — what `DELETE /v1/rooms/{id}`
+        drops with it (half-sent files are the room's; nothing is stored yet)."""
+        found = []
+        for meta in self.root.glob("*.json"):
+            try:
+                record = json.loads(meta.read_text("utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(record, dict) and record.get("room_id") == room_id:
+                found.append(str(record.get("upload_id") or meta.stem))
+        return sorted(found)
 
     def drop(self, upload_id: str) -> None:
         if not _UPLOAD_ID.match(str(upload_id or "")):

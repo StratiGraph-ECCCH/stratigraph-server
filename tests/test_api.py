@@ -333,7 +333,18 @@ def test_the_openapi_schema_is_served():
                       # DELETE abandons those partial bytes — never an asset,
                       # never anything somebody could have cited.
                       ("PATCH", "/v1/rooms/{room_id}/uploads/{upload_id}"),
-                      ("DELETE", "/v1/rooms/{room_id}/uploads/{upload_id}")}, \
+                      ("DELETE", "/v1/rooms/{room_id}/uploads/{upload_id}"),
+                      # ── AND DELETING A ROOM (E.D., 16 Oct 2026) ───────────
+                      #
+                      # The «separate act with a separate name and a
+                      # confirmation» `RoomRegistry.archive` promised: the
+                      # owner or the node's operator, the id repeated in the
+                      # body, nobody connected. It takes away the WORKSPACE
+                      # (record, ACL, invitations, op-log, container) and never
+                      # the bytes: every asset stays in the store, and the ones
+                      # no other room holds are listed as orphans
+                      # (`tests/test_cancellare_una_stanza.py`).
+                      ("DELETE", "/v1/rooms/{room_id}")}, \
         f"unexpected write endpoints: {sorted(writes)}"
     assert not [p for p in paths if p.endswith("/study") or p.endswith("/graph")], \
         "no route may take a study away: the deletions are tombstones"

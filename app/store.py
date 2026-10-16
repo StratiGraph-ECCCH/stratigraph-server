@@ -73,6 +73,13 @@ class InMemorySnapshotStore:
         with self._lock:
             return sorted(self._data)
 
+    def delete(self, room_id: str) -> bool:
+        """Forget this room's entry (`DELETE /v1/rooms/{id}`). → whether there
+        was one. Optional beside the interface's methods: a store without it is
+        reported by the deletion as «not removable here», not guessed at."""
+        with self._lock:
+            return self._data.pop(room_id, None) is not None
+
 
 class DirectorySnapshotStore:
     """A directory of `<room>.em.json` files.
@@ -106,6 +113,14 @@ class DirectorySnapshotStore:
         tmp.write_text(json.dumps(document, ensure_ascii=False, indent=1),
                        encoding="utf-8")
         tmp.replace(path)     # atomic: a reader never sees half a snapshot
+
+    def delete(self, room_id: str) -> bool:
+        """Remove this room's file (`DELETE /v1/rooms/{id}`). → whether there
+        was one."""
+        path = self._path(room_id)
+        existed = path.is_file()
+        path.unlink(missing_ok=True)
+        return existed
 
     def rooms(self) -> list[str]:
         """Which rooms this directory holds. Same method the memory store has —
@@ -222,6 +237,21 @@ class PostgresSnapshotStore:
         with self._pool.connection() as conn:
             return [row[0] for row in conn.execute(sql).fetchall()]
 
+    def delete(self, room_id: str) -> int:
+        """`DELETE /v1/rooms/{id}`: EVERY revision of this container goes.
+        → how many rows. The history is the container's, and a deleted room
+        that left its revisions would be a room any later one of the same
+        name reopens. Under the same advisory lock `put` takes, so a save in
+        flight cannot write revision n+1 between the count and the delete."""
+        with self._pool.connection() as conn:
+            conn.execute("SELECT pg_advisory_xact_lock(%s)",
+                         (self._docs.lock_key(room_id),))
+            cur = conn.execute(
+                f"DELETE FROM {self._docs.TABLE} WHERE project_id = %s",
+                (room_id,))
+            conn.commit()
+            return int(cur.rowcount or 0)
+
     # ── quello che la tabella compra in più ──────────────────────────────────
     #
     # Non fa parte di `SnapshotStore`: sono letture sulla stessa tabella, e
@@ -321,6 +351,13 @@ class InMemoryRoomStore:
         with self._lock:
             return sorted(self._data)
 
+    def delete(self, room_id: str) -> bool:
+        """Forget this room's entry (`DELETE /v1/rooms/{id}`). → whether there
+        was one. Optional beside the interface's methods: a store without it is
+        reported by the deletion as «not removable here», not guessed at."""
+        with self._lock:
+            return self._data.pop(room_id, None) is not None
+
 
 class DirectoryRoomStore:
     """A directory of `<room>.room.json` files, written atomically.
@@ -352,6 +389,14 @@ class DirectoryRoomStore:
         tmp.write_text(json.dumps(record, ensure_ascii=False, indent=1,
                                   sort_keys=True), encoding="utf-8")
         tmp.replace(path)
+
+    def delete(self, room_id: str) -> bool:
+        """Remove this room's file (`DELETE /v1/rooms/{id}`). → whether there
+        was one."""
+        path = self._path(room_id)
+        existed = path.is_file()
+        path.unlink(missing_ok=True)
+        return existed
 
     def ids(self) -> List[str]:
         return sorted(p.name[: -len(".room.json")]
