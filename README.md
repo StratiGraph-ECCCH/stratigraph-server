@@ -71,21 +71,102 @@ Rooms are **sticky**: one instance owns a room. Several replicas would need the
 op-log outside the process (a Redis stream, or the store) — the seam is written
 down in `app/rooms.py` and deliberately not implemented.
 
-## Endpoints (P0)
+## Endpoints
 
-| endpoint | what it does | needs |
+Every HTTP operation this build serves, grouped as `/docs` groups them, with the
+one-line summary each route carries in OpenAPI. `token` says whether the route
+needs a bearer token. The live, clickable list is `GET /docs` (at
+`https://em.localhost:8443/em/docs` on the dev stack); a prose walk-through of
+the room's two doors — the socket and REST — is
+[`docs/REST-API.md`](docs/REST-API.md). The WebSocket of a room,
+`/v1/rooms/{room_id}/ws`, is not in the table because OpenAPI does not describe
+sockets.
+
+`tests/test_la_documentazione_dice_il_vero.py` fails if this table and OpenAPI
+disagree, in either direction. (Until 17 October 2026 the table listed the P0
+read subset — 8 operations of 77 — and the sentence under it said 49.)
+
+Two operations depend on optional libraries: `POST /v1/export-ttl` needs
+`rdflib`, `POST /v1/reproject` needs `pyproj`. `GET /v1/health` says in
+`capabilities` whether this build has them, so a client never has to discover a
+501 by trying.
+
+| endpoint | what it does | token |
 |---|---|---|
-| `GET /v1/health` | liveness, version, **and `capabilities`** — which optional ops this build can actually perform, so a client never has to discover a 501 by trying | — |
-| `POST /v1/validate` | header/format conformance + stats (`api.validate`); load warnings travel in the response, not into a log the caller cannot read | — |
-| `POST /v1/export-ttl` | em.json → Turtle (`api.project_ttl`), `text/turtle` with the same filename the bridge uses | `rdflib` |
-| `POST /v1/reproject` | EPSG → EPSG (`api.reproject_many`); `{x, y, …}` or `{points: [[x, y], …]}` — one transformer per batch, capped at 512 points | `pyproj` |
-| `GET/POST /v1/resolve-authority` | ranked offline authority candidates; both verbs, like the bridge | authority snapshots |
-| `GET /health` | **unversioned probe alias** — same payload as `/v1/health` | — |
-
-**This table is the P0 read subset, not the surface.** The build now serves 49
-operations across rooms, access, assets, node administration, corpus, IIIF and
-photogrammetry — `GET /docs` is the live list, and it is the one that cannot go
-stale.
+| `GET /v1/auth-config` | How to sign in to this node: realm, client and endpoints *(meta)* | — |
+| `GET /v1/node` | What this node offers: its services and where they live *(meta)* | — |
+| `GET /v1/health` | Liveness, versions and what this node can do *(meta)* | — |
+| `GET /v1/whoami` | Who this token says you are *(meta)* | yes |
+| `POST /v1/health/reach` | Knock now on every dependency, and refresh the health *(meta)* | yes |
+| `GET /health` | Unversioned probe alias — same payload as /v1/health *(meta)* | — |
+| `GET /open` | The web half of an «Open in…» link (an HTML page) *(rooms)* | — |
+| `POST /v1/handoff/parse` | Read an «Open in…» link: which server, which room *(rooms)* | — |
+| `GET /v1/rooms` | The rooms you have a role in *(rooms)* | yes |
+| `POST /v1/rooms` | Create a room *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}` | One room: its title, its containers, its state *(rooms)* | yes |
+| `DELETE /v1/rooms/{room_id}` | Delete a room (its assets stay, as orphans) *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/who` | Who is in the room now, and who wrote recently *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/waiting` | What waits for a signature: fields a model composed, not yet validated *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/statistics` | What the room holds: nodes, edges, epochs, gaps *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/operators` | Who has written in this room *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/changes` | What changed since an instant — counted, not replayed *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/document` | The room's document now, with the cursor to resume from *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/ops` | The operations that arrived after a cursor (the REST replay) *(rooms)* | yes |
+| `POST /v1/rooms/{room_id}/ops` | Write graph operations into a room, over HTTP *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/chat` | What was said in the room, in order *(rooms)* | yes |
+| `POST /v1/rooms/{room_id}/archive` | Archive a room, or bring it back *(rooms)* | yes |
+| `POST /v1/rooms/{room_id}/invites` | Create an invitation link to a room *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/invites` | The invitation links of a room *(rooms)* | yes |
+| `DELETE /v1/rooms/{room_id}/invites/{token_id}` | Revoke an invitation link *(rooms)* | yes |
+| `POST /v1/join` | Accept an invitation link and enter the room *(rooms)* | yes |
+| `GET /v1/rooms/{room_id}/open` | How to open this room in a tool, without typing anything *(rooms)* | yes |
+| `PUT /v1/rooms/{room_id}/asset` | Store a file in a room, addressed by its content *(assets)* | yes |
+| `POST /v1/rooms/{room_id}/asset-reference` | On a personal node, put a project's file in the room by reference *(assets)* | yes |
+| `GET /v1/rooms/{room_id}/asset-home/{ref}` | Where a file lives, which rooms cite it, and what you may do *(assets)* | yes |
+| `POST /v1/rooms/{room_id}/asset-home/{ref}` | Make this room the file's only home (no bytes travel) *(assets)* | yes |
+| `POST /v1/rooms/{room_id}/uploads` | Start a resumable upload of a large file *(assets)* | yes |
+| `GET, HEAD /v1/rooms/{room_id}/uploads/{upload_id}` | How far a resumable upload has got *(assets)* | yes |
+| `PATCH /v1/rooms/{room_id}/uploads/{upload_id}` | Send the next piece of a resumable upload *(assets)* | yes |
+| `DELETE /v1/rooms/{room_id}/uploads/{upload_id}` | Abandon a resumable upload *(assets)* | yes |
+| `GET, HEAD /v1/rooms/{room_id}/asset/{ref}` | Download an asset of a room (Range requests welcome) *(assets)* | yes |
+| `PUT /v1/rooms/{room_id}/blend-backup` | Keep a snapshot of a working Blender file *(assets)* | yes |
+| `GET /v1/rooms/{room_id}/blend-backups` | Your Blender snapshots in this room, newest first *(assets)* | yes |
+| `GET /v1/rooms/{room_id}/blend-backup/{sha256}` | One Blender snapshot back, byte for byte *(assets)* | yes |
+| `GET /v1/rooms/{room_id}/blend-packages` | The Blender scene packages of a room, newest first *(assets)* | yes |
+| `GET /v1/rooms/{room_id}/blend-package/{sha256}` | One Blender scene package, byte for byte *(assets)* | yes |
+| `GET /v1/rooms/{room_id}/members` | Who is in a room, and with which role *(access)* | yes |
+| `PUT /v1/rooms/{room_id}/members/{orcid}` | Give someone a role in a room, or hand the room to a new owner *(access)* | yes |
+| `DELETE /v1/rooms/{room_id}/members/{orcid}` | Take a person out of a room *(access)* | yes |
+| `PUT /v1/rooms/{room_id}/groups/{group_id}` | Give a team a role in a room *(access)* | yes |
+| `DELETE /v1/rooms/{room_id}/groups/{group_id}` | Take a team's role in a room away *(access)* | yes |
+| `GET /v1/rooms/{room_id}/study-access` | Who may see the study: visibility and embargo *(access)* | yes |
+| `PUT /v1/rooms/{room_id}/study-access` | Change who may see the study *(access)* | yes |
+| `GET /v1/groups` | Every group this node knows *(access)* | yes |
+| `PUT /v1/groups/{group_id}` | Create a group, or replace one you own *(access)* | yes |
+| `DELETE /v1/groups/{group_id}` | Delete a group *(access)* | yes |
+| `PUT /v1/groups/{group_id}/members/{orcid}` | Add a person to a group *(access)* | yes |
+| `DELETE /v1/groups/{group_id}/members/{orcid}` | Take a person out of a group *(access)* | yes |
+| `GET /v1/corpus` | The node's documentation corpus: the slice a study needs *(corpus)* | yes |
+| `GET /v1/corpus/neighbourhood` | What made a file, and what it went on to make *(corpus)* | yes |
+| `POST /v1/corpus/append` | One documentation act on the node's corpus *(corpus)* | yes |
+| `POST /v1/corpus/merge` | Fold a project's file corpus into the node's corpus *(corpus)* | yes |
+| `POST /v1/validate` | Check a document's format, and count what it holds *(graph)* | yes |
+| `POST /v1/export-ttl` | Export a graph as Linked Data (Turtle) *(graph)* | yes |
+| `POST /v1/reproject` | Move coordinates from one reference system to another *(geo)* | yes |
+| `GET /v1/resolve-authority` | Look a term up in an authority (a thesaurus, a gazetteer) *(authority)* | yes |
+| `POST /v1/resolve-authority` | Look several terms up in an authority at once *(authority)* | yes |
+| `GET /v1/iiif-authz` | May the caller of this image request have it? (asked by the image proxy) *(iiif)* | — |
+| `GET /v1/rooms/{room_id}/iiif/{target_id}/manifest` | The IIIF manifest of one item of a room *(iiif)* | — |
+| `POST /v1/photogrammetry` | Reconstruct a set of photographs into a placed 3D model *(photogrammetry)* | yes |
+| `GET /v1/photogrammetry/{job_id}` | How a photogrammetry job is going *(photogrammetry)* | yes |
+| `GET /v1/admin/whoami` | Am I an operator of this node? *(node)* | yes |
+| `GET /v1/admin/rooms` | Every room on this node (operators) *(node)* | yes |
+| `GET /v1/admin/storage` | What the node holds, and what does not line up (operators) *(node)* | yes |
+| `DELETE /v1/admin/assets/{ref}` | Remove an asset from the node (operators) *(node)* | yes |
+| `GET, HEAD /v1/admin/assets/{ref}` | Download any asset, through no room (operators) *(node)* | yes |
+| `GET /v1/admin/assets/orphans` | Assets a room's deletion left with no room (operators) *(node)* | yes |
+| `GET /v1/admin/health` | The node's services, and how they are doing (operators) *(node)* | yes |
+| `POST /v1/admin/rooms/{room_id}/archive` | Archive any room of the node (operators) *(node)* | yes |
 
 ### Versioning
 
