@@ -141,8 +141,9 @@ class DirectoryCorpusStore:
         tmp.replace(self.path)
 
 
-class MinioCorpusStore:
-    """The deployment implementation: one object in the room bucket.
+class S3CorpusStore:
+    """The deployment implementation: one object in the room bucket — on any
+    S3-compatible store (GetObject / PutObject and nothing else).
 
     The same client and the same bucket as the assets — the corpus is *about*
     those bytes, and giving it a second bucket would be a second thing to
@@ -165,8 +166,8 @@ class MinioCorpusStore:
             from minio import Minio  # type: ignore
         except ImportError as exc:   # pragma: no cover — depends on the build
             raise RuntimeError(
-                "the MinIO corpus store needs the `minio` client, which this "
-                "build does not have: install StratiGraph Server[s3] (or unset the MinIO "
+                "the S3 corpus store needs the `minio` client, which this "
+                "build does not have: install StratiGraph Server[s3] (or unset the S3 "
                 "environment and use EM_CORPUS_DIR)") from exc
         self.bucket = bucket
         self.endpoint = endpoint
@@ -198,14 +199,18 @@ class MinioCorpusStore:
                                len(blob), content_type="application/json")
 
 
+#: the old name, the same class
+MinioCorpusStore = S3CorpusStore
+
+
 def corpus_store_from_env(environ: Optional[Dict[str, str]] = None) -> CorpusStore:
     """The corpus store this process should use, chosen by configuration.
 
     Precedence, and each step answers "what did the operator ask for?":
 
-    1. **MinIO** when the asset store's settings are there — the corpus rides in
-       the same bucket as the bytes it describes (`assets._minio_settings`, so a
-       half-configured MinIO refuses to start there, once, rather than twice);
+    1. **S3** when the asset store's settings are there — the corpus rides in
+       the same bucket as the bytes it describes (`assets._s3_settings`, so a
+       half-configured store refuses to start there, once, rather than twice);
     2. `EM_CORPUS_DIR`, or `EM_SNAPSHOT_DIR` when that is not set — a local run
        keeps its corpus beside its snapshots without a second setting to
        remember;
@@ -213,14 +218,13 @@ def corpus_store_from_env(environ: Optional[Dict[str, str]] = None) -> CorpusSto
        by `/v1/health`.
     """
     env = environ if environ is not None else os.environ
-    from .assets import _minio_settings
+    from .assets import _s3_settings
 
-    minio = _minio_settings(env)
-    if minio:
-        return MinioCorpusStore(endpoint=minio["endpoint"],
-                                access_key=minio["access_key"],
-                                secret_key=minio["secret_key"],
-                                bucket=minio["bucket"], secure=minio["secure"])
+    s3 = _s3_settings(env)
+    if s3:
+        return S3CorpusStore(endpoint=s3["endpoint"], access_key=s3["access_key"],
+                             secret_key=s3["secret_key"], bucket=s3["bucket"],
+                             secure=s3["secure"])
     directory = env.get("EM_CORPUS_DIR") or env.get("EM_SNAPSHOT_DIR")
     if directory:
         return DirectoryCorpusStore(directory)
@@ -229,8 +233,8 @@ def corpus_store_from_env(environ: Optional[Dict[str, str]] = None) -> CorpusSto
 
 def describe(store: CorpusStore) -> str:
     """A word for `/v1/health`: where the documentation lives."""
-    if isinstance(store, MinioCorpusStore):
-        return f"minio ({store.endpoint}, bucket {store.bucket})"
+    if isinstance(store, S3CorpusStore):
+        return f"s3 ({store.endpoint}, bucket {store.bucket})"
     return {
         "InMemoryCorpusStore": "memory (not durable — dies with the process)",
         "DirectoryCorpusStore": "directory (local only — not for replicas)",

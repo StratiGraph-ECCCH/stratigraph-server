@@ -127,7 +127,9 @@ def probe_directory(path: str) -> Callable[[], str]:
     return go
 
 
-def probe_minio(store: Any) -> Callable[[], str]:
+def probe_s3(store: Any) -> Callable[[], str]:
+    """HeadBucket through the store's own client: standard S3, so it reaches
+    MinIO and RustFS (and any S3) the same way."""
     def go() -> str:
         client = getattr(store, "_client")
         bucket = getattr(store, "bucket")
@@ -135,6 +137,10 @@ def probe_minio(store: Any) -> Callable[[], str]:
             raise RuntimeError(f"bucket {bucket!r} is not there")
         return f"{getattr(store, 'endpoint', '?')} · bucket {bucket}"
     return go
+
+
+#: the old name, the same probe
+probe_minio = probe_s3
 
 
 def probe_postgres(store: Any) -> Callable[[], str]:

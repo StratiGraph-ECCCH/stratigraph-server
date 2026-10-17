@@ -74,15 +74,19 @@ def _implementazioni():
     interfaccia» significa qui. Un backend nuovo in `app/assets.py` entra da
     solo — è il cancello che varrà il giorno che arriva quello di PSNC.
     """
-    return [c for _n, c in inspect.getmembers(assets_module, inspect.isclass)
-            if c is not AssetStore and issubclass(c, AssetStore)]
+    # per IDENTITÀ, non per nome: `MinioAssetStore` è il vecchio nome di
+    # `S3AssetStore` (17 ottobre 2026) e `getmembers` vede la stessa classe due
+    # volte — un'implementazione, non due
+    trovate = [c for _n, c in inspect.getmembers(assets_module, inspect.isclass)
+               if c is not AssetStore and issubclass(c, AssetStore)]
+    return list(dict.fromkeys(trovate))
 
 
 def test_IL_PROTOCOLLO_TROVA_LE_SUE_IMPLEMENTAZIONI():
     nomi = sorted(c.__name__ for c in _implementazioni())
     # N2 (4 ottobre 2026): il quarto, lo store del nodo personale (per riferimento)
     assert nomi == ["DirectoryAssetStore", "InMemoryAssetStore",
-                    "MinioAssetStore", "ReferenceAssetStore"], nomi
+                    "ReferenceAssetStore", "S3AssetStore"], nomi
     #: …e tutti rispondono a tutti e quattro i verbi
     for classe in _implementazioni():
         for verbo in ("put", "get", "head", "delete"):

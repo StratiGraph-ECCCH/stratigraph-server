@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import pathlib
 import threading
@@ -336,12 +337,22 @@ class DirectoryAssetStore:
         return sorted(found)
 
 
-class MinioAssetStore:
+class S3AssetStore:
     """The deployment implementation: one bucket, one object per digest.
 
     **This is the production store**, not a development double. A local FCN and
     an institutional node are the same service with different addresses, so they
-    run the same class; `dev-stack/` only puts a MinIO next to it on a laptop.
+    run the same class; `dev-stack/` only puts an object store next to it on a
+    laptop.
+
+    **S3, not MinIO.** The service behind it is any S3-compatible store: MinIO
+    in the dev stack and in production today, RustFS in the trial stack
+    (`dev-stack/docker-compose.rustfs.yml`, measured on 17 October 2026 — the
+    smokes and the suite pass unchanged). `minio` survives only as the name of
+    the Python CLIENT, which speaks plain S3: every call below is a standard S3
+    operation (HeadBucket, CreateBucket, HeadObject, PutObject — multipart for
+    `put_file` —, GetObject with a Range, DeleteObject). Nothing here uses
+    MinIO's admin API, policies, notifications or console.
 
     The object KEY is the digest itself (`<hex>`, without the `sha256:` prefix —
     the prefix belongs to the reference, not to the bucket's namespace). That is
@@ -365,8 +376,9 @@ class MinioAssetStore:
             from minio import Minio  # type: ignore
         except ImportError as exc:   # pragma: no cover — depends on the build
             raise RuntimeError(
-                "the MinIO asset store needs the `minio` client, which this "
-                "build does not have: install StratiGraph Server[s3] (or unset the MinIO "
+                "the S3 asset store needs the `minio` client (an S3 client, "
+                "whatever the store behind it), which this build does not "
+                "have: install StratiGraph Server[s3] (or unset the S3 "
                 "environment and use EM_ASSET_DIR)") from exc
 
         self.bucket = bucket
@@ -397,7 +409,8 @@ class MinioAssetStore:
                 f"the asset bucket '{self.bucket}' is not usable at "
                 f"{self.endpoint}: {exc.code}. Either it does not exist and these "
                 f"credentials may not create it, or they may not read it — "
-                f"create the bucket in MinIO, or give the key access to it") from exc
+                f"create the bucket in the object store, or give the key access "
+                f"to it") from exc
         except Exception as exc:      # network, DNS, TLS: not an S3 answer at all
             raise RuntimeError(
                 f"the object store at {self.endpoint} did not answer: {exc}. "
@@ -469,7 +482,7 @@ class MinioAssetStore:
                 response.release_conn()
 
     def read_range(self, ref: str, start: int, length: int) -> Optional[bytes]:
-        """`GetObject` with `offset`/`length`, i.e. an S3 ranged GET: MinIO
+        """`GetObject` with `offset`/`length`, i.e. an S3 ranged GET: the store
         sends only these bytes, so a tile read from the end of a 200 MB `.3tz`
         costs the tile and not the archive."""
         from minio.error import S3Error  # type: ignore
@@ -545,43 +558,78 @@ class MinioAssetStore:
         return {"ref": ref, "removed": existed}
 
 
-#: The MinIO settings, in the two spellings that exist in the wild: the client's
-#: own names (`MINIO_*`, what the dev-stack and MinIO's own docs use) and the
-#: StratiGraph Server-prefixed ones the Ansible role writes. Read in this order, like
-#: `auth.py` reads the issuer — one setting, two names, and a precedence, rather
-#: than two settings that will one day disagree.
-_MINIO_KEYS = {
-    "endpoint": ("MINIO_ENDPOINT", "EM_ASSET_S3_ENDPOINT"),
-    "access_key": ("MINIO_ACCESS_KEY", "EM_ASSET_S3_ACCESS_KEY"),
-    "secret_key": ("MINIO_SECRET_KEY", "EM_ASSET_S3_SECRET_KEY"),
-    "bucket": ("MINIO_BUCKET", "EM_ASSET_S3_BUCKET"),
+#: The old name of the class, kept so that nothing that imported it breaks. It is
+#: the SAME class (`MinioAssetStore is S3AssetStore`), not a second store.
+MinioAssetStore = S3AssetStore
+
+
+#: The S3 settings, in the two spellings that exist in the wild, and NOW IN THIS
+#: ORDER: the neutral `EM_ASSET_S3_*` first — what the Ansible role writes, and a
+#: name that is true whatever store answers — and the old `MINIO_*` second, still
+#: read so that no deployment breaks, with a warning naming the new one. One
+#: setting, two names, and a precedence, like `auth.py` reads the issuer.
+#:
+#: The order used to be the other way round. Flipping it changes nothing that
+#: runs, and that was measured before flipping (17 October 2026): the dev stack
+#: sets only `MINIO_*`, the production template only `EM_ASSET_S3_*`, so no
+#: deployment sets both. No third spelling (`EM_S3_*`) was added: the neutral
+#: name already existed, and a third would be a third thing to keep aligned.
+_S3_KEYS = {
+    "endpoint": ("EM_ASSET_S3_ENDPOINT", "MINIO_ENDPOINT"),
+    "access_key": ("EM_ASSET_S3_ACCESS_KEY", "MINIO_ACCESS_KEY"),
+    "secret_key": ("EM_ASSET_S3_SECRET_KEY", "MINIO_SECRET_KEY"),
+    "bucket": ("EM_ASSET_S3_BUCKET", "MINIO_BUCKET"),
+    "secure": ("EM_ASSET_S3_SECURE", "MINIO_SECURE"),
 }
+_MINIO_KEYS = _S3_KEYS   # the old name of this table, for whoever imported it
+
+log = logging.getLogger("stratigraph.assets")
+_warned_old_names: set = set()
 
 
-def _minio_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
-    """The MinIO configuration, or None when there is none at all.
+def _setting(env: Dict[str, str], field: str) -> str:
+    """One setting, the neutral name first; the old one still works and says so
+    — ONCE per process and per name, because a warning at every request is a
+    log nobody reads."""
+    neutral, old = _S3_KEYS[field]
+    value = (env.get(neutral) or "").strip()
+    if value:
+        return value
+    value = (env.get(old) or "").strip()
+    if value and old not in _warned_old_names:
+        _warned_old_names.add(old)
+        log.warning("%s is the old name of %s: it is still read, and it will "
+                    "keep working — rename it when the deployment is next "
+                    "touched (the store behind it need not be MinIO)",
+                    old, neutral)
+    return value
+
+
+def _s3_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    """The S3 configuration, or None when there is none at all.
 
     Raises when it is HALF there. That is the whole point of this function: a
     deployment that believes it writes to the shared bucket and quietly writes
     to a local directory instead is a data-loss story, and it is silent until it
     is expensive — the same rule `auth.py` applies to a half-configured realm.
     """
-    found = {field: next((env[name].strip() for name in names
-                          if (env.get(name) or "").strip()), "")
-             for field, names in _MINIO_KEYS.items()}
+    found = {field: _setting(env, field)
+             for field in ("endpoint", "access_key", "secret_key", "bucket")}
     given = [field for field, value in found.items() if value]
     if not given:
         return None
     missing = [field for field, value in found.items() if not value]
     if missing:
         raise RuntimeError(
-            "the MinIO asset store is half configured: "
+            "the S3 asset store is half configured: "
             f"{', '.join(sorted(given))} given, {', '.join(sorted(missing))} "
             "missing. StratiGraph Server will not fall back to a local directory the "
             "operator did not ask for — set all four "
-            "(MINIO_ENDPOINT / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / "
+            "(EM_ASSET_S3_ENDPOINT / EM_ASSET_S3_ACCESS_KEY / "
+            "EM_ASSET_S3_SECRET_KEY / EM_ASSET_S3_BUCKET, or their old names "
+            "MINIO_ENDPOINT / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / "
             "MINIO_BUCKET) or none of them.")
-    secure_raw = (env.get("MINIO_SECURE") or "").strip().lower()
+    secure_raw = _setting(env, "secure").lower()
     if secure_raw:
         secure = secure_raw in ("1", "true", "yes", "on")
     else:
@@ -591,6 +639,10 @@ def _minio_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
         secure = not found["endpoint"].startswith("http://")
     found["secure"] = secure
     return found
+
+
+#: the old name, for the modules and scripts that imported it
+_minio_settings = _s3_settings
 
 
 class ReferenceAssetStore:
@@ -714,7 +766,7 @@ def asset_store_from_env(environ: Optional[Dict[str, str]] = None) -> AssetStore
     Precedence, and each step is a deliberate answer to "what did the operator
     actually ask for?":
 
-    1. **MinIO** when its settings are there — the deployment store, durable and
+    1. **S3** (MinIO, RustFS, any S3-compatible store) when its settings are there — the deployment store, durable and
        outside this process (rule #2). Half-configured **refuses to start**.
     2. `EM_ASSET_DIR` — a directory. Honest for one instance, wrong for replicas.
     3. nothing — in-memory, which dies with the process. Loudly wrong for a
@@ -727,12 +779,11 @@ def asset_store_from_env(environ: Optional[Dict[str, str]] = None) -> AssetStore
         fallback_dir = env.get("EM_ASSET_DIR") or os.path.join(
             env.get("EM_SNAPSHOT_DIR") or ".", "assets")
         return ReferenceAssetStore(env["EM_PERSONAL_ROOT"], DirectoryAssetStore(fallback_dir))
-    minio = _minio_settings(env)
-    if minio:
-        return MinioAssetStore(endpoint=minio["endpoint"],
-                               access_key=minio["access_key"],
-                               secret_key=minio["secret_key"],
-                               bucket=minio["bucket"], secure=minio["secure"])
+    s3 = _s3_settings(env)
+    if s3:
+        return S3AssetStore(endpoint=s3["endpoint"], access_key=s3["access_key"],
+                            secret_key=s3["secret_key"], bucket=s3["bucket"],
+                            secure=s3["secure"])
     directory = env.get("EM_ASSET_DIR")
     if directory:
         return DirectoryAssetStore(directory)
@@ -760,10 +811,12 @@ def asset_ref_valid(ref: str) -> bool:
 
 
 def describe(store: AssetStore) -> str:
-    if isinstance(store, MinioAssetStore):
+    if isinstance(store, S3AssetStore):
         # the bucket and the host, never the key: `/v1/health` is public enough
-        # that a credential printed there is a credential in a screenshot
-        return f"minio ({store.endpoint}, bucket {store.bucket})"
+        # that a credential printed there is a credential in a screenshot.
+        # `s3`, not `minio`: the node cannot tell which S3 answers, and the
+        # node console already reads either word (`storage.js`).
+        return f"s3 ({store.endpoint}, bucket {store.bucket})"
     return {
         "InMemoryAssetStore": "memory (not durable — dies with the process)",
         "DirectoryAssetStore": "directory (local only — not for replicas)",

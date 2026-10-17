@@ -1012,7 +1012,7 @@ def _probe_for(store: Any):
     if name.startswith("InMemory"):
         return None
     if hasattr(store, "_client") and hasattr(store, "bucket"):
-        return reach_module.probe_minio(store)
+        return reach_module.probe_s3(store)
     # Postgres PRIMA della directory: lo store dei documenti ha anche una
     # directory (`journal_root`, l'oplog), e sondare quella direbbe «raggiunto»
     # di una casa che non è dove stanno i documenti.

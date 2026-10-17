@@ -276,7 +276,10 @@ def _probe_minio(store: Any) -> Check:
                             "configured) — see /health for which store is in use")
     target = _host_of(endpoint)
     asked = endpoint.rstrip("/") + "/minio/health/live"
-    console = _console("EM_MINIO_CONSOLE_URL")
+    # the neutral name first, the old one still read (`assets._setting` warns
+    # about the old store names; this one is a browser link, and a missing
+    # link is the worst it can cost)
+    console = _console("EM_ASSET_S3_CONSOLE_URL", "EM_MINIO_CONSOLE_URL")
     status, _, error = _fetch(asked)
     if error:
         return Check(name="minio", state=UNREACHABLE, target=target,

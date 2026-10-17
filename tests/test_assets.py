@@ -170,17 +170,19 @@ def test_4_the_asset_module_adds_no_logic():
 
 def test_4b_the_production_store_is_named_and_real():
     source = (_REPO / "app" / "assets.py").read_text(encoding="utf-8")
-    assert "class MinioAssetStore" in source, "the deployment target is named"
+    assert "class S3AssetStore" in source, "the deployment target is named"
     for method in ("def put", "def get", "def head"):
         assert method in source
     # it is the same class the deployment runs — not a dev double beside it
-    assert "class MinioAssetStore" in source and "moto" not in source
+    assert "class S3AssetStore" in source and "moto" not in source
+    # …and the old name is the SAME class, not a second store beside it
+    assert assets.MinioAssetStore is assets.S3AssetStore
 
 
 def test_4c_health_says_where_the_bytes_live(client):
     payload = client.get("/health").json()
     assert "asset_store" in payload
-    assert payload["asset_store"].startswith(("memory", "directory", "minio"))
+    assert payload["asset_store"].startswith(("memory", "directory", "s3"))
 
 
 # ── 5 · choosing a store, and refusing a half-chosen one ────────────────────
@@ -217,7 +219,7 @@ def test_5c_the_ansible_spelling_of_the_settings_is_understood():
     """Two names for one setting, with a precedence — not two settings that will
     one day disagree. The Ansible role writes `EM_ASSET_S3_*`; MinIO's own docs
     and the dev stack use `MINIO_*`."""
-    settings = assets._minio_settings({
+    settings = assets._s3_settings({
         "EM_ASSET_S3_ENDPOINT": "https://minio.example.org",
         "EM_ASSET_S3_ACCESS_KEY": "key",
         "EM_ASSET_S3_SECRET_KEY": "secret",
@@ -225,11 +227,43 @@ def test_5c_the_ansible_spelling_of_the_settings_is_understood():
     })
     assert settings["endpoint"] == "https://minio.example.org"
     assert settings["secure"] is True, "https means TLS without being told"
-    plain = assets._minio_settings({
+    plain = assets._s3_settings({
         "MINIO_ENDPOINT": "http://minio:9000", "MINIO_ACCESS_KEY": "k",
         "MINIO_SECRET_KEY": "s", "MINIO_BUCKET": "b"})
     assert plain["secure"] is False, "http means somebody chose plain HTTP"
-    assert assets._minio_settings({}) is None
+    assert assets._s3_settings({}) is None
+    assert assets._minio_settings is assets._s3_settings, "the old name still works"
+
+
+def test_5d_the_neutral_name_wins_and_the_old_one_still_works_and_says_so(caplog):
+    """RustFS, 17 October 2026: the store behind the settings need not be MinIO,
+    so the neutral `EM_ASSET_S3_*` is read FIRST. The old `MINIO_*` keeps every
+    deployment that uses it working — with a warning that names the new one."""
+    both = assets._s3_settings({
+        "EM_ASSET_S3_ENDPOINT": "http://rustfs:9000", "MINIO_ENDPOINT": "http://minio:9000",
+        "EM_ASSET_S3_ACCESS_KEY": "k", "EM_ASSET_S3_SECRET_KEY": "s",
+        "EM_ASSET_S3_BUCKET": "b"})
+    assert both["endpoint"] == "http://rustfs:9000"
+
+    assets._warned_old_names.clear()
+    with caplog.at_level("WARNING", logger="stratigraph.assets"):
+        old = assets._s3_settings({
+            "MINIO_ENDPOINT": "https://s3.example.org", "MINIO_ACCESS_KEY": "k",
+            "MINIO_SECRET_KEY": "s", "MINIO_BUCKET": "b"})
+    assert old["endpoint"] == "https://s3.example.org" and old["secure"] is True
+    said = caplog.text
+    assert "MINIO_ENDPOINT is the old name of EM_ASSET_S3_ENDPOINT" in said
+    assert "MINIO_BUCKET is the old name of EM_ASSET_S3_BUCKET" in said
+    assert "s3.example.org" not in said and " s " not in said, \
+        "the warning names the setting, never its value"
+
+
+def test_5e_secure_has_a_neutral_name_too():
+    base = {"EM_ASSET_S3_ENDPOINT": "https://s3.example.org", "EM_ASSET_S3_ACCESS_KEY": "k",
+            "EM_ASSET_S3_SECRET_KEY": "s", "EM_ASSET_S3_BUCKET": "b"}
+    assert assets._s3_settings({**base, "EM_ASSET_S3_SECURE": "false"})["secure"] is False
+    assert assets._s3_settings({**base, "MINIO_SECURE": "false"})["secure"] is False
+    assert assets._s3_settings(base)["secure"] is True
 
 
 # ── 6 · the IIIF manifest: read by VIEWERS, not only by programs ────────────

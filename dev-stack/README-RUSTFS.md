@@ -87,6 +87,7 @@ spostata (lo script della prova è `_datasets/_rustfs-2026-10-17/seed-prova.py`)
   `curl` dell'immagine di RustFS: CreateBucket di S3, nient'altro.
 - **La console:** sotto `/rustfs/console/`, sulla porta 9001 del container.
 - **Per l'em-server non cambia niente:** stesso client (`minio-py`), stesse
-  operazioni S3. Le variabili sono `EM_ASSET_S3_*`, l'altra grafia che il
-  server legge già (quella del ruolo Ansible): il file non dice «minio» di una
-  cosa che non lo è.
+  operazioni S3. Le variabili sono `EM_ASSET_S3_*`, il nome neutro che il
+  server legge per primo (ed è quello del ruolo Ansible); i vecchi `MINIO_*`
+  funzionano ancora, con un avviso al primo uso. `/health` dice
+  `s3 (<endpoint>, bucket <nome>)`, perché il nodo non sa quale S3 risponde.

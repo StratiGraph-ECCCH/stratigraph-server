@@ -150,7 +150,9 @@ def main() -> int:
     health = json.loads(body)
     ok("StratiGraph Server is enforcing tokens", health.get("auth") == "keycloak",
        str(health.get("auth")))
-    ok("the asset store is MinIO", "minio" in str(health.get("asset_store")),
+    # `s3 (…)` since 17 October 2026 (MinIO and RustFS are both S3 to the
+    # node); `minio (…)` is what an older server says
+    ok("the asset store is S3", str(health.get("asset_store")).startswith(("s3", "minio")),
        str(health.get("asset_store")))
 
     # ── 1 · a token from the dev realm ──────────────────────────────────────

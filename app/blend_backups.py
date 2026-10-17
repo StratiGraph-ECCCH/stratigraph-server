@@ -173,8 +173,9 @@ class DirectoryBackupBlobs:
         return {"sha256": str(sha256).lower(), "size": stat.st_size}
 
 
-class MinioBackupBlobs:
-    """MinIO, in its own **prefix** inside the node's bucket.
+class S3BackupBlobs:
+    """The node's S3 store (MinIO, RustFS…), in its own **prefix** inside the
+    node's bucket. HeadObject / PutObject / GetObject, nothing else.
 
     A prefix rather than a second bucket, and the reason is operational: a bucket
     is a thing somebody has to create, give a policy and remember; a prefix
@@ -192,7 +193,7 @@ class MinioBackupBlobs:
         except ImportError as exc:   # pragma: no cover — depends on the build
             raise RuntimeError(
                 "the backup store needs the `minio` client, which this build "
-                "does not have: install StratiGraph Server[s3], or unset the MinIO "
+                "does not have: install StratiGraph Server[s3], or unset the S3 "
                 "environment and use EM_BACKUP_DIR") from exc
         self.bucket = bucket
         self.endpoint = endpoint
@@ -247,6 +248,10 @@ class MinioBackupBlobs:
         except (S3Error, ValueError):
             return None
         return {"sha256": str(sha256).lower(), "size": int(stat.size or 0)}
+
+
+#: the old name, the same class
+MinioBackupBlobs = S3BackupBlobs
 
 
 # ── the register ─────────────────────────────────────────────────────────────
@@ -321,16 +326,16 @@ class DirectoryBackupRegister:
 
 
 def blobs_from_env(environ: Optional[Dict[str, str]] = None) -> BackupBlobs:
-    """MinIO when the node has one, a directory otherwise, memory as the last
+    """S3 when the node has one, a directory otherwise, memory as the last
     resort — the same ladder the asset store climbs, and for the same reason: a
     node must not silently store a person's safety copy in RAM."""
     env = dict(environ if environ is not None else os.environ)
-    from .assets import _minio_settings
+    from .assets import _s3_settings
 
-    settings = _minio_settings(env)
+    settings = _s3_settings(env)
     if settings:
         bucket = env.get("EM_BACKUP_BUCKET") or settings["bucket"]
-        return MinioBackupBlobs(settings["endpoint"], settings["access_key"],
+        return S3BackupBlobs(settings["endpoint"], settings["access_key"],
                                 settings["secret_key"], bucket,
                                 secure=settings["secure"])
     directory = env.get("EM_BACKUP_DIR")
@@ -356,7 +361,7 @@ def register_from_env(environ: Optional[Dict[str, str]] = None) -> BackupRegiste
 def describe(blobs: BackupBlobs, register: BackupRegister) -> str:
     where = getattr(blobs, "endpoint", None) or getattr(blobs, "root", None)
     kind = type(blobs).__name__.replace("BackupBlobs", "").lower() or "memory"
-    if isinstance(blobs, MinioBackupBlobs):
+    if isinstance(blobs, S3BackupBlobs):
         where = f"{blobs.endpoint}, bucket {blobs.bucket}, prefix {blobs.prefix}"
     note = ""
     if isinstance(register, DirectoryBackupRegister):
