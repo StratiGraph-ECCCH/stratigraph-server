@@ -147,12 +147,114 @@ async def _lifespan(_app: FastAPI):
     yield
 
 
+# ── WHAT THE /docs PAGE SAYS ABOUT THIS SERVER (17 Oct 2026) ─────────────────
+#
+# The summary said «read-only (P0)» long after the first write; the description
+# was this module's docstring, which describes P0. Both are for the people who
+# open `/docs` first — project partners (WP4, PSNC), archaeologists who build
+# with the API — so they are written for them, in words, and they say what the
+# server does today. `tests/test_la_documentazione_dice_il_vero.py` checks that
+# the page agrees with the code. The long docstrings of the routes stay as
+# they are: they ARE the extended documentation.
+API_SUMMARY = ("A shared workplace for stratigraphic studies: rooms where people "
+               "and tools work on the same graph, with its files, its "
+               "documentation, and services that check, export and place it.")
+
+API_DESCRIPTION = """\
+StratiGraph Server is the place where a study lives while people work on it. A
+study here is an Extended Matrix graph — stratigraphic units, the relations
+between them, their dating, the sources and the 3D models that document them —
+kept in the `em.json` container that EMStudio, EM-tools for Blender and
+StratiField all read and write.
+
+**Rooms.** Work happens in a *room*: one study, the people who may enter it, and
+their roles (owner, admin, editor, viewer). A room has two doors. Desktop and
+tablet clients stay inside through a live connection (the WebSocket
+`/v1/rooms/{room_id}/ws`, not listed on this page because OpenAPI does not
+describe sockets) and see every change as it happens. A phone in the field
+comes and goes, so it uses plain requests: it reads the document with
+`GET /v1/rooms/{room_id}/document`, writes with `POST /v1/rooms/{room_id}/ops`,
+and on its return asks `GET /v1/rooms/{room_id}/ops?after=<cursor>` for what
+arrived meanwhile. Same room, same operations, two doors.
+
+**Changes are operations.** Nobody uploads a whole new version: every edit is a
+small operation (add a unit, set a field, link two units), stamped with who
+made it and when. When two people change the same field the more recent
+stamp wins, and the answer says whose value lost and what it was — nothing is
+silently thrown away.
+
+**Files, access, documentation.** Photographs, 3D models and Blender files are
+*assets*, stored once and cited by the graph (`assets`). Who may enter which
+room, and which groups exist, is `access`. The node's documentation corpus —
+what made a file and what it went on to make — is `corpus`.
+
+**Services on the graph.** Checking a document against the data model, exporting
+it as Linked Data (as Turtle text), moving coordinates between reference
+systems, looking terms up in a thesaurus or gazetteer: `graph`, `geo`,
+`authority`. Images are served to IIIF viewers (`iiif`), and a set of
+photographs can be turned into a placed 3D model (`photogrammetry`).
+
+**Signing in.** Most routes need a bearer token from the node's identity service
+(Keycloak; people sign in with ORCID). On this page, press *Authorize* and
+paste a token: every *Execute* then carries it. A few routes are public on
+purpose — `/v1/health`, `/v1/node`, `/v1/auth-config`, the IIIF ones — and
+show no lock.
+
+**Further reading.** `docs/REST-API.md` in the repository walks through the two
+doors and the phone's cycle with real requests. Each route below opens to its
+long description, which is the reference for what it does and why.
+"""
+
+#: The sections of /docs, in the order a reader needs them: what this node is,
+#: then the rooms and what lives in them, then the services.
+OPENAPI_TAGS = [
+    {"name": "meta", "description": "This node: is it up, which versions it "
+     "speaks, what it can do, how to sign in, who you are."},
+    {"name": "rooms", "description": "Rooms, where a study is worked on: create "
+     "and list them, read their document and what changed, write operations, "
+     "invitations, and the questions a room answers about itself (who is "
+     "here, what is waiting, who wrote what)."},
+    {"name": "assets", "description": "The files a study cites — photographs, 3D "
+     "models, Blender files — stored once, addressed by their content, "
+     "uploaded in pieces when large."},
+    {"name": "access", "description": "Who may enter a room and with which role, "
+     "the groups of this node, and who may see a study (visibility, embargo)."},
+    {"name": "corpus", "description": "The node's documentation corpus: the "
+     "graphs of the files themselves — what made them, what they went on to "
+     "make."},
+    {"name": "graph", "description": "Services on a graph you send: check it "
+     "against the data model, export it as Linked Data."},
+    {"name": "geo", "description": "Move coordinates from one reference system to "
+     "another."},
+    {"name": "authority", "description": "Look terms up in an authority — a "
+     "thesaurus, a gazetteer — and get ranked candidates."},
+    {"name": "iiif", "description": "Images and documents for IIIF viewers: "
+     "manifests, and the check an image server asks before serving."},
+    {"name": "photogrammetry", "description": "Turn a set of photographs into a "
+     "3D model placed in the study, as a job you can follow."},
+    {"name": "node", "description": "For the people who run the node "
+     "(operators): every room, storage, orphan files, the health of the "
+     "services around the server."},
+]
+
 app = FastAPI(
     lifespan=_lifespan,
     title="StratiGraph Server",
     version=__version__,
-    summary="The s3Dgraphy access API over HTTP — read-only (P0), under /v1.",
-    description=__doc__,
+    summary=API_SUMMARY,
+    description=API_DESCRIPTION,
+    openapi_tags=OPENAPI_TAGS,
+    # «Try it out» BEHIND A PREFIX. The node is served at `/em` and Caddy strips
+    # it (`dev-stack/Caddyfile.dev`, `handle_path /em/*`), so the page FastAPI
+    # generated asked for `/openapi.json` and every Execute went to `/v1/…`:
+    # measured on 17 Oct, `/em/docs` 200 and the definition it pointed to 404.
+    # A RELATIVE server is resolved against the address of `openapi.json`
+    # itself, so the same file works at `/em/` behind the proxy and at `/` on
+    # a bare `uvicorn` — no setting to keep in step with the deployment.
+    servers=[{"url": ".", "description": "this node, wherever it is mounted"}],
+    # …and the pages are ours, so they can ask for `openapi.json` relatively
+    docs_url=None,
+    redoc_url=None,
 )
 
 # ── ONE translation of «that graph has another home now» ─────────────────────
@@ -479,7 +581,7 @@ class AuthConfig(BaseModel):
     native_client_id: str = ""
 
 
-@v1_public.get("/auth-config", response_model=AuthConfig, tags=["meta"])
+@v1_public.get("/auth-config", summary="How to sign in to this node: realm, client and endpoints", response_model=AuthConfig, tags=["meta"])
 def auth_config() -> AuthConfig:
     """How the browser signs in to THIS node. No secret, by construction.
 
@@ -683,7 +785,7 @@ _TOOLS = (
 )
 
 
-@v1_public.get("/node", response_model=NodeOffers, tags=["meta"])
+@v1_public.get("/node", summary="What this node offers: its services and where they live", response_model=NodeOffers, tags=["meta"])
 def node_offers() -> NodeOffers:
     """What this node offers, and where. Public, and reduced on purpose.
 
@@ -739,7 +841,7 @@ def _profile() -> str:
     return node_profile()
 
 
-@v1_public.get("/health", response_model=Health, tags=["meta"])
+@v1_public.get("/health", summary="Liveness, versions and what this node can do", response_model=Health, tags=["meta"])
 def health() -> Health:
     """Liveness, version, and what this build can do.
 
@@ -984,7 +1086,7 @@ class AssetInfo(BaseModel):
     home: Optional[str] = None
 
 
-@v1.put("/rooms/{room_id}/asset", response_model=AssetInfo, tags=["assets"])
+@v1.put("/rooms/{room_id}/asset", summary="Store a file in a room, addressed by its content", response_model=AssetInfo, tags=["assets"])
 async def put_asset(room_id: str, request: Request,
                     media_type: str = Query(default="application/octet-stream",
                                             description="the MIME type of the bytes"),
@@ -1057,7 +1159,7 @@ class AssetReferenceIn(BaseModel):
     media_type: str = "application/octet-stream"
 
 
-@v1.post("/rooms/{room_id}/asset-reference", response_model=AssetInfo, tags=["assets"])
+@v1.post("/rooms/{room_id}/asset-reference", summary="On a personal node, put a project's file in the room by reference", response_model=AssetInfo, tags=["assets"])
 async def put_asset_reference(room_id: str, body: AssetReferenceIn,
                               request: Request) -> AssetInfo:
     """N2 · «Upload to the room» on a PERSONAL node: the file of the project's
@@ -1253,7 +1355,7 @@ async def _asset_home_view(room_id: str, ref: str, request: Request
         can_move=can, why_not=why, moves=record.moves(digest))
 
 
-@v1.get("/rooms/{room_id}/asset-home/{ref}", response_model=AssetHomeOut,
+@v1.get("/rooms/{room_id}/asset-home/{ref}", summary="Where a file lives, which rooms cite it, and what you may do", response_model=AssetHomeOut,
         tags=["assets"])
 async def get_asset_home(room_id: str, ref: str, request: Request) -> AssetHomeOut:
     """Where this file lives, which rooms' graphs cite it, and whether you may
@@ -1266,7 +1368,7 @@ async def get_asset_home(room_id: str, ref: str, request: Request) -> AssetHomeO
     return await _asset_home_view(room_id, ref, request)
 
 
-@v1.post("/rooms/{room_id}/asset-home/{ref}", response_model=AssetHomeOut,
+@v1.post("/rooms/{room_id}/asset-home/{ref}", summary="Make this room the file's only home (no bytes travel)", response_model=AssetHomeOut,
          tags=["assets"])
 async def move_asset_home(room_id: str, ref: str, body: AssetHomeIn,
                           request: Request) -> AssetHomeOut:
@@ -1372,7 +1474,7 @@ def _session_for(room_id: str, upload_id: str, request: Request) -> Dict[str, An
     return record
 
 
-@v1.post("/rooms/{room_id}/uploads", response_model=UploadOut, status_code=201,
+@v1.post("/rooms/{room_id}/uploads", summary="Start a resumable upload of a large file", response_model=UploadOut, status_code=201,
          tags=["assets"])
 async def start_upload(room_id: str, body: UploadIn, request: Request) -> UploadOut:
     """Open a resumable upload. Nothing is stored until the last byte arrives
@@ -1393,7 +1495,7 @@ async def start_upload(room_id: str, body: UploadIn, request: Request) -> Upload
     return _upload_out(record)
 
 
-@v1.api_route("/rooms/{room_id}/uploads/{upload_id}", methods=["GET", "HEAD"],
+@v1.api_route("/rooms/{room_id}/uploads/{upload_id}", summary="How far a resumable upload has got", methods=["GET", "HEAD"],
               tags=["assets"], response_model=UploadOut)
 async def upload_status(room_id: str, upload_id: str, request: Request):
     """Where an upload is: `Upload-Offset` (and `Upload-Length`) in the headers
@@ -1407,7 +1509,7 @@ async def upload_status(room_id: str, upload_id: str, request: Request):
     return JSONResponse(_upload_out(record).model_dump(), headers=headers)
 
 
-@v1.patch("/rooms/{room_id}/uploads/{upload_id}", response_model=UploadOut,
+@v1.patch("/rooms/{room_id}/uploads/{upload_id}", summary="Send the next piece of a resumable upload", response_model=UploadOut,
           tags=["assets"])
 async def continue_upload(room_id: str, upload_id: str, request: Request):
     """Append one piece. `Upload-Offset` must be where the server IS.
@@ -1494,7 +1596,8 @@ async def continue_upload(room_id: str, upload_id: str, request: Request):
         uploads.SESSIONS.release(upload_id)
 
 
-@v1.delete("/rooms/{room_id}/uploads/{upload_id}", status_code=204,
+@v1.delete("/rooms/{room_id}/uploads/{upload_id}", summary="Abandon a resumable upload",
+        responses={204: {"description": "the upload is gone"}}, status_code=204,
            tags=["assets"])
 async def abandon_upload(room_id: str, upload_id: str, request: Request) -> Response:
     """Give up an upload: the partial bytes are deleted. Idempotent only for
@@ -1549,7 +1652,8 @@ def _byte_range(header: Optional[str], size: int):
     return (start, size - 1 if end is None else min(end, size - 1))
 
 
-@v1.api_route("/rooms/{room_id}/asset/{ref:path}", methods=["GET", "HEAD"],
+@v1.api_route("/rooms/{room_id}/asset/{ref:path}", summary="Download an asset of a room (Range requests welcome)",
+        responses={200: {"description": "the bytes, with license and author in the headers"}, 206: {"description": "a byte range"}, 403: {"description": "the graph does not let you have it (yet)"}}, methods=["GET", "HEAD"],
               tags=["assets"])
 async def get_asset(room_id: str, ref: str, request: Request) -> Response:
     """Fetch an asset by reference — if the graph says you may have it yet.
@@ -1740,7 +1844,7 @@ async def _backup_door(room_id: str, request: Request) -> tuple:
     return who, dev_mode
 
 
-@v1.put("/rooms/{room_id}/blend-backup", response_model=BlendBackupOut,
+@v1.put("/rooms/{room_id}/blend-backup", summary="Keep a snapshot of a working Blender file", response_model=BlendBackupOut,
         tags=["assets"])
 async def archive_blend(room_id: str, request: Request,
                         label: str = Query(default="", description="what this snapshot is"),
@@ -1774,7 +1878,7 @@ async def archive_blend(room_id: str, request: Request,
     return BlendBackupOut(**{k: v for k, v in record.items() if k != "room_id"})
 
 
-@v1.get("/rooms/{room_id}/blend-backups", response_model=List[BlendBackupOut],
+@v1.get("/rooms/{room_id}/blend-backups", summary="Your Blender snapshots in this room, newest first", response_model=List[BlendBackupOut],
         tags=["assets"])
 async def list_blend_backups(room_id: str, request: Request
                              ) -> List[BlendBackupOut]:
@@ -1792,7 +1896,8 @@ async def list_blend_backups(room_id: str, request: Request
                                        all_authors=dev_mode)]
 
 
-@v1.get("/rooms/{room_id}/blend-backup/{sha256}", tags=["assets"])
+@v1.get("/rooms/{room_id}/blend-backup/{sha256}", summary="One Blender snapshot back, byte for byte",
+        responses={200: {"description": "the exact bytes of the snapshot", "content": {"application/x-blender": {}}}}, tags=["assets"])
 async def restore_blend(room_id: str, sha256: str, request: Request) -> Response:
     """The exact bytes back. Verify them: the name IS the digest.
 
@@ -1822,7 +1927,7 @@ async def _package_door(room_id: str, request: Request) -> None:
                                    "the people working in it")
 
 
-@v1.get("/rooms/{room_id}/blend-packages", response_model=List[BlendBackupOut],
+@v1.get("/rooms/{room_id}/blend-packages", summary="The Blender scene packages of a room, newest first", response_model=List[BlendBackupOut],
         tags=["assets"])
 async def list_blend_packages(room_id: str, request: Request
                               ) -> List[BlendBackupOut]:
@@ -1834,7 +1939,8 @@ async def list_blend_packages(room_id: str, request: Request
             for record in BACKUPS.packages(room_id)]
 
 
-@v1.get("/rooms/{room_id}/blend-package/{sha256}", tags=["assets"])
+@v1.get("/rooms/{room_id}/blend-package/{sha256}", summary="One Blender scene package, byte for byte",
+        responses={200: {"description": "the exact bytes of the package"}}, tags=["assets"])
 async def fetch_blend_package(room_id: str, sha256: str, request: Request
                               ) -> Response:
     """The exact bytes of a scene package of this room. Verify them: the name IS
@@ -2289,7 +2395,7 @@ class CorpusAppendOut(BaseModel):
     by: Optional[str] = None
 
 
-@v1.get("/corpus", response_model=CorpusOut, tags=["corpus"], responses={
+@v1.get("/corpus", summary="The node's documentation corpus: the slice a study needs", response_model=CorpusOut, tags=["corpus"], responses={
     403: {"description": "the WHOLE register is a curation read; ask for a slice"},
 })
 def get_corpus(
@@ -2361,7 +2467,7 @@ class NeighbourhoodOut(BaseModel):
     version: str = ""
 
 
-@v1.get("/corpus/neighbourhood", response_model=NeighbourhoodOut, tags=["corpus"])
+@v1.get("/corpus/neighbourhood", summary="What made a file, and what it went on to make", response_model=NeighbourhoodOut, tags=["corpus"])
 def corpus_neighbourhood(
     request: Request,
     sha256: str = Query(description="the asset's digest — what a store browser "
@@ -2406,7 +2512,7 @@ def corpus_neighbourhood(
     return NeighbourhoodOut(sha256=digest, version=version, **answer)
 
 
-@v1.post("/corpus/append", response_model=CorpusAppendOut, tags=["corpus"])
+@v1.post("/corpus/append", summary="One documentation act on the node's corpus", response_model=CorpusAppendOut, tags=["corpus"])
 def append_corpus(request: Request,
                   act: CorpusAct = Body(...)) -> CorpusAppendOut:
     """Perform one documentation act on the resident corpus.
@@ -2453,7 +2559,7 @@ def append_corpus(request: Request,
     return CorpusAppendOut(act=act.act, report=report, version=version, by=who)
 
 
-@v1.post("/corpus/merge", response_model=CorpusAppendOut, tags=["corpus"])
+@v1.post("/corpus/merge", summary="Fold a project's file corpus into the node's corpus", response_model=CorpusAppendOut, tags=["corpus"])
 def merge_corpus_endpoint(request: Request,
                           graph: Dict[str, Any] = Body(...)) -> CorpusAppendOut:
     """Fold a project's **file** corpus into the resident one — the promote path.
@@ -2506,7 +2612,7 @@ def merge_corpus_endpoint(request: Request,
 # "who can reach this". `forward_auth` is one stanza in the file that already
 # decides what reaches what.
 
-@v1_public.get("/iiif-authz", tags=["iiif"], responses={
+@v1_public.get("/iiif-authz", summary="May the caller of this image request have it? (asked by the image proxy)", tags=["iiif"], responses={
     200: {"description": "let it through"},
     403: {"description": "under embargo for this caller"},
     503: {"description": "the rights cannot be read right now"},
@@ -2705,7 +2811,7 @@ IIIF_INTERNAL_BASE = IIIF_INTERNAL
 # On the router WITHOUT the blanket auth dependency, and doing the check itself:
 # a viewer cannot set a header, so the token has to be allowed in the query — and
 # a router-level dependency refuses the request before the handler can look.
-@v1_public.get("/rooms/{room_id}/iiif/{target_id}/manifest", tags=["iiif"])
+@v1_public.get("/rooms/{room_id}/iiif/{target_id}/manifest", summary="The IIIF manifest of one item of a room", tags=["iiif"])
 async def iiif_manifest(room_id: str, target_id: str, request: Request,
                         response: Response,
                         image_base: Optional[str] = Query(default=None),
@@ -2931,7 +3037,7 @@ class PhotogrammetryJob(BaseModel):
     result: Dict[str, Any] = Field(default_factory=dict)
 
 
-@v1.post("/photogrammetry", response_model=PhotogrammetryJob,
+@v1.post("/photogrammetry", summary="Reconstruct a set of photographs into a placed 3D model", response_model=PhotogrammetryJob,
          status_code=202, tags=["photogrammetry"])
 async def start_photogrammetry(request: Request,
                                ask: PhotogrammetryIn = Body(...)
@@ -3029,7 +3135,7 @@ async def start_photogrammetry(request: Request,
     return PhotogrammetryJob(**job.as_dict())
 
 
-@v1.get("/photogrammetry/{job_id}", response_model=PhotogrammetryJob,
+@v1.get("/photogrammetry/{job_id}", summary="How a photogrammetry job is going", response_model=PhotogrammetryJob,
         tags=["photogrammetry"])
 async def photogrammetry_job(job_id: str, request: Request) -> PhotogrammetryJob:
     """Where a reconstruction is now.
@@ -3061,7 +3167,7 @@ async def photogrammetry_job(job_id: str, request: Request) -> PhotogrammetryJob
 
 # ── validate ──────────────────────────────────────────────────────────────────
 
-@v1.post("/validate", tags=["graph"])
+@v1.post("/validate", summary="Check a document's format, and count what it holds", tags=["graph"])
 def validate(doc: Dict[str, Any] = Body(..., description="an em.json document")
              ) -> Dict[str, Any]:
     """Header/format conformance plus stats — `api.validate`.
@@ -3077,7 +3183,7 @@ def validate(doc: Dict[str, Any] = Body(..., description="an em.json document")
 
 # ── RDF / CIDOC projection ────────────────────────────────────────────────────
 
-@v1.post("/export-ttl", tags=["graph"],
+@v1.post("/export-ttl", summary="Export a graph as Linked Data (Turtle)", tags=["graph"],
          responses={200: {"content": {"text/turtle": {}}}})
 def export_ttl(doc: Dict[str, Any] = Body(..., description="an em.json document"),
                base_uri: Optional[str] = Query(None)) -> Response:
@@ -3114,7 +3220,7 @@ class ReprojectRequest(BaseModel):
     epsg_target: int = 4326
 
 
-@v1.post("/reproject", tags=["geo"])
+@v1.post("/reproject", summary="Move coordinates from one reference system to another", tags=["geo"])
 def reproject(req: ReprojectRequest) -> Dict[str, Any]:
     """EPSG → EPSG via `api.reproject_many` (pyproj).
 
@@ -3185,7 +3291,7 @@ def _resolve_authority(term: str, facet: str) -> Dict[str, Any]:
             "candidates": em.resolve_authority(term, facet)}
 
 
-@v1.get("/resolve-authority", tags=["authority"])
+@v1.get("/resolve-authority", summary="Look a term up in an authority (a thesaurus, a gazetteer)", tags=["authority"])
 def resolve_authority_get(term: str = Query(...), facet: str = Query(...)
                           ) -> Dict[str, Any]:
     """Ranked offline authority candidates. GET, for a link or a curl."""
@@ -3197,7 +3303,7 @@ class AuthorityRequest(BaseModel):
     facet: str
 
 
-@v1.post("/resolve-authority", tags=["authority"])
+@v1.post("/resolve-authority", summary="Look several terms up in an authority at once", tags=["authority"])
 def resolve_authority_post(req: AuthorityRequest) -> Dict[str, Any]:
     """The same op as POST — em-bridge offers both verbs and so does this."""
     return _resolve_authority(req.term, req.facet)
@@ -3297,7 +3403,7 @@ async def _acting_role(room_id: str, request: Request) -> tuple:
     return load_acl(room_id), room, role, orcid
 
 
-@v1.get("/rooms/{room_id}/members", response_model=Members, tags=["access"])
+@v1.get("/rooms/{room_id}/members", summary="Who is in a room, and with which role", response_model=Members, tags=["access"])
 async def list_members(room_id: str, request: Request) -> Members:
     """Who may work in this room. Owner and admins only.
 
@@ -3312,7 +3418,7 @@ async def list_members(room_id: str, request: Request) -> Members:
     return _members_view(room_id, acl, role)
 
 
-@v1.put("/rooms/{room_id}/members/{orcid}", response_model=Members, tags=["access"])
+@v1.put("/rooms/{room_id}/members/{orcid}", summary="Give someone a role in a room, or hand the room to a new owner", response_model=Members, tags=["access"])
 async def set_member(room_id: str, orcid: str, body: MemberIn,
                      request: Request) -> Members:
     """Give somebody a role — or move the room to a new owner.
@@ -3388,7 +3494,7 @@ def _group_grant_refusal(wanted: Optional[Role]) -> Optional[str]:
     return None
 
 
-@v1.put("/rooms/{room_id}/groups/{group_id}", response_model=Members,
+@v1.put("/rooms/{room_id}/groups/{group_id}", summary="Give a team a role in a room", response_model=Members,
         tags=["access"])
 async def set_room_group(room_id: str, group_id: str, body: GroupGrantIn,
                          request: Request) -> Members:
@@ -3433,7 +3539,7 @@ async def set_room_group(room_id: str, group_id: str, body: GroupGrantIn,
     return _members_view(room_id, acl, role)
 
 
-@v1.delete("/rooms/{room_id}/groups/{group_id}", response_model=Members,
+@v1.delete("/rooms/{room_id}/groups/{group_id}", summary="Take a team's role in a room away", response_model=Members,
            tags=["access"])
 async def remove_room_group(room_id: str, group_id: str,
                             request: Request) -> Members:
@@ -3455,7 +3561,7 @@ async def remove_room_group(room_id: str, group_id: str,
     return _members_view(room_id, acl, role)
 
 
-@v1.delete("/rooms/{room_id}/members/{orcid}", response_model=Members,
+@v1.delete("/rooms/{room_id}/members/{orcid}", summary="Take a person out of a room", response_model=Members,
            tags=["access"])
 async def remove_member(room_id: str, orcid: str, request: Request) -> Members:
     """Revoke a role. Removing somebody who has none is not an error — the
@@ -3616,7 +3722,7 @@ def _caller_identity(request: Request) -> tuple:
     return orcid, dev_mode
 
 
-@v1.get("/rooms", response_model=List[RoomOut], tags=["rooms"])
+@v1.get("/rooms", summary="The rooms you have a role in", response_model=List[RoomOut], tags=["rooms"])
 async def list_rooms(request: Request) -> List[RoomOut]:
     """The rooms this caller has a grant in.
 
@@ -3697,7 +3803,7 @@ async def list_rooms(request: Request) -> List[RoomOut]:
     return out
 
 
-@v1.post("/rooms", response_model=RoomOut, status_code=201, tags=["rooms"])
+@v1.post("/rooms", summary="Create a room", response_model=RoomOut, status_code=201, tags=["rooms"])
 async def create_room(body: RoomRefIn, request: Request) -> RoomOut:
     """Declare a room. It exists from here: empty, listable, nobody connected.
 
@@ -3769,7 +3875,7 @@ async def create_room(body: RoomRefIn, request: Request) -> RoomOut:
     return described
 
 
-@v1.get("/rooms/{room_id}", response_model=RoomOut, tags=["rooms"])
+@v1.get("/rooms/{room_id}", summary="One room: its title, its containers, its state", response_model=RoomOut, tags=["rooms"])
 async def get_room(room_id: str, request: Request) -> RoomOut:
     """One room's record. Needs a role — the same door as everything else.
 
@@ -3901,7 +4007,7 @@ async def _reader(room_id: str, request: Request):
     return room, who
 
 
-@v1.get("/rooms/{room_id}/who", response_model=RoomWho, tags=["rooms"])
+@v1.get("/rooms/{room_id}/who", summary="Who is in the room now, and who wrote recently", response_model=RoomWho, tags=["rooms"])
 async def room_who(room_id: str, request: Request,
                    since: str = Query(default="", description=
                                       "ISO instant: writers after it. Empty "
@@ -3922,7 +4028,7 @@ async def room_who(room_id: str, request: Request,
     return RoomWho(**roomview.who_is_here(room, recent_after=since or None))
 
 
-@v1.get("/rooms/{room_id}/waiting", response_model=RoomWaiting, tags=["rooms"])
+@v1.get("/rooms/{room_id}/waiting", summary="What waits for a signature: fields a model composed, not yet validated", response_model=RoomWaiting, tags=["rooms"])
 async def room_waiting(room_id: str, request: Request,
                        mine: bool = Query(default=False, description=
                                           "only units this caller wrote")
@@ -3952,7 +4058,7 @@ async def room_waiting(room_id: str, request: Request,
                            room.document, subject=(who if mine else None)))
 
 
-@v1.get("/rooms/{room_id}/statistics", response_model=RoomStatistics,
+@v1.get("/rooms/{room_id}/statistics", summary="What the room holds: nodes, edges, epochs, gaps", response_model=RoomStatistics,
         tags=["rooms"])
 async def room_statistics(room_id: str, request: Request) -> RoomStatistics:
     """Com'è fatto il grafo di questa stanza — e cosa gli manca.
@@ -3969,7 +4075,7 @@ async def room_statistics(room_id: str, request: Request) -> RoomStatistics:
     return RoomStatistics(**roomview.statistics(room.document))
 
 
-@v1.get("/rooms/{room_id}/operators", response_model=RoomOperators,
+@v1.get("/rooms/{room_id}/operators", summary="Who has written in this room", response_model=RoomOperators,
         tags=["rooms"])
 async def room_operators(room_id: str, request: Request) -> RoomOperators:
     """Chi ha scritto in questa stanza, quanto, quali campi, quando, con cosa.
@@ -3985,7 +4091,7 @@ async def room_operators(room_id: str, request: Request) -> RoomOperators:
     return RoomOperators(**roomview.operators(room.document))
 
 
-@v1.get("/rooms/{room_id}/changes", response_model=RoomChanges, tags=["rooms"])
+@v1.get("/rooms/{room_id}/changes", summary="What changed since an instant — counted, not replayed", response_model=RoomChanges, tags=["rooms"])
 async def room_changes(room_id: str, request: Request,
                        since: str = Query(
                            default="",
@@ -4057,7 +4163,7 @@ class RoomOpsFeed(BaseModel):
     compacted_upto: Optional[str] = None
 
 
-@v1.get("/rooms/{room_id}/document", tags=["rooms"],
+@v1.get("/rooms/{room_id}/document", summary="The room's document now, with the cursor to resume from", tags=["rooms"],
         response_model=RoomDocument,
         responses={403: {"description": "not a member of this room"},
                    404: {"description": "no such room, or no such graph"}})
@@ -4116,7 +4222,7 @@ async def room_document(room_id: str, request: Request,
                     media_type="application/json")
 
 
-@v1.get("/rooms/{room_id}/ops", response_model=RoomOpsFeed, tags=["rooms"],
+@v1.get("/rooms/{room_id}/ops", summary="The operations that arrived after a cursor (the REST replay)", response_model=RoomOpsFeed, tags=["rooms"],
         responses={403: {"description": "not a member of this room"},
                    404: {"description": "no such room"}})
 async def room_ops_feed(room_id: str, request: Request,
@@ -4186,7 +4292,7 @@ class RoomChat(BaseModel):
     last: Optional[str] = None
 
 
-@v1.get("/rooms/{room_id}/chat", response_model=RoomChat, tags=["rooms"])
+@v1.get("/rooms/{room_id}/chat", summary="What was said in the room, in order", response_model=RoomChat, tags=["rooms"])
 async def room_chat(room_id: str, request: Request) -> RoomChat:
     """La conversazione della stanza — letta dagli orologi, non dal registro.
 
@@ -4298,7 +4404,7 @@ class OpsOut(BaseModel):
     conflicts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-@v1.post("/rooms/{room_id}/ops", response_model=OpsOut, tags=["rooms"])
+@v1.post("/rooms/{room_id}/ops", summary="Write graph operations into a room, over HTTP", response_model=OpsOut, tags=["rooms"])
 async def apply_ops(room_id: str, body: OpsIn, request: Request) -> OpsOut:
     """Hand a batch of graph operations to a room, over HTTP.
 
@@ -4362,7 +4468,7 @@ class ArchiveIn(BaseModel):
                            description="false brings the room back")
 
 
-@v1.post("/rooms/{room_id}/archive", response_model=RoomOut, tags=["rooms"])
+@v1.post("/rooms/{room_id}/archive", summary="Archive a room, or bring it back", response_model=RoomOut, tags=["rooms"])
 async def archive_room(room_id: str, body: ArchiveIn,
                        request: Request) -> RoomOut:
     """Mark a room archived, or bring it back. Owner and admin only.
@@ -4506,7 +4612,7 @@ def _delete_piece(errors: List[str], what: str, fn, *args):
         return None
 
 
-@v1.delete("/rooms/{room_id}", response_model=RoomDeleted, tags=["rooms"],
+@v1.delete("/rooms/{room_id}", summary="Delete a room (its assets stay, as orphans)", response_model=RoomDeleted, tags=["rooms"],
            responses={400: {"description": "confirmation missing or different"},
                       403: {"description": "neither the owner nor an operator"},
                       404: {"description": "no such room"},
@@ -4770,7 +4876,7 @@ def _invite_out(invite: Any, *, token: Optional[str] = None) -> InviteOut:
     return InviteOut(**invite.as_public(), token=token)
 
 
-@v1.post("/rooms/{room_id}/invites", response_model=InviteOut, status_code=201,
+@v1.post("/rooms/{room_id}/invites", summary="Create an invitation link to a room", response_model=InviteOut, status_code=201,
          tags=["rooms"])
 async def create_invite(room_id: str, body: InviteIn,
                         request: Request) -> InviteOut:
@@ -4798,7 +4904,7 @@ async def create_invite(room_id: str, body: InviteIn,
     return _invite_out(invite, token=token)
 
 
-@v1.get("/rooms/{room_id}/invites", response_model=List[InviteOut], tags=["rooms"])
+@v1.get("/rooms/{room_id}/invites", summary="The invitation links of a room", response_model=List[InviteOut], tags=["rooms"])
 async def list_invites(room_id: str, request: Request) -> List[InviteOut]:
     """Which links are out there, and in what state. Admin and owner only — a
     list of invitations is a list of who was asked to join an unpublished study.
@@ -4812,7 +4918,7 @@ async def list_invites(room_id: str, request: Request) -> List[InviteOut]:
     return [_invite_out(invite) for invite in invites().list(room_id)]
 
 
-@v1.delete("/rooms/{room_id}/invites/{token_id}", response_model=InviteOut,
+@v1.delete("/rooms/{room_id}/invites/{token_id}", summary="Revoke an invitation link", response_model=InviteOut,
            tags=["rooms"])
 async def revoke_invite(room_id: str, token_id: str,
                         request: Request) -> InviteOut:
@@ -4857,7 +4963,7 @@ def _study_access(room_id: str, room) -> StudyAccessOut:
                           embargo=str(embargo) if embargo else None)
 
 
-@v1.get("/rooms/{room_id}/study-access", response_model=StudyAccessOut,
+@v1.get("/rooms/{room_id}/study-access", summary="Who may see the study: visibility and embargo", response_model=StudyAccessOut,
         tags=["access"])
 async def get_study_access(room_id: str, request: Request) -> StudyAccessOut:
     """Who sees this study: its visibility and its embargo. Any role."""
@@ -4867,7 +4973,7 @@ async def get_study_access(room_id: str, request: Request) -> StudyAccessOut:
     return _study_access(room_id, room)
 
 
-@v1.put("/rooms/{room_id}/study-access", response_model=StudyAccessOut,
+@v1.put("/rooms/{room_id}/study-access", summary="Change who may see the study", response_model=StudyAccessOut,
         tags=["access"])
 async def set_study_access(room_id: str, body: StudyAccessIn,
                            request: Request) -> StudyAccessOut:
@@ -4898,7 +5004,7 @@ async def set_study_access(room_id: str, body: StudyAccessIn,
     return _study_access(room_id, room)
 
 
-@v1.post("/join", response_model=JoinOut, tags=["rooms"])
+@v1.post("/join", summary="Accept an invitation link and enter the room", response_model=JoinOut, tags=["rooms"])
 async def join_by_link(body: JoinIn, request: Request) -> JoinOut:
     """Accept an invitation: the link says which room, the token says who invited
     you, and **the ORCID has to be yours**.
@@ -5022,7 +5128,7 @@ class StorageOut(BaseModel):
     rooms: List[StorageRoom] = Field(default_factory=list)
 
 
-@v1.get("/admin/whoami", response_model=NodeWhoAmI, tags=["node"])
+@v1.get("/admin/whoami", summary="Am I an operator of this node?", response_model=NodeWhoAmI, tags=["node"])
 async def node_whoami(request: Request) -> NodeWhoAmI:
     """Am I an operator? Answered WITHOUT a 403, because the console asks this
     before it draws anything: a page that shows an error where it could show
@@ -5034,7 +5140,7 @@ async def node_whoami(request: Request) -> NodeWhoAmI:
                       auth=authenticator.settings.describe())
 
 
-@v1.get("/admin/rooms", response_model=List[RoomOut], tags=["node"])
+@v1.get("/admin/rooms", summary="Every room on this node (operators)", response_model=List[RoomOut], tags=["node"])
 async def node_rooms(request: Request) -> List[RoomOut]:
     """EVERY room on this node — declared or not, empty or not, archived or not.
 
@@ -5061,7 +5167,7 @@ async def node_rooms(request: Request) -> List[RoomOut]:
                            with_members=True) for room_id in sorted(ids)]
 
 
-@v1.get("/admin/storage", response_model=StorageOut, tags=["node"])
+@v1.get("/admin/storage", summary="What the node holds, and what does not line up (operators)", response_model=StorageOut, tags=["node"])
 async def node_storage(request: Request) -> StorageOut:
     """What the node is holding, and what does not line up.
 
@@ -5142,7 +5248,7 @@ class AssetForgotten(BaseModel):
     corpus: bool = False
 
 
-@v1.delete("/admin/assets/{ref}", response_model=AssetForgotten, tags=["node"])
+@v1.delete("/admin/assets/{ref}", summary="Remove an asset from the node (operators)", response_model=AssetForgotten, tags=["node"])
 async def forget_asset(ref: str, request: Request) -> AssetForgotten:
     """**Forget these bytes** — the fourth verb, and the only one that removes.
 
@@ -5231,7 +5337,7 @@ class OrphanAsset(BaseModel):
     deleted_by: Optional[str] = None
 
 
-@v1.get("/admin/assets/orphans", response_model=List[OrphanAsset], tags=["node"])
+@v1.get("/admin/assets/orphans", summary="Assets a room's deletion left with no room (operators)", response_model=List[OrphanAsset], tags=["node"])
 async def list_orphan_assets(
         request: Request,
         kind: Optional[str] = Query(
@@ -5330,7 +5436,7 @@ def _download_name(ref: str, media_type: str) -> str:
     return f"{ref.split(':', 1)[1]}{ext}"
 
 
-@v1.api_route("/admin/assets/{ref}", methods=["GET", "HEAD"], tags=["node"],
+@v1.api_route("/admin/assets/{ref}", summary="Download any asset, through no room (operators)", methods=["GET", "HEAD"], tags=["node"],
               responses={400: {"description": "not an asset reference"},
                          403: {"description": "not an operator"},
                          404: {"description": "the store does not hold it"}})
@@ -5534,7 +5640,7 @@ class NodeHealthOut(BaseModel):
     entrances: List[NodeEntrance] = Field(default_factory=list)
 
 
-@v1.get("/admin/health", response_model=NodeHealthOut, tags=["node"])
+@v1.get("/admin/health", summary="The node's services, and how they are doing (operators)", response_model=NodeHealthOut, tags=["node"])
 async def node_health_report(request: Request) -> NodeHealthOut:
     """Is this node well — the services around StratiGraph Server, not just StratiGraph Server.
 
@@ -5574,7 +5680,7 @@ class NodeArchiveIn(BaseModel):
     confirm_room_id: str = Field(default="")
 
 
-@v1.post("/admin/rooms/{room_id}/archive", response_model=RoomOut, tags=["node"])
+@v1.post("/admin/rooms/{room_id}/archive", summary="Archive any room of the node (operators)", response_model=RoomOut, tags=["node"])
 async def node_archive_room(room_id: str, body: NodeArchiveIn,
                             request: Request) -> RoomOut:
     """Archive (or restore) any room on the node — the lifecycle action.
@@ -5649,7 +5755,7 @@ def _may_manage(group: Group, who: Optional[str], request: Request) -> None:
                f"({group.owner or 'nobody recorded'})")
 
 
-@v1.get("/groups", response_model=List[GroupOut], tags=["access"])
+@v1.get("/groups", summary="Every group this node knows", response_model=List[GroupOut], tags=["access"])
 def list_groups(request: Request) -> List[GroupOut]:
     """Every group this instance knows. Readable by any authenticated caller:
     a group is a name for a team, not a secret, and you cannot be granted a role
@@ -5659,7 +5765,7 @@ def list_groups(request: Request) -> List[GroupOut]:
                                                     key=lambda g: g.id)]
 
 
-@v1.put("/groups/{group_id}", response_model=GroupOut, tags=["access"])
+@v1.put("/groups/{group_id}", summary="Create a group, or replace one you own", response_model=GroupOut, tags=["access"])
 def put_group(group_id: str, body: GroupIn, request: Request) -> GroupOut:
     """Create a group, or replace the one you own.
 
@@ -5677,7 +5783,7 @@ def put_group(group_id: str, body: GroupIn, request: Request) -> GroupOut:
     return GroupOut(**group.as_dict())
 
 
-@v1.put("/groups/{group_id}/members/{orcid}", response_model=GroupOut,
+@v1.put("/groups/{group_id}/members/{orcid}", summary="Add a person to a group", response_model=GroupOut,
         tags=["access"])
 def add_group_member(group_id: str, orcid: str, request: Request) -> GroupOut:
     who = _caller(request)
@@ -5691,7 +5797,7 @@ def add_group_member(group_id: str, orcid: str, request: Request) -> GroupOut:
     return GroupOut(**group.as_dict())
 
 
-@v1.delete("/groups/{group_id}/members/{orcid}", response_model=GroupOut,
+@v1.delete("/groups/{group_id}/members/{orcid}", summary="Take a person out of a group", response_model=GroupOut,
            tags=["access"])
 def remove_group_member(group_id: str, orcid: str, request: Request) -> GroupOut:
     """Take somebody out. Removing who is not there is not an error — the state
@@ -5707,7 +5813,7 @@ def remove_group_member(group_id: str, orcid: str, request: Request) -> GroupOut
     return GroupOut(**group.as_dict())
 
 
-@v1.delete("/groups/{group_id}", tags=["access"])
+@v1.delete("/groups/{group_id}", summary="Delete a group", tags=["access"])
 def delete_group(group_id: str, request: Request) -> Dict[str, Any]:
     """Drop the group. The grants that named it stay in the rooms' ACLs and stop
     resolving — reported rather than chased: a server that walked every room to
@@ -5766,7 +5872,7 @@ class WhoAmI(BaseModel):
     accredited: bool = False
 
 
-@v1.get("/whoami", response_model=WhoAmI, tags=["meta"])
+@v1.get("/whoami", summary="Who this token says you are", response_model=WhoAmI, tags=["meta"])
 def member_whoami(request: Request) -> WhoAmI:
     """The MEMBER-facing identity — deliberately not `/v1/admin/whoami`.
 
@@ -5798,7 +5904,7 @@ def member_whoami(request: Request) -> WhoAmI:
         accredited=accredited)
 
 
-@v1.get("/rooms/{room_id}/open", response_model=HandoffOut, tags=["rooms"])
+@v1.get("/rooms/{room_id}/open", summary="How to open this room in a tool, without typing anything", response_model=HandoffOut, tags=["rooms"])
 async def room_handoff(room_id: str, request: Request) -> HandoffOut:
     """How to open this room in a tool, without typing anything.
 
@@ -5827,7 +5933,7 @@ async def room_handoff(room_id: str, request: Request) -> HandoffOut:
         raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
-@v1_public.post("/handoff/parse", tags=["rooms"])
+@v1_public.post("/handoff/parse", summary="Read an «Open in…» link: which server, which room", tags=["rooms"])
 def parse_handoff(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """`{link}` → `{server, room}`, or the reason it is not a handoff.
 
@@ -5844,7 +5950,7 @@ def parse_handoff(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
-@app.get("/open", response_class=HTMLResponse, tags=["rooms"])
+@app.get("/open", summary="The web half of an «Open in…» link (an HTML page)", response_class=HTMLResponse, tags=["rooms"])
 def open_page(server: str = Query(default=""),
               room: str = Query(default="")) -> HTMLResponse:
     """The web half of the handoff: a page that tries the scheme, then explains.
@@ -6086,6 +6192,84 @@ def entrances(public_base: str) -> List[Dict[str, str]]:
 
 app.include_router(v1_public)
 app.include_router(v1)
+
+
+# ── /docs and /redoc, and the definition they read ───────────────────────────
+
+import json as _json_openapi
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
+from fastapi.routing import APIRoute as _APIRoute
+
+#: Responses captured LIVE on the dev-stack (room `rest-2026-10-16`, 17 Oct
+#: 2026), not written by hand: `…/_rest-2026-10-16/lavoro/crea_e_cattura.py`.
+_EXAMPLES_FILE = pathlib.Path(__file__).with_name("openapi_examples.json")
+
+
+@app.get("/docs", include_in_schema=False)
+def swagger_page() -> HTMLResponse:
+    # `openapi.json` RELATIVE: `/em/docs` reads `/em/openapi.json`, `/docs`
+    # reads `/openapi.json`. The absolute path FastAPI writes is the 404.
+    return get_swagger_ui_html(
+        openapi_url="openapi.json", title="StratiGraph Server — API",
+        swagger_ui_parameters={"persistAuthorization": True,
+                               "displayRequestDuration": True,
+                               "docExpansion": "none"})
+
+
+@app.get("/redoc", include_in_schema=False)
+def redoc_page() -> HTMLResponse:
+    return get_redoc_html(openapi_url="openapi.json",
+                          title="StratiGraph Server — API")
+
+
+def _authenticated_operations() -> set:
+    """(path, method) of every route that hangs off `v1` — the router that
+    carries `AuthDependency`. Read from the router, not listed by hand: a new
+    route is locked on /docs because of where it is declared, exactly as it
+    is locked on the wire."""
+    return {(route.path_format, method.lower())
+            for route in v1.routes if isinstance(route, _APIRoute)
+            for method in route.methods}
+
+
+def custom_openapi() -> Dict[str, Any]:
+    """FastAPI's definition, plus what it cannot infer: the bearer token, and
+    the examples captured live."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version=app.version,
+                         summary=app.summary, description=app.description,
+                         routes=app.routes, tags=app.openapi_tags,
+                         servers=app.servers)
+    schema.setdefault("components", {}).setdefault("securitySchemes", {})[
+        "bearerAuth"] = {
+            "type": "http", "scheme": "bearer", "bearerFormat": "JWT",
+            "description": "A token from this node's identity service "
+                           "(Keycloak). `/v1/auth-config` says where to get "
+                           "one."}
+    locked = _authenticated_operations()
+    for path, operations in schema.get("paths", {}).items():
+        for method, operation in operations.items():
+            if (path, method) in locked:
+                operation["security"] = [{"bearerAuth": []}]
+    try:
+        examples = _json_openapi.loads(_EXAMPLES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):                       # pragma: no cover
+        examples = {}
+    for key, named in examples.items():
+        method, _, path = key.partition(" ")
+        operation = schema.get("paths", {}).get(path, {}).get(method.lower())
+        if not operation:
+            continue
+        media = (operation.setdefault("responses", {}).setdefault("200", {})
+                 .setdefault("content", {}).setdefault("application/json", {}))
+        media["examples"] = named
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi
 #: P4.2 · the relay. A router of its own because it is a different KIND of thing:
 #: everything above is stateless request/response, and this holds connections. It
 #: authenticates in the handshake rather than through the router dependency —
@@ -6100,7 +6284,7 @@ class Reachability(BaseModel):
     dependencies: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-@v1.post("/health/reach", response_model=Reachability, tags=["meta"])
+@v1.post("/health/reach", summary="Knock now on every dependency, and refresh the health", response_model=Reachability, tags=["meta"])
 def knock_now() -> Reachability:
     """Bussa adesso a ogni dipendenza dichiarata, e aggiorna la salute.
 

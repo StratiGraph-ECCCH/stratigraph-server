@@ -1,0 +1,324 @@
+{
+ "GET /v1/rooms/{room_id}/document": {
+  "live": {
+   "summary": "an editor reads rest-2026-10-16 (17 Oct 2026)",
+   "value": {
+    "room_id": "rest-2026-10-16",
+    "cursor": "d33795c2:4",
+    "taken_at": "2026-10-17T08:21:56Z",
+    "role": "editor",
+    "can_write": true,
+    "gc_watermark": null,
+    "graph_id": null,
+    "doc": {
+     "header": {
+      "format": "em.json",
+      "version": "1.0"
+     },
+     "graphs": {
+      "rest-2026-10-16": {
+       "graph_id": "rest-2026-10-16",
+       "name": "REST · prova della porta senza socket, 17 ottobre",
+       "nodes": [
+        {
+         "id": "US1",
+         "node_type": "US",
+         "name": "US 1",
+         "description": "Crollo di tegole sul piano di calpestio.",
+         "data": {
+          "lang": "it",
+          "created_at": "2026-10-17T08:21:56Z",
+          "created_by": "0000-0003-1111-1112",
+          "created_auth": {
+           "mode": "node_password",
+           "attested_by": "em.localhost:8443"
+          },
+          "modified_at": "2026-10-17T08:21:56Z",
+          "modified_by": "0000-0003-1111-1112",
+          "modified_auth": {
+           "mode": "node_password",
+           "attested_by": "em.localhost:8443"
+          }
+         }
+        },
+        {
+         "id": "US2",
+         "node_type": "US",
+         "name": "US 2",
+         "description": "Piano in cocciopesto, integro nel settore nord.",
+         "data": {
+          "lang": "it",
+          "created_at": "2026-10-17T08:21:56Z",
+          "created_by": "0000-0003-1111-1112",
+          "created_auth": {
+           "mode": "node_password",
+           "attested_by": "em.localhost:8443"
+          },
+          "modified_at": "2026-10-17T08:21:56Z",
+          "modified_by": "0000-0003-1111-1112",
+          "modified_auth": {
+           "mode": "node_password",
+           "attested_by": "em.localhost:8443"
+          }
+         }
+        },
+        {
+         "id": "US3",
+         "node_type": "US",
+         "name": "US 3",
+         "description": "Muro perimetrale est, opera mista.",
+         "data": {
+          "lang": "it",
+          "created_at": "2026-10-17T08:21:56Z",
+          "created_by": "0000-0003-1111-1112",
+          "created_auth": {
+           "mode": "node_password",
+           "attested_by": "em.localhost:8443"
+          },
+          "modified_at": "2026-10-17T08:21:56Z",
+          "modified_by": "0000-0003-1111-1112",
+          "modified_auth": {
+           "mode": "node_password",
+           "attested_by": "em.localhost:8443"
+          }
+         }
+        }
+       ],
+       "edges": [
+        {
+         "id": "US1__is_before__US2",
+         "edge_type": "is_before",
+         "source": "US1",
+         "target": "US2",
+         "attributes": {
+          "created_at": "2026-10-17T08:21:56Z",
+          "created_by": "0000-0003-1111-1112"
+         }
+        }
+       ]
+      }
+     },
+     "active_graph_id": "rest-2026-10-16"
+    }
+   }
+  }
+ },
+ "GET /v1/rooms/{room_id}/ops": {
+  "granted": {
+   "summary": "one operation arrived after the cursor",
+   "value": {
+    "room_id": "rest-2026-10-16",
+    "granted": true,
+    "after": "d33795c2:4",
+    "cursor": "d33795c2:5",
+    "count": 1,
+    "has_more": false,
+    "operations": [
+     {
+      "graph_id": "rest-2026-10-16",
+      "op": {
+       "op": "update_field",
+       "node_id": "US2",
+       "field": "description",
+       "value": "Piano in cocciopesto, lacunoso a sud.",
+       "ts": "2026-10-17T08:21:57.299Z",
+       "author": "0000-0003-2222-2221",
+       "auth": {
+        "mode": "node_password",
+        "attested_by": "em.localhost:8443"
+       }
+      }
+     }
+    ],
+    "reason": null,
+    "detail": null,
+    "resync": null,
+    "horizon": null,
+    "compacted_upto": null
+   }
+  },
+  "caught_up": {
+   "summary": "nothing new: same cursor back",
+   "value": {
+    "room_id": "rest-2026-10-16",
+    "granted": true,
+    "after": "d33795c2:5",
+    "cursor": "d33795c2:5",
+    "count": 0,
+    "has_more": false,
+    "operations": [],
+    "reason": null,
+    "detail": null,
+    "resync": null,
+    "horizon": null,
+    "compacted_upto": null
+   }
+  },
+  "no_cursor": {
+   "summary": "refused: a first look, read the document",
+   "value": {
+    "room_id": "rest-2026-10-16",
+    "granted": false,
+    "after": null,
+    "cursor": null,
+    "count": 0,
+    "has_more": false,
+    "operations": [],
+    "reason": "no_cursor",
+    "detail": "no cursor: this is a first look. Read the document, which comes with the cursor to start from.",
+    "resync": "/v1/rooms/rest-2026-10-16/document",
+    "horizon": null,
+    "compacted_upto": null
+   }
+  },
+  "unknown_cursor": {
+   "summary": "refused: not this log's cursor",
+   "value": {
+    "room_id": "rest-2026-10-16",
+    "granted": false,
+    "after": null,
+    "cursor": null,
+    "count": 0,
+    "has_more": false,
+    "operations": [],
+    "reason": "unknown_cursor",
+    "detail": "this cursor does not belong to this room's log — malformed, from another room, or from a log that has since been rebuilt: read the document.",
+    "resync": "/v1/rooms/rest-2026-10-16/document",
+    "horizon": null,
+    "compacted_upto": null
+   }
+  }
+ },
+ "POST /v1/rooms/{room_id}/ops": {
+  "seed": {
+   "summary": "four operations land and are kept",
+   "value": {
+    "applied": 4,
+    "refused": [],
+    "kept": {
+     "at": "2026-10-17T08:21:56Z",
+     "compaction": {},
+     "gc_watermark": null,
+     "oplog": 4,
+     "stats": {
+      "node_tombstones": 0,
+      "edge_tombstones": 0,
+      "field_clocks": 0,
+      "field_tombstones": 0
+     }
+    },
+    "conflicts": []
+   }
+  },
+  "conflict": {
+   "summary": "a description overwritten: the earlier value comes back",
+   "value": {
+    "applied": 1,
+    "refused": [],
+    "kept": {
+     "at": "2026-10-17T08:21:57Z",
+     "compaction": {},
+     "gc_watermark": null,
+     "oplog": 5,
+     "stats": {
+      "node_tombstones": 0,
+      "edge_tombstones": 0,
+      "field_clocks": 1,
+      "field_tombstones": 0
+     }
+    },
+    "conflicts": [
+     {
+      "op": "update_field",
+      "id": null,
+      "applied": true,
+      "node_id": "US2",
+      "field": "description",
+      "reason": "newer",
+      "winner": {
+       "by": "0000-0003-2222-2221",
+       "at": "2026-10-17T08:21:57.299Z",
+       "side": "op"
+      },
+      "loser": {
+       "by": "0000-0003-1111-1112",
+       "at": "2026-10-17T08:21:56Z",
+       "side": "state"
+      },
+      "loser_value": "Piano in cocciopesto, integro nel settore nord."
+     }
+    ]
+   }
+  }
+ },
+ "GET /v1/rooms/{room_id}/changes": {
+  "live": {
+   "summary": "what changed since the document was read",
+   "value": {
+    "since": "2026-10-17T08:21:56Z",
+    "readable_from": "2026-10-17T08:21:56.001Z",
+    "replayable_from": "2026-10-17T08:21:56.001Z",
+    "durable": true,
+    "operations": 1,
+    "by_author": {
+     "0000-0003-2222-2221": 1
+    },
+    "by_verb": {
+     "update_field": 1
+    },
+    "units": [
+     {
+      "id": "US2",
+      "operations": 1,
+      "what": [
+       {
+        "verb": "update_field",
+        "said": "corretta",
+        "times": 1
+       }
+      ],
+      "authors": [
+       "0000-0003-2222-2221"
+      ],
+      "first_at": "2026-10-17T08:21:57.299Z",
+      "last_at": "2026-10-17T08:21:57.299Z"
+     }
+    ],
+    "oldest": "2026-10-17T08:21:57.299Z",
+    "newest": "2026-10-17T08:21:57.299Z",
+    "complete": true,
+    "horizon": null,
+    "truncated": false
+   }
+  }
+ },
+ "GET /v1/rooms/{room_id}/who": {
+  "live": {
+   "summary": "nobody seated; one person wrote recently",
+   "value": {
+    "seated": [],
+    "wrote_recently": [
+     {
+      "author": "0000-0003-2222-2221",
+      "last_at": "2026-10-17T08:21:57Z",
+      "nodes_touched": 1,
+      "seated": false
+     }
+    ],
+    "left": [],
+    "recent_after": "2026-10-17T08:21:56Z",
+    "beat": {
+     "every_seconds": 10.0,
+     "quiet_after_seconds": 30.0
+    },
+    "counts": {
+     "seated": 0,
+     "in": 0,
+     "quiet": 0,
+     "left": 0,
+     "wrote_recently": 1
+    }
+   }
+  }
+ }
+}
