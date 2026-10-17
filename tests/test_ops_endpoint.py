@@ -433,7 +433,9 @@ def test_an_empty_delivery_is_fine(client, store, whoever):
     answer = client.post(f"/v1/rooms/{ROOM}/ops", json={"ops": []},
                          headers=HEAD)
     assert answer.status_code == 200, answer.text
-    assert answer.json() == {"applied": 0, "refused": [], "kept": None}
+    # `conflicts` dal 17 ottobre 2026 (`test_ops_dice_i_conflitti.py`)
+    assert answer.json() == {"applied": 0, "refused": [], "kept": None,
+                             "conflicts": []}
 
 
 # ── 5 · the door does not invent its own provenance ──────────────────────────

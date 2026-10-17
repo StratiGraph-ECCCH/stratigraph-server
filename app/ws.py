@@ -918,6 +918,7 @@ async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
     """
     applied: List[Dict[str, Any]] = []
     refused: List[Dict[str, Any]] = []
+    conflicts: List[Dict[str, Any]] = []
     async with room.lock:
         for op in ops:
             entry = dict(op)
@@ -933,6 +934,17 @@ async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
             entry = _stamp_birth(room, entry, auth, who=author)
             entry.setdefault("ts", now_iso())
             outcome = room.apply(entry, graph_id)
+            # I CONFLITTI PER CAMPO, che s3Dgraphy calcola e che fino al 17
+            # ottobre «non lasciavano mai il processo» (SYNC-FIELD-TO-CLOUD
+            # §1.4): un campo dove un valore con un orologio ha perso — quello
+            # di prima sovrascritto, o quello dell'operazione rifiutato — con
+            # `loser_value`. Una prima scrittura su un campo vuoto non è un
+            # conflitto e non compare.
+            for esito in outcome.get("fields") or []:
+                if isinstance(esito, dict) and (esito.get("loser") or {}).get("at"):
+                    conflicts.append({"op": entry.get("op"), "id": entry.get("id"),
+                                      "applied": bool(outcome.get("applied")),
+                                      **esito})
             if outcome.get("applied"):
                 went = outcome.get("graph_id") or graph_id
                 room.record(entry, went)
@@ -954,7 +966,8 @@ async def apply_from_connector(room, ops: List[Dict[str, Any]], *,
         await _fanout(room, envelope("op", op, source=source, graph_id=went))
     if info is not None:
         await _fanout(room, envelope("snapshot_written", info, source=source))
-    return {"applied": len(applied), "refused": refused, "kept": info}
+    return {"applied": len(applied), "refused": refused, "kept": info,
+            "conflicts": conflicts}
 
 
 async def keep_study_access(room, *, visibility: Optional[str] = None,

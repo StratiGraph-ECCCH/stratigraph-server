@@ -3786,19 +3786,19 @@ async def get_room(room_id: str, request: Request) -> RoomOut:
 
 # ── COSA SA DIRE UNA STANZA DI SÉ ────────────────────────────────────────────
 #
-# Quattro letture, e nient'altro: `app/roomview.py` non scrive, non tiene un
+# Le letture della stanza, e nient'altro: `app/roomview.py` non scrive, non tiene un
 # indice e non conosce HTML. La pagina la fa StratiField; qui vivono i fatti.
 #
-# LA QUINTA RISPOSTA NON C'È, e non è una dimenticanza. «Cosa è cambiato da
-# quando non guardavo» vorrebbe il registro delle operazioni della stanza, e
-# quel registro **non sopravvive a un riavvio**: vive in memoria, non finisce
-# nello store, e un'operazione arrivata dal socket non viene nemmeno persistita
-# finché qualcuno non chiede `request_save`.
+# LA QUINTA C'È DAL 3 OTTOBRE: `/changes`. Fino al 28 settembre il registro
+# delle operazioni viveva in memoria e moriva col processo, e questo commento
+# spiegava perché la quinta risposta non si poteva dare. Da allora il registro
+# dura (`app/oplog.py`) e «cosa è cambiato da quando non guardavo» è
+# `GET …/changes`, letta e mai rigiocata, col suo confine dichiarato.
 #
-# Misurato, non dedotto: `tests/test_il_registro_della_stanza.py`, sette prove,
-# fra cui una stanza dimenticata e ricostruita — che è quello che fa un riavvio
-# — dove il registro è vuoto e l'operazione non è più nel documento. Costruire
-# un cursore sopra quello significherebbe promettere una memoria che non c'è.
+# E DAL 17 OTTOBRE LA STANZA SI LEGGE ANCHE SENZA SOCKET: `GET …/document` (il
+# documento e il cursore dallo stesso istante) e `GET …/ops?after=` (le
+# operazioni dopo un cursore sul numero d'arrivo, non sul `ts`). Quelle due non
+# sono domande di chi guarda: sono la porta REST del replay, per il telefono.
 
 
 class RoomWho(BaseModel):
@@ -4290,6 +4290,12 @@ class OpsOut(BaseModel):
     #: What the snapshot store kept, or null when nothing applied and so nothing
     #: was written.
     kept: Optional[Dict[str, Any]] = None
+    #: Per field, where a value that had a clock LOST — the earlier value
+    #: overwritten by this batch, or this batch's value refused — with whose it
+    #: was (`winner`, `loser`) and `loser_value`. s3Dgraphy's decision, carried
+    #: out of the process since 17 October 2026; empty when nobody lost
+    #: anything. Optional for a client: an old one ignores it.
+    conflicts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 @v1.post("/rooms/{room_id}/ops", response_model=OpsOut, tags=["rooms"])
