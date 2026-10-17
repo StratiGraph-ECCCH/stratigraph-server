@@ -78,6 +78,31 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # ── il termine di paragone, solo con `--profile confronto` ─────────────────
+  #
+  # Per i tempi MinIO contro RustFS serve una MinIO su cui SCRIVERE file da 1 GB
+  # e diecimila chiavi, e quella della pila di sviluppo non si tocca. Questa è la
+  # STESSA immagine pinnata di `docker-compose.dev.yml`, un disco, volume suo: i
+  # due servizi partono uguali, sulla stessa VM, e il confronto è fra loro.
+  minio-confronto:
+    profiles: ["confronto"]
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z  # sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    container_name: rustfs-prova-minio-confronto
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: "${RUSTFS_ACCESS_KEY}"
+      MINIO_ROOT_PASSWORD: "${RUSTFS_SECRET_KEY}"
+    ports:
+      - "127.0.0.1:${CONFRONTO_MINIO_PORT:-9200}:9000"
+    volumes:
+      - minio_confronto_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: "no"
+
   # Un one-shot: il bucket, PRIMA della prima richiesta, come `minio-init`. Senza
   # `mc`: è uno strumento di MinIO, e la prova è proprio fare a meno di MinIO.
   # Una `PUT /<bucket>` firmata SigV4 con il curl dell'immagine di RustFS è la
@@ -128,8 +153,12 @@ services:
       POSTGRES_USER: "em"
       POSTGRES_PASSWORD: "${PROVA_PG_PASSWORD:?manca il file di prova: vedi README-RUSTFS.md}"
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
-    # nessuna porta pubblicata: lo legge solo l'em-server di prova, sulla rete
-    # di questo progetto
+    ports:
+      # Sul loopback, e per una ragione sola: `pytest` (tests/conftest.py) si
+      # crea un database `em_test_<casuale>` e lo butta, e per default lo fa sul
+      # Postgres di SVILUPPO (5433). Con EM_TEST_PG_PORT=5434 lo fa qui, e la
+      # pila di sviluppo non vede nemmeno la prova.
+      - "127.0.0.1:${PROVA_PG_PORT:-5434}:5432"
     volumes:
       - em_documents_data:/var/lib/postgresql/data
     healthcheck:
@@ -247,3 +276,4 @@ volumes:
   rustfs_data:        # gli oggetti — nella prova, copie: l'originale resta in MinIO
   em_data:
   em_documents_data:
+  minio_confronto_data:   # solo per i tempi (`--profile confronto`)
