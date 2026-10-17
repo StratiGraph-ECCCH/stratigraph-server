@@ -823,8 +823,10 @@ def operations_after(room: Any, after: Optional[str], *,
     riletto il documento intero a ogni ripresa.
 
     Il caso pericoloso è un altro, e questo lo rifiuta: **un'operazione
-    arrivata dopo una compattazione e più vecchia del punto compattato**
-    (`ts < compacted_upto` in vigore al suo arrivo). È il telefono tornato dal
+    arrivata dopo una compattazione che ha buttato qualcosa, e più vecchia del
+    punto compattato** (`ts < compacted_upto` in vigore al suo arrivo; una
+    compattazione con `dropped: 0` non conta, misurato dal vivo il 17
+    ottobre). È il telefono tornato dal
     sommerso dopo che la stanza ha fatto pulizia: la stanza l'ha fusa con la
     contabilità già buttata, il client la fonderebbe con la sua, che è ancora
     intera, e le due fusioni possono dare risultati diversi. Lì il feed non
@@ -876,9 +878,19 @@ def operations_after(room: Any, after: Optional[str], *,
     # LA COMPATTAZIONE IN VIGORE ALL'ARRIVO DI OGNI RIGA. Un segno senza `seq`
     # (registri di prima) vale da prima di tutte le righe numerate: è la
     # lettura prudente.
+    #
+    # E CONTA SOLO UNA COMPATTAZIONE CHE HA BUTTATO QUALCOSA. Misurato dal vivo
+    # il 17 ottobre (Parte 4, il telefono con un desktop seduto): a ogni
+    # `POST /ops` la stanza compatta, quasi sempre senza togliere niente
+    # (`total: 0`), e la regola senza questa riga rifiutava ogni consegna in
+    # ritardo dal campo. Una compattazione che non ha tolto niente lascia la
+    # stanza con la contabilità del client. Un segno che non dice quanto ha
+    # buttato (scritto prima del 17 ottobre) conta: prudenza.
     segni = []
     for segno in stato["compactions"]:
         n = segno.get("seq")
+        if segno.get("dropped") == 0:
+            continue
         if segno.get("upto"):
             segni.append((n if isinstance(n, int) else da, str(segno["upto"])))
     for riga in righe:

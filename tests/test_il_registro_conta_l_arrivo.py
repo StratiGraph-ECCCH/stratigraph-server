@@ -73,7 +73,8 @@ def test_la_potatura_salva_l_epoca_e_il_segno_di_compattazione(tmp_path):
         j.append(_op(i), at="t")
     stato = j.read_rows()
     assert stato["epoch"] == epoca
-    assert stato["compactions"] == [{"seq": 1, "upto": "2026-10-17T09:00:00Z"}]
+    assert stato["compactions"] == [{"seq": 1, "upto": "2026-10-17T09:00:00Z",
+                                     "dropped": None}]
     assert [r["seq"] for r in stato["rows"]] == [6, 7, 8]
     assert j.compacted_upto() == "2026-10-17T09:00:00Z"
     j.read()

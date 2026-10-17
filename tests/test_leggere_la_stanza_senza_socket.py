@@ -240,12 +240,14 @@ def _compatta_a(monkeypatch, room, upto):
 def test_5_dopo_una_compattazione_un_operazione_piu_vecchia_e_unsafe(
         client, durevole, chi, monkeypatch):
     chi(CARLA)
-    _post(client, _unit("US1", "2026-10-17T09:00:00Z"))
+    _post(client, _unit("US1", "2026-10-17T09:00:00Z"),
+          {"op": "remove_node", "id": "US1", "ts": "2026-10-17T09:10:00Z"})
     cursore = _document_of(client)["cursor"]
     room = durevole.peek(ROOM)
     _compatta_a(monkeypatch, room, "2026-10-17T10:00:00Z")
-    _post(client, _unit("US2", "2026-10-17T10:30:00Z"))      # compatta
+    kept = _post(client, _unit("US2", "2026-10-17T10:30:00Z"))["kept"]
     assert room.compacted_upto == "2026-10-17T10:00:00Z"
+    assert kept["compaction"]["total"] >= 1          # la tomba di US1, buttata
     # il telefono torna dal sommerso: timbro delle 09:30, dopo la pulizia
     _post(client, _unit("US3", "2026-10-17T09:30:00Z"))
     feed = _feed(client, cursore)
@@ -265,6 +267,22 @@ def test_5b_una_compattazione_con_solo_operazioni_piu_nuove_non_rifiuta(
     _post(client, _unit("US2", "2026-10-17T09:10:00Z"))
     _compatta_a(monkeypatch, room, "2026-10-17T09:10:00Z")
     _post(client, _unit("US3", "2026-10-17T09:20:00Z"))
+    feed = _feed(client, cursore)
+    assert feed["granted"] is True and _ids(feed) == ["US2", "US3"]
+
+
+def test_5c_una_compattazione_che_non_ha_buttato_niente_non_rende_pericoloso_niente(
+        client, durevole, chi, monkeypatch):
+    """Il telefono con un desktop seduto, misurato dal vivo il 17 ottobre: la
+    stanza compatta a ogni consegna, quasi sempre senza togliere niente."""
+    chi(CARLA)
+    _post(client, _unit("US1", "2026-10-17T09:00:00Z"))
+    cursore = _document_of(client)["cursor"]
+    room = durevole.peek(ROOM)
+    _compatta_a(monkeypatch, room, "2026-10-17T10:00:00Z")
+    kept = _post(client, _unit("US2", "2026-10-17T10:30:00Z"))["kept"]
+    assert kept["compaction"]["total"] == 0
+    _post(client, _unit("US3", "2026-10-17T09:30:00Z"))      # dal sommerso
     feed = _feed(client, cursore)
     assert feed["granted"] is True and _ids(feed) == ["US2", "US3"]
 

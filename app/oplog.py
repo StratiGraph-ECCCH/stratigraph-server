@@ -203,7 +203,8 @@ class Journal:
 
     # ── scrivere ────────────────────────────────────────────────────────────
 
-    def mark_compacted(self, upto: str, *, at: str) -> None:
+    def mark_compacted(self, upto: str, *, at: str,
+                       dropped: Optional[int] = None) -> None:
         """Segna fin dove la stanza è stata compattata.
 
         ════════════════════════════════════════════════════════════════════
@@ -229,8 +230,15 @@ class Journal:
             # IL SEGNO PORTA IL NUMERO D'ARRIVO a cui è stato scritto: è così
             # che una lettura per cursore sa se una compattazione è venuta DOPO
             # il documento che il client ha in mano.
-            riga = json.dumps({"at": at, "compacted_upto": upto,
-                               "seq": self._seq}, ensure_ascii=False)
+            #
+            # …E QUANTO HA BUTTATO (`dropped`, il `total` del rapporto di
+            # `em.compact`), dal 17 ottobre: una compattazione che non ha tolto
+            # niente lascia la stanza con la stessa contabilità del client, e
+            # non rende pericoloso niente (vedi `roomview.operations_after`).
+            voce = {"at": at, "compacted_upto": upto, "seq": self._seq}
+            if dropped is not None:
+                voce["dropped"] = int(dropped)
+            riga = json.dumps(voce, ensure_ascii=False)
             self._write(riga)
 
     def compacted_upto(self) -> Optional[str]:
@@ -457,7 +465,8 @@ class Journal:
                 continue
             if "compacted_upto" in voce and "op" not in voce:
                 fuori["compactions"].append(
-                    {"seq": voce.get("seq"), "upto": voce.get("compacted_upto")})
+                    {"seq": voce.get("seq"), "upto": voce.get("compacted_upto"),
+                     "dropped": voce.get("dropped")})
                 continue
             if "op" in voce:
                 seq = voce.get("seq")

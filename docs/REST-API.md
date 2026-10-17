@@ -240,8 +240,8 @@ only way to get a new cursor is to read the document again. The reasons are
 `no_cursor` (a first look), `no_durable_log` (this node keeps no log on disk),
 `unknown_cursor` (malformed, from another room, or from a log that has since
 been rebuilt), `incomplete` (the log no longer reaches back that far, `pruned`,
-or never did, `began`) and `unsafe` (an operation older than a clean-up the
-room had already made arrived after the cursor). The remedy is always the same:
+or never did, `began`) and `unsafe` (after the cursor, an operation arrived that is older than a
+clean-up in which the room had already thrown some bookkeeping away). The remedy is always the same:
 read the document again, then re-apply the phone's own unconfirmed work on top.
 
 ```bash

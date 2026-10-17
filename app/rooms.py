@@ -710,7 +710,9 @@ class Room:
             # al riavvio e la guardia che lo protegge deve sopravvivere con lui.
             if self.journal is not None:
                 try:
-                    self.journal.mark_compacted(before, at=now_iso())
+                    self.journal.mark_compacted(
+                        before, at=now_iso(),
+                        dropped=(report or {}).get("total"))
                 except Exception as exc:      # noqa: BLE001
                     log.warning("the room %s could not journal its compaction "
                                 "point: %s", self.room_id, exc)
