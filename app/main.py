@@ -6253,6 +6253,17 @@ def custom_openapi() -> Dict[str, Any]:
         for method, operation in operations.items():
             if (path, method) in locked:
                 operation["security"] = [{"bearerAuth": []}]
+            # ONE operationId PER OPERATION. A route declared for GET and HEAD
+            # (`api_route`) gets one id from FastAPI for both, ending in
+            # whichever method the set yields first — measured on 17 Oct: the
+            # same build gave `…_head` in one process and `…_get` in another,
+            # and both operations the same id (FastAPI warns «Duplicate
+            # Operation ID»). The suffix is the operation's own method.
+            ident = operation.get("operationId") or ""
+            stem, _, tail = ident.rpartition("_")
+            if stem and tail in ("get", "head", "post", "put", "patch",
+                                 "delete") and tail != method:
+                operation["operationId"] = f"{stem}_{method}"
     try:
         examples = _json_openapi.loads(_EXAMPLES_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):                       # pragma: no cover

@@ -134,3 +134,12 @@ def test_gli_esempi_sono_risposte_vere_della_stessa_forma(spec):
         assert set(valore) <= set(main.RoomOpsFeed.model_fields)
     for valore in chiavi("/v1/rooms/{room_id}/ops", "post"):
         assert set(valore) == set(main.OpsOut.model_fields)
+
+
+def test_ogni_operazione_ha_un_operationId_suo_e_stabile(spec):
+    """Le rotte GET+HEAD avevano lo stesso id, e il suffisso cambiava da un
+    processo all'altro (misurato il 17 ottobre): un client generato da
+    OpenAPI ne avrebbe perso una, e uno snapshot non sarebbe mai uguale."""
+    ids = [(op["operationId"], m) for m, _p, op in _operations(spec)]
+    assert len({i for i, _m in ids}) == len(ids)
+    assert all(i.endswith("_" + m.lower()) for i, m in ids)
