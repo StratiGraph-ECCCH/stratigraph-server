@@ -1,0 +1,67 @@
+# La pila di prova RustFS
+
+RustFS al posto di MinIO, **accanto** alla pila di sviluppo e non al suo posto
+(17 ottobre 2026). Serve ad avere i numeri prima della decisione; la pila di
+sviluppo (`docker-compose.dev.yml`, progetto `em-dev`) resta com'è e può restare
+accesa mentre questa gira.
+
+## Accendere
+
+Le credenziali sono di prova e stanno fuori dal repository, in un file
+`KEY=valore` con quattro righe:
+
+```
+RUSTFS_ACCESS_KEY=…
+RUSTFS_SECRET_KEY=…
+RUSTFS_BUCKET=em-assets
+PROVA_PG_PASSWORD=…
+```
+
+Quello della prova del 17 ottobre è
+`~/Documents/GitHub/_datasets/_rustfs-2026-10-17/.env.rustfs`. Senza il file la
+pila non parte: niente default `rustfsadmin`.
+
+```sh
+cd dev-stack
+docker-compose -p rustfs-prova \
+  --env-file ../../_datasets/_rustfs-2026-10-17/.env.rustfs \
+  -f docker-compose.rustfs.yml up -d
+```
+
+| cosa | dove (solo loopback) |
+|---|---|
+| em-server, puntato a RustFS | `http://localhost:8100` (`/v1`, `/health`) |
+| RustFS S3 | `http://localhost:9100` |
+| console di RustFS | `http://localhost:9101/rustfs/console/` |
+| Cantaloupe, dallo stesso bucket | `http://localhost:8183/iiif/3` |
+
+Keycloak **non** c'è: si usa quello della pila di sviluppo in sola lettura
+(l'em-server di prova ne scarica solo le chiavi pubbliche da
+`host.docker.internal:8085`). I token sono quelli di `./token.sh`.
+
+## Spegnere
+
+```sh
+docker-compose -p rustfs-prova --env-file … -f docker-compose.rustfs.yml down
+```
+
+`down` senza `-v`: **i volumi restano** (`rustfs-prova_rustfs_data`,
+`rustfs-prova_em_data`, `rustfs-prova_em_documents_data`), e un nuovo `up` ritrova tutto. Per
+buttarli, `down -v`, e solo quando la prova è finita.
+
+## Cosa cambia rispetto a MinIO
+
+- **L'immagine:** `rustfs/rustfs:1.0.2` (Apache-2.0), pinnata con il digest.
+  Gira come utente 10001, come l'em-server.
+- **Le variabili:** `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY` al posto di
+  `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`; `RUSTFS_VOLUMES`, `RUSTFS_ADDRESS`,
+  `RUSTFS_CONSOLE_ADDRESS`, `RUSTFS_CONSOLE_ENABLE`.
+- **La salute:** `GET /health` (e risponde anche al `/minio/health/live` che
+  sonda la mappa del nodo). Il healthcheck usa il `curl` dell'immagine.
+- **Il bucket:** creato senza `mc`, con una `PUT /<bucket>` firmata SigV4 dal
+  `curl` dell'immagine di RustFS: CreateBucket di S3, nient'altro.
+- **La console:** sotto `/rustfs/console/`, sulla porta 9001 del container.
+- **Per l'em-server non cambia niente:** stesso client (`minio-py`), stesse
+  operazioni S3. Le variabili sono `EM_ASSET_S3_*`, l'altra grafia che il
+  server legge già (quella del ruolo Ansible): il file non dice «minio» di una
+  cosa che non lo è.
