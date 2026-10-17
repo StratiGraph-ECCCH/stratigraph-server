@@ -1,6 +1,6 @@
 # Leggere una stanza senza socket — specifica di due rotte
 
-**Stato:** proposta, 12 ottobre 2026. Nessun codice scritto.
+**Stato:** proposta del 12 ottobre 2026, **implementata il 17 ottobre** con l'Opzione A (cursore sull'arrivo). Dove la misura ha cambiato la proposta, c'è scritto «17 ott».
 **Perché:** StratiField da smartphone non può tenere un websocket aperto (lo si prende e lo si rimette in tasca di continuo). Oggi può *scrivere* in una stanza via HTTP (`POST /v1/rooms/{id}/ops`) ma non può *rileggerla*: lo snapshot arriva solo all'apertura del socket, e `GET …/changes` restituisce un riassunto (conteggi, unità toccate), non le operazioni. Mancano due letture. Il resto della superficie REST c'è già.
 **Come è stata fatta:** letto `app/main.py`, `app/ws.py`, `app/rooms.py`, `app/oplog.py`, `app/roomview.py`. Il server non è stato avviato: quello che segue dice cosa fa il codice, non cosa è stato misurato in esecuzione. Dove serve una misura, c'è scritto.
 
@@ -89,6 +89,8 @@ Una persona lavora offline dalle 10:00 alle 11:00, e le sue operazioni portano `
 
 **Da verificare, non ancora controllato:** quale valore usano oggi i client come `since` alla riconnessione (l'ultimo `ts` visto? l'istante della lettura?). Se è l'ultimo `ts` visto, il difetto è raggiungibile adesso; se è un'altra cosa, va letto cosa. Lo dico perché la conseguenza sul socket cambia, non quella sulle due rotte nuove.
 
+**17 ott, letto nel codice dei client (sola lettura).** EMStudio (web e desktop, stesso `frontend/src/main.ts`) rientra con `since` = il `ts` dell'ultima operazione ricevuta o confermata (`hubBase = String(op.ts ?? hubBase …)`) e ri-timbra solo nel caso `resync` di `planRejoin` (`hub.ts`). EMtools rientra con `SESSION.last_applied` = il `ts` massimo visto (`room_session.py`) e ri-timbra solo sul resync. StratiField non manda `since` (apre il socket senza) e consegna la coda del ponte, anche da `POST /ops`, con il `ts` del momento della dettatura, senza ri-timbrare. **Quindi il difetto è raggiungibile oggi anche sul socket**: EMStudio o EMtools che rientrano dopo una consegna in ritardo di StratiField non la ricevono nel replay. Il socket non è stato toccato.
+
 ### Proposta per le due rotte nuove
 
 Un cursore basato sull'**arrivo al server**, opaco per il client:
@@ -104,6 +106,7 @@ Costa questo, e va detto:
 1. `Journal.append` aggiunge `"seq"` alla riga; `seq` si recupera all'apertura leggendo l'ultima riga.
 2. Una riga-marcatore `{"epoca": "…"}` come quella di `compacted_upto`. **`Journal.read()` oggi conta come illeggibile ogni riga senza `"op"`** (salta solo quelle con `compacted_upto`): un marcatore nuovo, senza un `if` che lo salti, finirebbe nel contatore `unreadable` e in `/health` come registro rovinato. E `_prune` deve salvarlo, come salva il marcatore di compattazione.
 3. Il marcatore di compattazione porta anche `seq` al momento in cui è stato scritto. La regola `unsafe` diventa: il cursore è precedente a quel `seq`. **È una traduzione della regola di `_replay_plan`, non una derivazione**: va confermata con chi conosce il contratto di s3Dgraphy sulla compattazione prima di fidarsene.
+   **17 ott: la regola implementata è un'altra, e il perché è misurato.** «Il cursore è precedente a una compattazione» rifiuterebbe il feed a ogni `POST /ops` con un desktop seduto, perché `apply_from_connector` compatta a ogni consegna quando c'è un watermark. Il feed sul numero d'arrivo è completo anche dopo una compattazione (la compattazione non taglia il registro; la potatura sì, ed è `incomplete`). Il caso pericoloso è un'operazione **arrivata dopo una compattazione con un `ts` più vecchio del punto compattato** — il telefono tornato dal sommerso dopo la pulizia, che viola la precondizione di `s3dgraphy.api.compact` — e `unsafe` rifiuta quello. Da confermare con chi mantiene il contratto; la regola è in `roomview.operations_after`.
 4. Le righe già scritte, senza `seq`, restano leggibili. Un cursore che cade prima della prima riga con `seq` riceve `incomplete` con `horizon: began` («prima di qui questo server non sa»), la stessa distinzione `pruned`/`began` che `changes_since` fa già.
 5. `Journal.read_rows()` nuovo, che restituisce le righe intere (`at`, `seq`, `op`) senza toccare `read()`, che altri usano.
 
@@ -111,7 +114,7 @@ Costa questo, e va detto:
 
 Tenere il cursore su `ts` e riusare `_replay_plan` com'è. È un lavoro di mezza giornata e c'è una sola logica di rifiuto invece di due. Ma consegna al telefono esattamente il difetto sopra. Se si sceglie questa strada, il documento va corretto con la frase «le operazioni offline consegnate in ritardo possono sfuggire a chi ha già un cursore più recente», e StratiField deve rileggere il documento intero a ogni ripresa. Si perde quasi tutto il vantaggio della rotta `/ops`.
 
-**La decisione è tua:** cursore sull'arrivo (consigliato) o su `ts`. Le due rotte sono scritte per l'opaco `cursore`, quindi la forma delle risposte non cambia; cambia solo cosa c'è dietro.
+**La decisione è tua:** cursore sull'arrivo (consigliato) o su `ts`. *(17 ott: A, il default della MICRO; E.D. non ha scritto una scelta diversa.)* Le due rotte sono scritte per l'opaco `cursore`, quindi la forma delle risposte non cambia; cambia solo cosa c'è dietro.
 
 ---
 

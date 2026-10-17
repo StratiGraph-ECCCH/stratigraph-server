@@ -193,7 +193,12 @@ def test_il_registro_e_un_file_ACCANTO_e_non_dentro(tmp_path, client, durevole):
     documento = json.loads((tmp_path / f"{ROOM}.em.json").read_text(encoding="utf-8"))
     assert "oplog" not in json.dumps(documento)
     righe = [json.loads(l) for l in registro.read_text(encoding="utf-8").splitlines()]
-    assert all(set(r) == {"at", "op"} for r in righe)
+    # dal 17 ottobre 2026 ogni riga porta anche `seq`, il numero d'arrivo, e
+    # il registro ha un marcatore d'epoca (`app/oplog.py`): niente altro
+    marcatori = [r for r in righe if "op" not in r]
+    righe = [r for r in righe if "op" in r]
+    assert [set(m) for m in marcatori] == [{"at", "epoch", "from_seq"}]
+    assert all(set(r) == {"at", "seq", "op"} for r in righe)
     # `at` è l'istante del SERVER, `ts` quello del client: due orologi, due usi
     assert righe[0]["at"] != righe[0]["op"]["ts"]
 
@@ -467,7 +472,8 @@ def test_health_dice_se_la_storia_dura(client, durevole):
     salute = client.get("/health").json()["oplog"]
     assert salute["durable"] is True
     assert salute["keep_per_room"] == oplog.KEEP_OPS
-    assert salute["rooms_with_a_log"] == 1 and salute["entries"] == 3
+    # `entries` conta le righe: tre operazioni e il marcatore d'epoca
+    assert salute["rooms_with_a_log"] == 1 and salute["entries"] == 4
     assert salute["shortest_memory"]["room"] == ROOM
     assert salute["shortest_memory"]["reaches_back_to"] == "2026-09-28T10:00:00Z"
 
