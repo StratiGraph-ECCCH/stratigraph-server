@@ -766,6 +766,14 @@ def health() -> Health:
             "export_ttl": importable("rdflib"),
             "reproject": importable("pyproj"),
             "resolve_authority": bool(em.authority_facets()),
+            # LE DUE LETTURE DELLA STANZA SENZA SOCKET (17 ott 2026), annunciate
+            # perché StratiField sceglie la modalità smartphone prima di
+            # provarle. Il feed vale solo dove il registro dura: senza, ogni
+            # domanda riceverebbe `no_durable_log`, e annunciare una porta che
+            # risponde sempre di no è un 501 travestito.
+            "room_document_read": True,
+            "room_ops_feed": oplog_module.journal_for(
+                snapshot_store(), "esempio") is not None,
         },
         # read at call time: the constant is defined with the ops door below
         limits={"ops_batch_max": OPS_BATCH_MAX},
@@ -4002,6 +4010,158 @@ async def room_changes(room_id: str, request: Request,
     """
     room, _who = await _reader(room_id, request)
     return RoomChanges(**roomview.changes_since(room, since or None))
+
+
+class RoomDocument(BaseModel):
+    """Il documento della stanza com'è adesso, e il cursore da cui ripartire.
+
+    Stesso documento della frame `snapshot` del socket, chat compresa: chi è
+    nella stanza vede quello che vedrebbe dal socket. Il confine della
+    pubblicazione (`document_view`) è un'altra porta.
+    """
+
+    room_id: str
+    #: `"<epoca>:<seq>"`, opaco: da passare così com'è a `GET …/ops?after=`.
+    #: `null` quando la stanza non ha un registro durevole (store in memoria).
+    cursor: Optional[str] = None
+    taken_at: str
+    role: str
+    can_write: bool
+    gc_watermark: Optional[str] = None
+    graph_id: Optional[str] = None
+    doc: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RoomOpsFeed(BaseModel):
+    """Le operazioni arrivate dopo un cursore, o un rifiuto che dice perché.
+
+    Un rifiuto è un **200 con `granted: false`** e non porta mai un `cursor`:
+    l'unico modo di averne uno nuovo è rileggere il documento (`resync`).
+    """
+
+    room_id: str
+    granted: bool
+    after: Optional[str] = None
+    cursor: Optional[str] = None
+    count: int = 0
+    has_more: bool = False
+    #: `{graph_id, op}`, la forma di una frame `op` del socket
+    operations: List[Dict[str, Any]] = Field(default_factory=list)
+    #: solo nei rifiuti: `no_cursor`, `no_durable_log`, `unknown_cursor`,
+    #: `incomplete`, `unsafe`
+    reason: Optional[str] = None
+    detail: Optional[str] = None
+    resync: Optional[str] = None
+    #: `pruned` o `began`, per `incomplete`
+    horizon: Optional[str] = None
+    compacted_upto: Optional[str] = None
+
+
+@v1.get("/rooms/{room_id}/document", tags=["rooms"],
+        response_model=RoomDocument,
+        responses={403: {"description": "not a member of this room"},
+                   404: {"description": "no such room, or no such graph"}})
+async def room_document(room_id: str, request: Request,
+                        graph_id: Optional[str] = Query(
+                            default=None,
+                            description="one graph of the container only "
+                                        "(the phone that does not need the "
+                                        "whole study). Absent: all of it.")
+                        ) -> Response:
+    """Il documento della stanza, e il cursore da cui riprendere — senza socket.
+
+    È la prima metà della porta REST della stanza (`docs/REST-API.md`): chi
+    lavora dal telefono apre con questa, scrive con `POST …/ops`, e alla
+    ripresa chiede `GET …/ops?after=<cursor>`.
+
+    **IL DOCUMENTO E IL CURSORE ESCONO DALLO STESSO ISTANTE.** Dal ritorno di
+    `_acting_role` in poi il gestore non attraversa nessun `await`: il
+    cursore si legge e il documento si serializza in un tratto sincrono, e la
+    risposta è una `Response` con i byte già pronti, non un modello che
+    FastAPI serializzerebbe dopo. Le scritture della stanza
+    (`apply_from_connector`, il socket) sono codice sincrono fra `apply` e
+    `record`, quindi un tratto sincrono non cade in mezzo a una. Se cadesse
+    fra `apply` e `record` di una via che avesse un `await` lì in mezzo, il
+    documento conterrebbe un'operazione che il cursore non ha ancora contato:
+    il feed la ridarebbe, ed è innocuo (le operazioni sono idempotenti). Il
+    verso pericoloso — un cursore più avanti del documento — non può
+    succedere, perché il registro si scrive dopo l'applicazione.
+
+    Porta: **essere della stanza**, a qualunque ruolo (`_reader`). `role` e
+    `can_write` viaggiano con la risposta, così il client sa se può scrivere
+    prima di provarci.
+    """
+    import json as _json
+    from .rooms import now_iso
+    _acl, room, role, _who = await _acting_role(room_id, request)
+    if role is None:
+        raise HTTPException(status_code=403, detail="not a member of this room")
+    # ── da qui, nessun await ─────────────────────────────────────────────
+    doc = room.document
+    section_key = None
+    if graph_id:
+        section_key = room._section_id(graph_id)
+        if section_key is None:
+            raise HTTPException(status_code=404,
+                                detail=f"this room has no graph {graph_id!r}")
+        doc = {**{k: v for k, v in room.document.items() if k != "graphs"},
+               "graphs": {section_key: room.document["graphs"][section_key]}}
+    cursor = room.journal.cursor() if room.journal is not None else None
+    body = _json.dumps({
+        "room_id": room.room_id, "cursor": cursor, "taken_at": now_iso(),
+        "role": role.value, "can_write": bool(role.can_write),
+        "gc_watermark": room.compacted_upto,
+        "graph_id": section_key, "doc": doc}, ensure_ascii=False)
+    return Response(content=body.encode("utf-8"),
+                    media_type="application/json")
+
+
+@v1.get("/rooms/{room_id}/ops", response_model=RoomOpsFeed, tags=["rooms"],
+        responses={403: {"description": "not a member of this room"},
+                   404: {"description": "no such room"}})
+async def room_ops_feed(room_id: str, request: Request,
+                        after: str = Query(
+                            default="",
+                            description="the cursor from GET …/document or "
+                                        "from the last page of this feed. "
+                                        "Empty: refused with `no_cursor`."),
+                        limit: int = Query(
+                            default=roomview.FEED_LIMIT_DEFAULT, ge=1,
+                            description="operations per page; at most "
+                                        "ops_batch_max from /v1/health")
+                        ) -> RoomOpsFeed:
+    """Le operazioni arrivate dopo il cursore, in ordine di ARRIVO al server.
+
+    È il replay del socket, per chi non tiene il socket aperto. Ogni voce ha la
+    forma di una frame `op` (`{graph_id, op}`), così un client ha un lettore
+    solo per le due porte.
+
+    **Il cursore è un numero d'arrivo, non un orologio** (`app/oplog.py`):
+    un telefono che consegna alle 11:05 il lavoro delle 10 arriva dopo il
+    cursore di chi ha letto alle 11:00, e chi ha letto lo riceve. Un cursore
+    sul `ts` dell'operazione — quello del socket — non lo vedrebbe mai.
+
+    **Il proprio lavoro torna nel feed**: il cursore non avanza con le proprie
+    scritture, e le operazioni appena mandate con `POST …/ops` tornano qui con
+    quelle degli altri. Sono idempotenti; un cursore spostato avanti da sé
+    salterebbe ciò che altri hanno scritto nel frattempo.
+
+    **Un rifiuto è un 200 con `granted: false`**, e non porta un cursore. I
+    motivi e la regola di `unsafe` sono scritti in
+    `roomview.operations_after`. In tutti i casi il rimedio è uno:
+    `GET …/document`, poi ri-applicare la propria coda non confermata.
+
+    `limit` ha lo stesso tetto di `POST …/ops` (`OPS_BATCH_MAX`), per la
+    stessa ragione; con `has_more` si riprende da `cursor`.
+    """
+    room, _who = await _reader(room_id, request)
+    if limit > OPS_BATCH_MAX:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{limit} operations in one page, and this node serves "
+                   f"{OPS_BATCH_MAX}: ask for fewer and follow `has_more`.")
+    return RoomOpsFeed(**roomview.operations_after(room, after or None,
+                                                   limit=limit))
 
 
 class RoomChat(BaseModel):

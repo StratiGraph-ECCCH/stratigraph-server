@@ -13,6 +13,14 @@ Le domande vere sono quattro, e questo modulo le risponde:
 
 * **cosa è cambiato da quando non guardavo** — `changes_since`
 
+E, dal 17 ottobre 2026, la lettura che serve a chi **non ha il socket**: le
+operazioni dopo un cursore, nella forma del filo — `operations_after`. Non è
+una domanda di chi guarda, è la porta REST del replay (vedi
+`docs/SPEC-REST-LETTURA-STANZA.md`). Sta qui perché legge e basta: il cursore
+lo dà `Journal.cursor()`, chiamata dalla rotta del documento (che può scrivere,
+una volta nella vita del registro, il marcatore d'epoca: è il registro a
+scriverlo, non questo modulo).
+
 La quinta è arrivata il 3 ottobre, e per tre settimane **non era qui** con una
 ragione che vale la pena tenere scritta: il registro delle operazioni viveva
 solo in memoria, tagliato a 512, e una stanza dimenticata e ricostruita — cioè
@@ -748,3 +756,149 @@ def changes_since(room: Any, since: Optional[str], *,
         "last_at": riga["last_at"],
     } for riga in unita[:limit]]
     return fuori
+
+
+
+# ── la porta REST del replay ─────────────────────────────────────────────────
+
+#: I motivi di un rifiuto. I primi due hanno il nome di quelli di
+#: `ws._replay_plan`; gli altri tre esistono solo qui.
+FEED_UNSAFE = "unsafe"
+FEED_INCOMPLETE = "incomplete"
+FEED_UNKNOWN_CURSOR = "unknown_cursor"
+FEED_NO_DURABLE_LOG = "no_durable_log"
+FEED_NO_CURSOR = "no_cursor"
+
+#: Il default e il tetto di `limit`. Il tetto è quello di `POST /ops`
+#: (`OPS_BATCH_MAX`), passato dalla rotta: qui non si importa `main`.
+FEED_LIMIT_DEFAULT = 500
+
+
+def _refusal(room: Any, reason: str, detail: str,
+             **extra: Any) -> Dict[str, Any]:
+    """Un rifiuto: **nessun cursore nuovo**, ed è voluto. L'unico modo di
+    ottenerne uno è rileggere il documento; un client che potesse avanzare il
+    cursore senza averlo ricevuto si crederebbe allineato senza esserlo."""
+    return {"room_id": room.room_id, "granted": False, "reason": reason,
+            "detail": detail,
+            "resync": f"/v1/rooms/{room.room_id}/document",
+            "operations": [], **extra}
+
+
+def operations_after(room: Any, after: Optional[str], *,
+                     limit: int = FEED_LIMIT_DEFAULT) -> Dict[str, Any]:
+    """Le operazioni arrivate dopo il cursore, in ordine di arrivo.
+
+    ════════════════════════════════════════════════════════════════════════
+    ## SUL NUMERO D'ARRIVO, NON SUL `ts`
+
+    Il cursore è `"<epoca>:<seq>"` (`app/oplog.py`). Un telefono che consegna
+    alle 11:05 operazioni timbrate alle 10 le vede arrivare qui con un `seq`
+    più grande di quello di chi ha letto alle 11:00, e quindi chi ha letto le
+    riceve. Con un cursore sul `ts` non le vedrebbe mai: è la prova del
+    telefono in `tests/test_leggere_la_stanza_senza_socket.py`.
+
+    ## I RIFIUTI, e nessuno porta un cursore
+
+    * `no_cursor` — nessun `after`: è la prima volta, si legge il documento;
+    * `no_durable_log` — la stanza non ha un registro su disco;
+    * `unknown_cursor` — malformato, di un'altra stanza, di un'altra vita del
+      registro (epoca), o più avanti di quanto il registro abbia mai scritto;
+    * `incomplete` — il registro non arriva così indietro (`pruned`: potato;
+      `began`: righe di prima del numero d'arrivo, non indirizzabili);
+    * `unsafe` — vedi sotto.
+
+    ## `unsafe`: QUANDO LA COMPATTAZIONE CONTA PER UN FEED, e quando no
+
+    Il socket rifiuta un cursore più vecchio di `compacted_upto` perché il
+    suo cursore è un `ts` e la sua finestra in memoria è tagliata alla
+    compattazione: da lì in poi la riproduzione non sarebbe più tutta. Qui il
+    cursore è un numero d'arrivo e il registro **non** è tagliato dalla
+    compattazione (solo dalla potatura, che è `incomplete`): le righe dopo il
+    cursore ci sono tutte, e applicate sul documento del client lo portano
+    dove è la stanza. Rifiutare per una compattazione qualsiasi dopo il
+    cursore — la prima bozza, 12 ottobre — avrebbe rifiutato il feed **a ogni
+    scrittura REST con un desktop seduto**, perché `apply_from_connector`
+    compatta a ogni consegna quando c'è un watermark: il telefono avrebbe
+    riletto il documento intero a ogni ripresa.
+
+    Il caso pericoloso è un altro, e questo lo rifiuta: **un'operazione
+    arrivata dopo una compattazione e più vecchia del punto compattato**
+    (`ts < compacted_upto` in vigore al suo arrivo). È il telefono tornato dal
+    sommerso dopo che la stanza ha fatto pulizia: la stanza l'ha fusa con la
+    contabilità già buttata, il client la fonderebbe con la sua, che è ancora
+    intera, e le due fusioni possono dare risultati diversi. Lì il feed non
+    garantisce più che il client arrivi dove è la stanza, e si rilegge il
+    documento. **È una regola dedotta dal contratto di `s3dgraphy.api.compact`
+    («nessuna operazione più vecchia può ancora arrivare»), non confermata da
+    chi lo mantiene**: scritta così nel referto del 17 ottobre, da confermare.
+    """
+    if not after:
+        return _refusal(room, FEED_NO_CURSOR,
+                        "no cursor: this is a first look. Read the document, "
+                        "which comes with the cursor to start from.")
+    journal = getattr(room, "journal", None)
+    if journal is None:
+        return _refusal(room, FEED_NO_DURABLE_LOG,
+                        "this room keeps no log on disk on this node, so it "
+                        "has no memory beyond the process: read the document.")
+    from .oplog import parse_cursor
+    letto = parse_cursor(after)
+    stato = journal.read_rows()
+    if letto is None or stato["epoch"] is None or letto[0] != stato["epoch"]:
+        return _refusal(room, FEED_UNKNOWN_CURSOR,
+                        "this cursor does not belong to this room's log — "
+                        "malformed, from another room, or from a log that "
+                        "has since been rebuilt: read the document.")
+    _epoca, numero = letto
+    ultimo = int(stato["last_seq"] or 0)
+    if numero > ultimo:
+        return _refusal(room, FEED_UNKNOWN_CURSOR,
+                        f"this cursor is ahead of the log ({numero} > "
+                        f"{ultimo}): it was not issued here. Read the "
+                        f"document.")
+    da = int(stato["from_seq"] or 0)
+    if numero < da:
+        return _refusal(room, FEED_INCOMPLETE,
+                        "before this point the log has no arrival numbers: "
+                        "this server does not know what came after your "
+                        "cursor. Read the document.", horizon="began")
+    righe = [r for r in stato["rows"] if isinstance(r.get("seq"), int)
+             and r["seq"] > numero]
+    if ultimo > numero:
+        primo = righe[0]["seq"] if righe else None
+        if primo != numero + 1 or len(righe) < ultimo - numero:
+            return _refusal(room, FEED_INCOMPLETE,
+                            "this room's log no longer reaches back to your "
+                            "cursor: a partial feed would leave you believing "
+                            "you are caught up. Read the document.",
+                            horizon="pruned")
+    # LA COMPATTAZIONE IN VIGORE ALL'ARRIVO DI OGNI RIGA. Un segno senza `seq`
+    # (registri di prima) vale da prima di tutte le righe numerate: è la
+    # lettura prudente.
+    segni = []
+    for segno in stato["compactions"]:
+        n = segno.get("seq")
+        if segno.get("upto"):
+            segni.append((n if isinstance(n, int) else da, str(segno["upto"])))
+    for riga in righe:
+        in_vigore = max((upto for n, upto in segni if n < riga["seq"]),
+                        default=None)
+        ts = str((riga.get("op") or {}).get("ts") or "")
+        if in_vigore and ts and ts < in_vigore:
+            return _refusal(room, FEED_UNSAFE,
+                            f"an operation stamped {ts} arrived after this "
+                            f"room had compacted up to {in_vigore}: the room "
+                            f"merged it without the bookkeeping it had "
+                            f"already forgotten, and replaying it on top of "
+                            f"what you hold could land somewhere else. Read "
+                            f"the document.", compacted_upto=in_vigore)
+    pagina = righe[:max(1, int(limit))]
+    fino = pagina[-1]["seq"] if pagina else numero
+    operazioni = []
+    for riga in pagina:
+        corpo, grafo = room.replay_entry(riga["op"])
+        operazioni.append({"graph_id": grafo, "op": corpo})
+    return {"room_id": room.room_id, "granted": True, "after": after,
+            "cursor": f"{stato['epoch']}:{fino}", "count": len(operazioni),
+            "has_more": len(righe) > len(pagina), "operations": operazioni}
