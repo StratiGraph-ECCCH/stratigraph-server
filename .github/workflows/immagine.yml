@@ -49,6 +49,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+      # Un tag che non è la versione del pacchetto pubblicherebbe un'immagine
+      # con un nome e un contenuto diversi: si ferma qui, prima di costruire.
+      - name: Il tag e la versione dicono la stessa cosa
+        if: github.ref_type == 'tag'
+        run: |
+          v=$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -1)
+          if [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "::error::il tag è $GITHUB_REF_NAME ma pyproject.toml dice $v: il tag giusto è v$v"
+            exit 1
+          fi
 
       # ── LA VERSIONE DI s3Dgraphy, DICHIARATA O NIENTE ──────────────────────
       #
@@ -66,6 +76,10 @@ jobs:
         run: |
           v="${{ inputs.s3dgraphy_version }}"
           [ -n "$v" ] || v="${{ vars.S3DGRAPHY_VERSION }}"
+          # …e se nessuno la dice, quella che `pyproject.toml` richiede: è il pin
+          # che il rilascio di s3Dgraphy scrive a ogni giro, quindi un tag
+          # pubblicato porta la versione con cui il repository è stato provato.
+          [ -n "$v" ] || v=$(sed -nE 's/.*"s3dgraphy(\[[a-z,]+\])?(==|>=)([0-9][0-9a-z.]*)".*/\3/p' pyproject.toml | head -1)
           if [ -z "$v" ]; then
             echo "::error::S3DGRAPHY_VERSION non è dichiarata. Mettila nelle" \
                  "variabili del repository (Settings → Secrets and variables →" \
