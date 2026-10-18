@@ -4,7 +4,7 @@
 # institutional node are the same service — is provisioned with the Ansible /
 # compose of production (heriverse-ansible). What runs here is the SAME
 # em-server image, the SAME wire, and the SAME S3 implementation of the
-# AssetStore (RustFS here since 18 October 2026: MinIO is deprecated and gone).
+# AssetStore (RustFS).
 # This file only puts the two things it depends on next to it, so the promotion
 # arc can be exercised against a REAL object store without a remote host.
 #
@@ -223,15 +223,11 @@ services:
   # OBJECT STORE — where the assets actually live (content-addressed)
   # =======================================================================
   rustfs:
-    # ── PERCHÉ RUSTFS, E DA QUANDO ──────────────────────────────────────────
+    # ── PERCHÉ RUSTFS ───────────────────────────────────────────────────────
     #
-    # Fino al 18 ottobre 2026 qui c'era MinIO. MinIO community si è allontanata
-    # dall'open source ed è deprecata per questo progetto; RustFS (Apache-2.0)
-    # parla lo stesso S3. La prova del 17 ottobre (`docker-compose.rustfs.yml`,
-    # ora tolto: la storia è nel git) ha misurato che ogni chiamata del server,
-    # di Cantaloupe, del catalogo e del chatbot è un'operazione S3 standard, e
-    # che smoke e suite passano invariati. Chi ha ancora i dati nel volume
-    # `em-dev_minio_data` li porta qui con `migra-minio-rustfs.sh` (una volta).
+    # RustFS (Apache-2.0) parla S3 e niente di più di quanto serve: la prova del
+    # 17 ottobre 2026 ha misurato che ogni chiamata del server, di Cantaloupe,
+    # del catalogo e del chatbot è un'operazione S3 standard.
     #
     # ── PINNATA, E IL DIGEST ACCANTO ────────────────────────────────────────
     #
@@ -285,8 +281,7 @@ services:
     volumes:
       # L'immagine gira come 10001 e la sua `/data` è già di 10001: un volume
       # nominato e vuoto ne eredita il proprietario alla prima creazione, quindi
-      # niente `chown` a parte (misurato il 17 ottobre). Volume NUOVO, non
-      # `minio_data`: il formato su disco di MinIO non è quello di RustFS.
+      # niente `chown` a parte (misurato il 17 ottobre).
       - rustfs_data:/data
     healthcheck:
       # the readiness endpoint, not a port check: a listening socket is not a
@@ -296,7 +291,7 @@ services:
       timeout: 3s
       retries: 20
     # `unless-stopped` COME TUTTI GLI ALTRI, e fino al 2026-09-19 questa chiave
-    # mancava (allora su MinIO). Un riavvio della VM di Colima ha riportato su il
+    # mancava. Un riavvio della VM di Colima ha riportato su il
     # nodo con sei servizi sani e SENZA object store, che e' la condizione
     # peggiore — sembra accesso e non lo e'.
     restart: unless-stopped
@@ -306,8 +301,8 @@ services:
   # first request even if em-server is started with credentials that are not
   # allowed to create buckets — which is what production looks like.
   #
-  # Senza `mc`, che è uno strumento di MinIO: una `PUT /<bucket>` firmata SigV4
-  # con il curl dell'immagine di RustFS è la CreateBucket di S3 e nient'altro;
+  # Senza client a parte: una `PUT /<bucket>` firmata SigV4 con il curl
+  # dell'immagine di RustFS è la CreateBucket di S3 e nient'altro;
   # 409 (BucketAlreadyOwnedByYou) è «c'è già». Stessa immagine, stesso digest.
   rustfs-init:
     image: rustfs/rustfs:1.0.2  # sha256:7e948dad4748bda48f8985fda7195f8cf2e4259427011f6120acc2c9acf51587
@@ -660,7 +655,7 @@ services:
     # file ha `restart: unless-stopped` su ogni servizio di lunga durata
     # (cantaloupe, caddy, stratigraph-server, chatbot, catalog, nodeodm,
     # couchdb, pyarchinit-mini) e `restart: "no"` UNA volta sola, su
-    # `minio-init` (oggi `rustfs-init`), che e' un one-shot e li' e' giusto.
+    # `rustfs-init`, che e' un one-shot e li' e' giusto.
     # Nessun commento, in nessun punto del file o di `fcn-up.sh`, spiegava
     # l'assenza qui.
     #
@@ -1073,8 +1068,7 @@ services:
       EM_CHATBOT_CLIENT_ID: "${EM_CHATBOT_CLIENT_ID:-em-console}"
       # --- the object store: the SAME variables the server reads --------------
       # Reused rather than paralleled: two spellings of one bucket is how one of
-      # them ends up pointing somewhere else. Il chatbot legge `EM_ASSET_S3_*`
-      # accanto ai suoi vecchi `MINIO_*` (`stratigraph-chatbot/app/assets.py`).
+      # them ends up pointing somewhere else (`stratigraph-chatbot/app/assets.py`).
       EM_ASSET_S3_ENDPOINT: "http://rustfs:9000"
       EM_ASSET_S3_ACCESS_KEY: "${RUSTFS_ACCESS_KEY}"
       EM_ASSET_S3_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
@@ -1108,8 +1102,8 @@ services:
       # servizio sulla rete di compose.
       EM_ROOM_SERVERS: "${EM_CHATBOT_ROOM_SERVERS:-${EM_PUBLIC_BASE:-https://em.localhost:${HTTPS_PORT:-8443}/em}=http://stratigraph-server:8000}"
       # --- LA DISPENSA: dove aspettano i byte che non sono ancora saliti ------
-      # Misurato il 30 settembre, staccando l'object store (allora MinIO) con
-      # il servizio in piedi: una foto di cantiere impiega 306 s a fallire e poi non e' da nessuna parte,
+      # Misurato il 30 settembre, staccando l'object store con il servizio in
+      # piedi: una foto di cantiere impiega 306 s a fallire e poi non e' da nessuna parte,
       # mentre l'US scritta un istante prima esiste. Il ponte accanto al
       # container accoda OPERAZIONI (173 byte l'una) e una foto sono quattro
       # megabyte: i byte hanno bisogno di un posto loro.
@@ -1285,8 +1279,8 @@ services:
       OIDC_JWKS_URI: "http://keycloak:8080/auth/realms/${DEV_REALM}/protocol/openid-connect/certs"
       OIDC_AUDIENCE: "${DEV_CLIENT_ID}"
       # --- the studies: the SAME bucket as the assets, under `studies/` -------
-      # `EM_ASSET_S3_*`: il catalogo le legge accanto ai suoi vecchi `MINIO_*`
-      # (`stratigraph-catalog/app/store.py`), quindi un nome solo per tutta la
+      # `EM_ASSET_S3_*`, come il server e il chatbot
+      # (`stratigraph-catalog/app/store.py`): un nome solo per tutta la
       # pila. (no _SECURE: the scheme of the endpoint decides — `http://` means
       # somebody chose plain. One fact, one place.)
       EM_ASSET_S3_ENDPOINT: "http://rustfs:9000"

@@ -14,19 +14,15 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
     `/assets/*` → `rustfs:9000`. In `.env.dev` le chiavi sono `RUSTFS_*`; server,
     catalogo e chatbot ricevono tutti `EM_ASSET_S3_*`. La pila di prova
     (`docker-compose.rustfs.yml`, `README-RUSTFS.md`) è tolta: ha fatto il suo.
-  - **Migrazione, una volta:** `dev-stack/migra-minio-rustfs.sh` aggiunge le
-    chiavi `RUSTFS_*` a `.env.dev` (stessi valori), copia il bucket dalla
-    vecchia MinIO e lo verifica (conteggi, byte, sha256 di un campione). Il
-    volume `em-dev_minio_data` resta come copia. `fcn-up.sh` si ferma su un
-    `.env.dev` di prima, con il comando da lanciare.
   - **Server:** il client è `boto3` (`app/s3client.py`), non più `minio-py`;
     extra `[s3]` = `boto3>=1.34`. Via gli alias `Minio*`. Si leggono solo
-    `EM_ASSET_S3_*` (e `EM_ASSET_S3_CONSOLE_URL`); un vecchio `MINIO_*` ferma
-    l'avvio con una frase che nomina quello nuovo. Il controllo di salute del
+    `EM_ASSET_S3_*` (e `EM_ASSET_S3_CONSOLE_URL`). Il controllo di salute del
     nodo si chiama `s3` e bussa a `<endpoint>/health`.
-  - **Non qui:** il ruolo di produzione (`heriverse-ansible`) porta ancora
-    MinIO; il catalogo e il chatbot usano ancora `minio-py` dentro i loro
-    repository (parlano S3 a RustFS senza problemi).
+  - **Ovunque, lo stesso giorno:** il ruolo di produzione (`heriverse-ansible`),
+    Heriverse-Docker, il catalogo, il chatbot, s3Dgraphy (`s3_backend`,
+    `ingest_s3_resource`), EM-tools ed EMStudio. Gli asset della pila di
+    sviluppo sono stati copiati e verificati (9672 oggetti, 5,77 GB); i nomi
+    `MINIO_*` non sono più né letti né riconosciuti.
 
 ### Aggiunto
 

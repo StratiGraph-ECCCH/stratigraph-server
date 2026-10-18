@@ -207,8 +207,7 @@ def main() -> int:
     tally.ok(states.get("stratigraph-server", {}).get("state") == "ok",
              "the node reports on ITSELF (it answered, so it is ok)")
     # A stopped service must not read «ok». Measured for real by stopping the
-    # object store (then MinIO) —
-    # see docs/NODE-CONSOLE.md; here we assert the weaker property the smoke can
+    # object store — see docs/NODE-CONSOLE.md; here we assert the weaker property the smoke can
     # check on a healthy stack: nothing is «ok» without having been asked.
     for name, check in states.items():
         if check.get("state") == "ok" and name != "stratigraph-server":

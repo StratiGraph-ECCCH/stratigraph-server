@@ -113,8 +113,7 @@ def e_interno(nome: str, valore: str, servizi) -> bool:
 
     Il secondo modo è stato aggiunto eseguendo: la prima versione guardava solo
     il suffisso e inciampava su `CANTALOUPE_S3SOURCE_ENDPOINT` e
-    `MINIO_ENDPOINT` (oggi `EM_ASSET_S3_ENDPOINT`), che nominano container e
-    non macchine.
+    `EM_ASSET_S3_ENDPOINT`, che nominano container e non macchine.
     """
     if (nome.endswith("_INTERNAL") or nome.endswith("_INTERNAL_BASE")
             or nome in _INTERNI_PER_NOME):

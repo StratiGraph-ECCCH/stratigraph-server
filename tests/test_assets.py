@@ -175,10 +175,6 @@ def test_4b_the_production_store_is_named_and_real():
         assert method in source
     # it is the same class the deployment runs — not a dev double beside it
     assert "class S3AssetStore" in source and "moto" not in source
-    # …and there is ONE name for it. The old vendor alias was removed with
-    # the vendor's client (October 2026): a second name for the same class is
-    # a second thing a reader has to learn is not a second store.
-    assert not hasattr(assets, "MinioAssetStore")
     assert "from . import s3client" in source, "the client is built in one place"
 
 
@@ -220,8 +216,7 @@ def test_5b_nothing_configured_is_memory_and_a_directory_is_a_directory(tmp_path
 
 def test_5c_the_settings_have_one_spelling():
     """`EM_ASSET_S3_*` — what the Ansible role writes, and a name that is true
-    whatever S3 answers. One name per setting: the old `MINIO_*` spelling is
-    no longer read (October 2026, when the dev stack moved to RustFS)."""
+    whatever S3 answers. One name per setting."""
     settings = assets._s3_settings({
         "EM_ASSET_S3_ENDPOINT": "https://s3.example.org",
         "EM_ASSET_S3_ACCESS_KEY": "key",
@@ -235,38 +230,6 @@ def test_5c_the_settings_have_one_spelling():
         "EM_ASSET_S3_SECRET_KEY": "s", "EM_ASSET_S3_BUCKET": "b"})
     assert plain["secure"] is False, "http means somebody chose plain HTTP"
     assert assets._s3_settings({}) is None
-    assert not hasattr(assets, "_minio_settings"), "one name for one function"
-
-
-def test_5d_an_old_name_alone_REFUSES_to_start_it_is_not_ignored():
-    """The old `MINIO_*` names are no longer read — and a deployment that still
-    sets them must not find out by losing data. Ignoring them would give it the
-    in-memory or directory store while it believes it writes to the bucket:
-    the half-configured story of test 5, with all four settings missing at once.
-    So the process refuses, and the sentence names the variable to set."""
-    old = {"MINIO_ENDPOINT": "https://s3.example.org", "MINIO_ACCESS_KEY": "k",
-           "MINIO_SECRET_KEY": "s", "MINIO_BUCKET": "b"}
-    for build in (assets._s3_settings, assets.asset_store_from_env):
-        with pytest.raises(RuntimeError) as exc:
-            build(dict(old, EM_ASSET_DIR="/srv/em-data/assets"))
-        message = str(exc.value)
-        assert "MINIO_ENDPOINT → EM_ASSET_S3_ENDPOINT" in message
-        assert "MINIO_BUCKET → EM_ASSET_S3_BUCKET" in message
-        assert "no longer reads" in message
-        assert "s3.example.org" not in message and " s " not in message, \
-            "the refusal names the setting, never its value"
-    # ONE old name is enough: a lone MINIO_SECURE is still somebody's intent
-    with pytest.raises(RuntimeError, match="EM_ASSET_S3_SECURE"):
-        assets._s3_settings({"MINIO_SECURE": "false"})
-
-
-def test_5e_an_old_name_beside_its_new_one_is_a_leftover_and_the_new_one_wins():
-    """Refusing THAT would stop a node whose configuration is right."""
-    both = assets._s3_settings({
-        "EM_ASSET_S3_ENDPOINT": "http://rustfs:9000", "MINIO_ENDPOINT": "http://old:9000",
-        "EM_ASSET_S3_ACCESS_KEY": "k", "EM_ASSET_S3_SECRET_KEY": "s",
-        "EM_ASSET_S3_BUCKET": "b"})
-    assert both["endpoint"] == "http://rustfs:9000"
 
 
 def test_5f_secure_is_said_with_the_same_name():

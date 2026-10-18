@@ -57,7 +57,7 @@ Corollary for the next parameter: if it does not have a strong reason to exist
 |---|---|---|
 | **IIIF image service** | `EM_IIIF_INTERNAL` — StratiGraph Server → Cantaloupe, to read `info.json` | `EM_IIIF_PUBLIC` — written into every manifest and every image URL a client renders |
 | **Identity** | `OIDC_JWKS_URI` — StratiGraph Server → Keycloak, to fetch the signing keys | `OIDC_ISSUER` — what the TOKEN says, i.e. the address the user's browser got it from |
-| **Object store** | `EM_ASSET_S3_ENDPOINT` (the old name `MINIO_ENDPOINT` stops the server at startup, by name) — StratiGraph Server → the S3 store (RustFS on the dev stack) | `/assets/*` on the public host, for clients that fetch an asset by digest |
+| **Object store** | `EM_ASSET_S3_ENDPOINT` — StratiGraph Server → the S3 store (RustFS) | `/assets/*` on the public host, for clients that fetch an asset by digest |
 | **The room API** | (none: nobody dials StratiGraph Server from inside) | `/em/*` on the public host — the base EMStudio and EMtools are configured with |
 
 Older spellings are still read, in this order, so nothing breaks on upgrade:

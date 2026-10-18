@@ -7,15 +7,9 @@ The map of the pieces is [`ARCHITECTURE-SYSTEM.md`](ARCHITECTURE-SYSTEM.md);
 this is the operational half. The playbook itself lives in the
 [`heriverse-ansible`](../../heriverse-ansible) repository.
 
-> **MinIO → RustFS (18 October 2026).** The dev stack runs RustFS since that
-> day, and StratiGraph Server talks to its object store with `boto3`, reading
-> only `EM_ASSET_S3_*` (an old `MINIO_*` name stops it at startup, by name). The
-> production role below **still deploys MinIO** — its variables (`minio_enabled`,
-> `minio_root_user`, …) and its service are named for it, and that role lives in
-> `heriverse-ansible`, not here. It already writes `EM_ASSET_S3_*` for the
-> server, so the server is ready; swapping the role's MinIO for RustFS (and
-> copying the bucket across, as `dev-stack/migra-minio-rustfs.sh` does on a
-> laptop) is that repository's change, still to be made.
+> **The object store is RustFS** (`rustfs/rustfs:1.0.2`, pinned with its
+> digest), in this role as on the dev stack. StratiGraph Server and the two
+> sibling services talk to it with `boto3` and read only `EM_ASSET_S3_*`.
 
 ---
 
@@ -32,7 +26,7 @@ Nine containers behind one Caddy, which terminates TLS and routes by path:
 | `/em/*` | **StratiGraph Server** | rooms: the live graph, its assets, the WebSocket |
 | `/catalog/*` | **StratiGraph Catalog** | the studies as published: search, HDT view, "open in…" |
 | `/iiif/*` | cantaloupe | the IIIF Image API, straight out of the bucket |
-| `/assets/*` | minio | the object store's own API |
+| `/assets/*` | rustfs | the object store's own S3 API |
 
 Caddy obtains and renews the certificate itself. That single origin is not
 cosmetic: it is what removes mixed-content errors, and it is what makes a token
@@ -51,8 +45,8 @@ in a query string defensible for a viewer that cannot set a header.
    in each repo and pushed to the registry the defaults name
    (`git.3dresearch.it:5050/stratigraph/…`). Change `em_server_image` /
    `em_catalog_image` if they live somewhere else.
-4. **The secrets, from outside the repository.** MinIO's root credentials and
-   CouchDB's. There are **no defaults** for them, deliberately: a default
+4. **The secrets, from outside the repository.** RustFS's keys
+   (`rustfs_access_key` / `rustfs_secret_key`) and CouchDB's. There are **no defaults** for them, deliberately: a default
    password is the same password on every deployment. Put them in the inventory,
    in an Ansible Vault file, or in the environment.
 
@@ -182,19 +176,21 @@ Two notes for whoever runs it:
 |---|---|---|
 | `server_name` | `heriverse.example.com` | **the** domain. Everything public is derived from it |
 | `em_server_enabled` / `em_catalog_enabled` | `true` | whether the StratiGraph services come up at all |
-| `minio_enabled` | `true` | object store on. Off ⇒ StratiGraph Server falls back to a directory (single instance only) |
-| `iiif_enabled` | `true` | Cantaloupe on. Needs MinIO |
+| `rustfs_enabled` | `true` | object store on (RustFS, plus the one-shot `rustfs-init` that makes the bucket). Off ⇒ StratiGraph Server falls back to a directory (single instance only) |
+| `iiif_enabled` | `true` | Cantaloupe on. Needs the object store |
 | `em_catalog_couchdb_enabled` | `true` | the Catalog's index in CouchDB. Off ⇒ SQLite on a volume |
 | `em_server_audience` / `em_catalog_audience` | `StratiGraph Server` | the audience each service requires in a token |
-| `minio_root_user` / `_password`, `couchdb_user` / `_password` | **none** | from the inventory or the Vault |
+| `rustfs_access_key` / `rustfs_secret_key`, `couchdb_user` / `_password` | **none** | from the inventory or the Vault |
+| `rustfs_image`, `rustfs_bucket`, `rustfs_api_port` / `rustfs_console_port` | `rustfs/rustfs:1.0.2`, `em-assets`, `9000` / `9001` | the store, its bucket and its ports |
+| `em_asset_s3_console_url` | empty | the RustFS console link the node map offers (`EM_ASSET_S3_CONSOLE_URL`) |
 | `EM_CORPUS_CURATORS` (env on StratiGraph Server) | **empty** | the ORCIDs allowed to read the **whole** resident DTC corpus. The register's per-file **slice** (`GET /v1/corpus?sha256=…`) is open to any authenticated caller — that is what clients use — but the lot is the provenance of every study on the instance, so it is a curation read and it is **off until somebody is named**. A refusal is a 403 that says so |
 | `EM_CORPUS_OPEN` (env on StratiGraph Server) | unset | `1` opens the whole read to any authenticated caller. For a single-user instance; kept as one visible setting rather than a special case in the code |
-| `EM_CORPUS_DIR` (env on StratiGraph Server) | falls back to `EM_SNAPSHOT_DIR` | where the resident corpus lives **when there is no MinIO**. With MinIO configured the register rides in the same bucket as the assets it describes (`em/corpus.em.json`) and needs no setting |
+| `EM_CORPUS_DIR` (env on StratiGraph Server) | falls back to `EM_SNAPSHOT_DIR` | where the resident corpus lives **when there is no object store**. With the S3 store configured the register rides in the same bucket as the assets it describes (`em/corpus.em.json`) and needs no setting |
 
 The URL topology is **already correct** in the templates: StratiGraph Server writes
 `https://<server_name>/iiif/3` into its manifests and dials
 `http://cantaloupe:8182/iiif/3` to measure images; StratiGraph Catalog writes
-`https://<server_name>` into its "open in…" answers and reaches MinIO and CouchDB
+`https://<server_name>` into its "open in…" answers and reaches RustFS and CouchDB
 by service name. Nothing about it has to be assembled by hand — see
 [`URL-TOPOLOGY.md`](URL-TOPOLOGY.md) for why the two forms are two variables.
 
@@ -212,14 +208,16 @@ ansible-playbook render.yml -e tpl_src=role/templates/docker-compose.yml.j2 -e t
 docker-compose -f /tmp/dc.yml config
 ```
 
-Measured: **VALID**, nine services —
-`caddy cantaloupe couchdb StratiGraph Catalog StratiGraph Server heriverse heriverse-server
-keycloak minio` — and the volumes `couchdb_config couchdb_data em_catalog_data
-em_data keycloak_data minio_data`.
+Measured (18 October 2026): **VALID**, twelve services — `caddy cantaloupe
+couchdb heriverse heriverse-server keycloak postgres rustfs rustfs-init
+stratigraph-catalog stratigraph-chatbot stratigraph-server` — and the volumes
+`chatbot_data couchdb_config couchdb_data em_catalog_data em_data
+em_documents_data keycloak_data rustfs_data`.
 
 With the Catalog on its SQLite index and no object store
-(`em_catalog_couchdb_enabled: false`, `minio_enabled: false`,
-`iiif_enabled: false`): **VALID**, seven services, and the StratiGraph Catalog block
+(`em_catalog_couchdb_enabled: false`, `rustfs_enabled: false`,
+`iiif_enabled: false`): **VALID**, nine services, StratiGraph Server on
+`EM_ASSET_DIR`, and the StratiGraph Catalog block
 carries `EM_CATALOG_DB` instead of `COUCHDB_URL`. The config gating works in
 both directions, which is the point of testing the *off* case at all.
 
@@ -256,8 +254,7 @@ What to look for, in both answers:
   service did not get its OIDC environment and is answering to anybody;
 * StratiGraph Server: `"asset_store": "s3 (…)"` — if it says `memory`, uploads are
   living in a process and will vanish with it;
-* StratiGraph Catalog: `"container_store": "minio (…)"` (the catalogue's own
-  word for its S3 store) and `"index": "couchdb (…)"`.
+* StratiGraph Catalog: `"container_store": "s3 (…)"` and `"index": "couchdb (…)"`.
 
 Then the one that proves the architecture rather than the wiring:
 

@@ -194,12 +194,10 @@ def test_the_store_is_called_s3_and_knocked_at_its_health_door(monkeypatch):
 
 
 def test_the_console_link_has_ONE_name(monkeypatch):
-    """`EM_ASSET_S3_CONSOLE_URL`. The old vendor-named variable is not read: a
-    link nobody configured is no link, and a missing link is the worst it can
-    cost."""
+    """`EM_ASSET_S3_CONSOLE_URL`: a link nobody configured is no link, and a
+    missing link is the worst it can cost."""
     monkeypatch.setattr(nh, "_fetch", lambda url, **k: (200, None, None))
     monkeypatch.delenv("EM_ASSET_S3_CONSOLE_URL", raising=False)
-    monkeypatch.setenv("EM_MINIO_CONSOLE_URL", "http://localhost:9001")
     assert nh._probe_s3(Credentialed()).browser is None
     monkeypatch.setenv("EM_ASSET_S3_CONSOLE_URL", "http://localhost:9001/")
     assert nh._probe_s3(Credentialed()).browser == "http://localhost:9001"
@@ -217,7 +215,6 @@ def test_the_node_needs_its_store_by_the_new_name(monkeypatch):
     report = nh.node_health(version="0.0.0", s3dgraphy=None, asset_store=Down(),
                             environ={})
     states = {c["name"]: c["state"] for c in report["checks"]}
-    assert "minio" not in states
     assert states["s3"] == nh.UNREACHABLE
     assert report["verdict"] == nh.UNREACHABLE
 

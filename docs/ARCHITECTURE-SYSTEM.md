@@ -189,7 +189,7 @@ which reads as an empty study.
 
 | piece | what it is | why it is there |
 |---|---|---|
-| **RustFS** | S3-compatible object store (MinIO until 18 Oct 2026; the production role still runs MinIO — see `DEPLOYMENT.md`) | the bytes: models, images, the study containers. Content-addressed for assets, keyed by study id for containers |
+| **RustFS** | S3-compatible object store | the bytes: models, images, the study containers. Content-addressed for assets, keyed by study id for containers |
 | **Cantaloupe** | IIIF Image API server | serves images straight out of the bucket, by digest. Zoom, crops and thumbnails become requests, not files |
 | **Keycloak** | OIDC identity provider | one realm, every service. Our services **validate** tokens; none of them logs anybody in |
 | **CouchDB** | document database | the Catalog's deploy index, beside Heriverse's own documents. Only the index — never the studies |

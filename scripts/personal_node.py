@@ -119,9 +119,8 @@ def start(root: str, data: Path, port: int, lan: bool, name: str) -> dict:
         env.pop(k, None)                         # personal: nothing of the stack
     # …and the object store WHOLE, not its endpoint alone: three of the four
     # `EM_ASSET_S3_*` left behind are a half-configured store, which the server
-    # refuses to start on. The old `MINIO_*` names go too — the server no longer
-    # reads them, and refuses to start while one is set without its new name.
-    for k in [k for k in env if k.startswith(("EM_ASSET_S3_", "MINIO_"))]:
+    # refuses to start on.
+    for k in [k for k in env if k.startswith("EM_ASSET_S3_")]:
         env.pop(k, None)
     env.update({"EM_NODE_PROFILE": "personal", "EM_PERSONAL_ROOT": os.path.abspath(root),
                 "EM_SNAPSHOT_DIR": str(data / "snapshots"), "EM_ASSET_DIR": str(data / "assets"),

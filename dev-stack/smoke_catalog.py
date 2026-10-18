@@ -162,10 +162,8 @@ def main() -> int:
     health = json.loads(body)
     ok("StratiGraph Catalog is enforcing tokens", health.get("auth") == "keycloak",
        str(health.get("auth")))
-    # the catalogue is its own program (stratigraph-catalog) and may still call
-    # its store `minio (…)`; what matters is that it is the S3 one, not a dict
     ok("the studies live in the S3 store",
-       str(health.get("container_store")).startswith(("s3", "minio")),
+       str(health.get("container_store")).startswith("s3"),
        str(health.get("container_store")))
     ok("the TTL projection can run", bool(
         health.get("capabilities", {}).get("export_ttl")))

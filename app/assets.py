@@ -539,29 +539,12 @@ def _transfer_config() -> Any:
 
 #: The S3 settings, ONE spelling: `EM_ASSET_S3_*` — what the Ansible role
 #: writes, and a name that is true whatever store answers.
-#:
-#: There used to be a second one, `MINIO_*`, read after it with a warning. It is
-#: no longer read (October 2026, when the dev stack moved to RustFS), and
-#: it is not silently ignored either: see `_LEGACY_S3_NAMES`.
 _S3_KEYS = {
     "endpoint": "EM_ASSET_S3_ENDPOINT",
     "access_key": "EM_ASSET_S3_ACCESS_KEY",
     "secret_key": "EM_ASSET_S3_SECRET_KEY",
     "bucket": "EM_ASSET_S3_BUCKET",
     "secure": "EM_ASSET_S3_SECURE",
-}
-
-#: The names this node USED to read, each with the one that replaced it. A
-#: deployment that still sets one of them, and not its replacement, believes it
-#: writes to the shared bucket; reading nothing would quietly give it a local
-#: directory — the data-loss story `_s3_settings` exists to refuse — so the
-#: process refuses to start instead, naming the variable to rename.
-_LEGACY_S3_NAMES = {
-    "MINIO_ENDPOINT": "EM_ASSET_S3_ENDPOINT",
-    "MINIO_ACCESS_KEY": "EM_ASSET_S3_ACCESS_KEY",
-    "MINIO_SECRET_KEY": "EM_ASSET_S3_SECRET_KEY",
-    "MINIO_BUCKET": "EM_ASSET_S3_BUCKET",
-    "MINIO_SECURE": "EM_ASSET_S3_SECURE",
 }
 
 log = logging.getLogger("stratigraph.assets")
@@ -571,26 +554,6 @@ def _setting(env: Dict[str, str], field: str) -> str:
     return (env.get(_S3_KEYS[field]) or "").strip()
 
 
-def _refuse_legacy_names(env: Dict[str, str]) -> None:
-    """Raise when an old name is set and its replacement is not.
-
-    Only then: an old name beside its new one is a leftover the new one
-    overrules, and refusing it would stop a node whose configuration is right.
-    """
-    stale = sorted(old for old, new in _LEGACY_S3_NAMES.items()
-                   if (env.get(old) or "").strip()
-                   and not (env.get(new) or "").strip())
-    if stale:
-        renames = ", ".join(f"{old} → {_LEGACY_S3_NAMES[old]}" for old in stale)
-        raise RuntimeError(
-            f"{', '.join(stale)} {'is' if len(stale) == 1 else 'are'} set, and "
-            f"StratiGraph Server no longer reads that name: the object store is "
-            f"configured with EM_ASSET_S3_ENDPOINT / EM_ASSET_S3_ACCESS_KEY / "
-            f"EM_ASSET_S3_SECRET_KEY / EM_ASSET_S3_BUCKET (and "
-            f"EM_ASSET_S3_SECURE). Rename {renames}. It will not start on a "
-            f"local directory the operator did not ask for.")
-
-
 def _s3_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
     """The S3 configuration, or None when there is none at all.
 
@@ -598,10 +561,7 @@ def _s3_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
     deployment that believes it writes to the shared bucket and quietly writes
     to a local directory instead is a data-loss story, and it is silent until it
     is expensive — the same rule `auth.py` applies to a half-configured realm.
-    The same reason makes it refuse the old `MINIO_*` names rather than ignore
-    them (`_refuse_legacy_names`).
     """
-    _refuse_legacy_names(env)
     found = {field: _setting(env, field)
              for field in ("endpoint", "access_key", "secret_key", "bucket")}
     given = [field for field, value in found.items() if value]

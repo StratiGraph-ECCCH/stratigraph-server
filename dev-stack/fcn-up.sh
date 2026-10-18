@@ -158,7 +158,6 @@ fi
 # stampa il comando `sudo` invece di eseguirlo. Qui si stampa la riga da
 # incollare, che è una cosa sola.
 sg_need_env_dev || exit 1
-sg_need_s3_keys || exit 1
 
 # QUALE compose. Era `docker-compose` scritto a mano: è il binario autonomo, e
 # su una macchina nuova (Docker Engine su Linux, Docker Desktop su Windows) non

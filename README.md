@@ -24,8 +24,8 @@ bucket, same realm, different question.
 | know why the two Heriverse images are not publishable yet | [`docs/HERIVERSE-IMMAGINI.md`](docs/HERIVERSE-IMMAGINI.md) |
 
 > **Status: P0–P4.5.** Read endpoints, Keycloak auth, the S3 asset store
-> (RustFS; MinIO until 18 Oct 2026), the IIIF image layer, the WIRE 2 envelope,
-> the room relay and structural real-time are all in and measured. What is left is ops (an institutional host) and the
+> (RustFS), the IIIF image layer, the WIRE 2 envelope, the room relay and
+> structural real-time are all in and measured. What is left is ops (an institutional host) and the
 > halves declared in the reports under `.claude/wip/reports/`.
 
 ## The two rules that shape this repo
@@ -448,7 +448,7 @@ refer to them that way.
 |---|---|---|
 | **P0** | the read API over s3Dgraphy — validate, export-ttl, reproject, resolve-authority | **done** |
 | **P1** | **Keycloak** bearer auth on the shared realm; **ORCID** as the identity a room grants a role to | **done**, running against a real realm on the dev stack |
-| **P2** | **S3 assets** (MinIO then, RustFS now), content-addressed by sha256, with the IIIF image layer reading the same bucket | **done** |
+| **P2** | **S3 assets** (RustFS), content-addressed by sha256, with the IIIF image layer reading the same bucket | **done** |
 | **P3** | **the room relay** — the WIRE 2 envelope, five idempotent ops, snapshots, presence | **done**. The conflict policy landed as convergence by merge, not the one-host-per-session ADR-002 allowed for |
 | **P4** | **deployment** (WP6) — the dev stack is arranged like production; the Ansible role lives in `heriverse-ansible` | **done on the dev stack**; an institutional host is the open half |
 | **P4.2 · P4.5** | one room, one live graph; the register, ACLs, roles, groups and invites; the front door split by verb; the node map | **done** |

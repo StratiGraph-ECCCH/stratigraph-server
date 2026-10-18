@@ -35,7 +35,7 @@ cp .env.dev.example .env.dev                    # once
 
 | service | where | notes |
 |---|---|---|
-| **RustFS** (S3) | API `:9000`, console `:9001/rustfs/console/` | bucket `em-assets` auto-created; keys `RUSTFS_*` in `.env.dev`. MinIO until 18 Oct 2026 — an old stack migrates once with `./migra-minio-rustfs.sh` (README-DEV.md) |
+| **RustFS** (S3) | API `:9000`, console `:9001/rustfs/console/` | bucket `em-assets` auto-created; keys `RUSTFS_*` in `.env.dev`. |
 | **Keycloak** | `:8085` and `…:8443/auth` | realm `em-dev`; ONE public issuer (https, through Caddy) whichever door you use — see `keycloak/README.md` |
 | **Cantaloupe / IIIF** | `:8182` | reads the SAME bucket, key = asset sha256 |
 | **Postgres** | `:5433` (`em`/`em`, db `em_documents`) | the room documents — one row per `(project_id, revision)`. Bodies stay in RustFS; the oplog stays in `em_data` |
@@ -215,11 +215,10 @@ Desktop — mind the org licensing; OrbStack; Podman) but the scripts assume Col
 
 ## 3 · Connect EMtools (Blender) to the local object store (RustFS)
 
-EMtools promotes an asset **in-process via s3Dgraphy** (`promote_resource_to_minio`
-→ `api.ingest_minio_resource`), and s3Dgraphy's MinIO backend reads the
-**Heriverse-aligned `S3_*` env vars** (`minio_backend.from_env` — s3Dgraphy's
-names, not this stack's: it is plain S3 and talks to RustFS unchanged). So launch Blender from a shell that carries
-them, pointing at the dev-stack RustFS:
+EMtools promotes an asset **in-process via s3Dgraphy** (`promote_resource_to_s3`
+→ `api.ingest_s3_resource`), and s3Dgraphy's S3 backend reads the
+**Heriverse-aligned `S3_*` env vars** (`s3_backend.S3Config.from_env`). So launch
+Blender from a shell that carries them, pointing at the dev-stack RustFS:
 
 ```bash
 export S3_ENDPOINT=http://localhost:9000        # http:// = insecure (dev)
@@ -230,11 +229,10 @@ export S3_BUCKET=em-assets                       # the SAME bucket server + Cant
 /Applications/Blender.app/Contents/MacOS/Blender
 ```
 
-Then in EMtools ▸ **Resources** ▸ "Object store (MinIO)" ▸ **Promote to MinIO**:
+Then in EMtools ▸ **Resources** ▸ "Object store (S3)" ▸ **Promote to object store**:
 the local bytes go up content-addressed, and the LinkNode locator is repointed to
-the returned `s3_uri` (one ID space, FS ↔ MinIO). Needs the `minio` extra in
-Blender's Python, else `MissingDependency` (EMtools' own label: the bytes land in
-RustFS). Inspect the object at the RustFS console
+the returned `s3_uri` (one ID space, FS ↔ S3). Needs the `s3` extra (boto3) in
+Blender's Python, else `MissingDependency`. Inspect the object at the RustFS console
 `http://localhost:9001/rustfs/console/`.
 
 > **Direct vs gated — read this once.** This `S3_*` path writes **straight to
