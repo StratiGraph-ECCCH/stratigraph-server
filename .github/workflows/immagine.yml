@@ -54,9 +54,14 @@ jobs:
       - name: Il tag e la versione dicono la stessa cosa
         if: github.ref_type == 'tag'
         run: |
+          # pyproject.toml parla PEP 440 (pip lo vuole: 1.6.0.dev25), il tag
+          # parla semver (1.6.0-dev.25): la stessa versione in due grafie, e la
+          # conversione è meccanica. Il punto in `dev.N` non è estetica: in
+          # semver `dev.25` viene dopo `dev.9`, `dev25` prima.
           v=$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -1)
-          if [ "$GITHUB_REF_NAME" != "v$v" ]; then
-            echo "::error::il tag è $GITHUB_REF_NAME ma pyproject.toml dice $v: il tag giusto è v$v"
+          s=$(echo "$v" | sed -E 's/\.?(dev|a|b|rc)\.?([0-9]+)$/-\1.\2/')
+          if [ "$GITHUB_REF_NAME" != "v$s" ]; then
+            echo "::error::il tag è $GITHUB_REF_NAME ma pyproject.toml dice $v: il tag giusto è v$s"
             exit 1
           fi
 
@@ -117,11 +122,14 @@ jobs:
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}
+          # SEMVER e nient'altro (18 ottobre 2026, PSNC: tre ambienti, dev ·
+          # stage · production, che scelgono le versioni per vincolo semver). Il
+          # tag git `v1.6.0-dev.25` diventa l'immagine `1.6.0-dev.25`. NIENTE
+          # `latest`: con tre ambienti è la via più corta per mettere una dev in
+          # produzione. Ogni ambiente nomina una versione, o meglio un digest.
           tags: |
-            type=ref,event=tag
             type=semver,pattern={{version}}
             type=sha,format=long
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
           labels: |
             org.opencontainers.image.licenses=GPL-3.0-or-later
             org.opencontainers.image.title=stratigraph-server
