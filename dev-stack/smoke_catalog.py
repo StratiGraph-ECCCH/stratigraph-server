@@ -12,11 +12,11 @@ there.
 What it checks, in order, and what each one would catch:
 
 1. the service is up, is **enforcing tokens**, and its container store is
-   **MinIO** — if any of those is not true, nothing after it means anything;
+   **S3** — if any of those is not true, nothing after it means anything;
 2. a token from the same dev realm StratiGraph Server uses (one realm, two services);
 3. **register two studies**, one `public` and one `restricted`, both real
    containers built with s3Dgraphy — and the container really lands in the
-   bucket, under `studies/`, verified against MinIO directly;
+   bucket, under `studies/`, verified against the S3 store directly;
 4. **search** finds them by author, by free text and by digital twin;
 5. the **HDT view** groups the two campaigns of one monument;
 6. `/emjson` gives back **exactly** the container that went in (a catalogue that
@@ -162,7 +162,10 @@ def main() -> int:
     health = json.loads(body)
     ok("StratiGraph Catalog is enforcing tokens", health.get("auth") == "keycloak",
        str(health.get("auth")))
-    ok("the studies live in MinIO", "minio" in str(health.get("container_store")),
+    # the catalogue is its own program (stratigraph-catalog) and may still call
+    # its store `minio (…)`; what matters is that it is the S3 one, not a dict
+    ok("the studies live in the S3 store",
+       str(health.get("container_store")).startswith(("s3", "minio")),
        str(health.get("container_store")))
     ok("the TTL projection can run", bool(
         health.get("capabilities", {}).get("export_ttl")))
@@ -223,25 +226,31 @@ def main() -> int:
        registered["restricted"]["card"]["visibility"] == "restricted")
 
     # ── 3 · the container is really in the bucket ───────────────────────────
-    bucket = env("MINIO_BUCKET", "em-assets")
+    bucket = env("RUSTFS_BUCKET", "em-assets")
     try:
-        from minio import Minio
+        import boto3
+        from botocore.config import Config
 
-        client = Minio(f"localhost:{env('MINIO_API_PORT', '9000')}",
-                       access_key=env("MINIO_ROOT_USER", "minioadmin"),
-                       secret_key=env("MINIO_ROOT_PASSWORD", "minioadmin"),
-                       secure=False)
-        keys = {o.object_name for o in client.list_objects(
-            bucket, prefix="studies/", recursive=True)}
-        ok("the container is an object in MinIO, under studies/",
+        client = boto3.client(
+            "s3", endpoint_url=f"http://localhost:{env('RUSTFS_API_PORT', '9000')}",
+            aws_access_key_id=env("RUSTFS_ACCESS_KEY"),
+            aws_secret_access_key=env("RUSTFS_SECRET_KEY"),
+            region_name="us-east-1",
+            config=Config(s3={"addressing_style": "path"},
+                          signature_version="s3v4"))
+        keys = {o["Key"]
+                for page in client.get_paginator("list_objects_v2").paginate(
+                    Bucket=bucket, Prefix="studies/")
+                for o in page.get("Contents", [])}
+        ok("the container is an object in the S3 bucket, under studies/",
            registered["public"]["container_ref"] in keys,
            registered["public"]["container_ref"])
         ok("…in the SAME bucket as the assets", bool(keys), f"{len(keys)} studies")
     except ImportError:
-        skip("look in the bucket directly", "the `minio` client is not installed "
-             "in this interpreter (pip install minio)")
+        skip("look in the bucket directly", "the `boto3` client is not installed "
+             "in this interpreter (pip install boto3)")
     except Exception as exc:
-        skip("look in the bucket directly", f"MinIO did not answer: {exc}")
+        skip("look in the bucket directly", f"the S3 store did not answer: {exc}")
 
     # ── 4 · search ──────────────────────────────────────────────────────────
     def search(**params):
@@ -327,7 +336,7 @@ def main() -> int:
     status, body, _ = request(f"{catalog}/catalog/reindex", method="POST",
                               data=b"", headers=auth)
     rebuilt = json.loads(body) if status == 200 else {}
-    ok("the index rebuilds itself from the containers in MinIO",
+    ok("the index rebuilds itself from the containers in the bucket",
        status == 200 and rebuilt.get("studies") == 2,
        f"status {status}, {rebuilt.get('studies')} studies")
     ok("…with nothing unreadable", rebuilt.get("unreadable") == [],

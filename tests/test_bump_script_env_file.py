@@ -2,7 +2,7 @@
 
 Measured on 2 Oct 2026: `--build` ran `docker-compose -f docker-compose.dev.yml
 up -d stratigraph-server` with no env file, the server was recreated without
-MinIO's keys and crashed over and over. Now it says `--env-file .env.dev` on
+the object store's keys and crashed over and over. Now it says `--env-file .env.dev` on
 both the build and the up, like `fcn-up.sh`, and without `.env.dev` it stops
 before touching any container, with `fcn-up.sh`'s message.
 

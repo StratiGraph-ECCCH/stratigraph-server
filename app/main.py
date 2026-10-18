@@ -1,6 +1,6 @@
 """StratiGraph Server — the s3Dgraphy access API, over HTTP.
 
-**P0: read-only, local, no auth.** Auth (Keycloak), assets (MinIO), the WebSocket
+**P0: read-only, local, no auth.** Auth (Keycloak), assets (S3), the WebSocket
 op-log and the deployment on the shared infrastructure are P1–P4, and they land
 with 3DR. Nothing here anticipates them beyond leaving the seams where they go.
 
@@ -134,7 +134,7 @@ async def _lifespan(_app: FastAPI):
     """L'avvio bussa una volta a ciò che questo nodo dichiara.
 
     **Non può impedire l'avvio.** Un server che si rifiuta di partire perché
-    MinIO è lento parte dopo MinIO per sempre, e lo scopo di questa misura è
+    l'object store è lento parte dopo l'object store per sempre, e lo scopo di questa misura è
     farla vedere, non farne una precondizione: si annota e si continua.
 
     `knock` è definita molto più in basso, dove stanno gli store: qui il nome si
@@ -444,8 +444,8 @@ class Health(BaseModel):
     #: …and the sentence a desk shows about it
     custody: str = ""
     #: WHAT WAS ACTUALLY REACHED, and when. Every other field on this model is a
-    #: description of the configuration: `asset_store` says «minio at
-    #: http://minio:9000» whether or not anything is listening there. This one is
+    #: description of the configuration: `asset_store` says «s3 (http://rustfs:9000,
+    #: bucket em-assets)» whether or not anything is listening there. This one is
     #: the only field that has touched something.
     #:
     #: It carries a DATE because the knock happens at start-up and on request,
@@ -520,7 +520,7 @@ class Health(BaseModel):
 
 #: This node's `.blend` safety archive: the opaque snapshots people deliberately
 #: keep, in their own namespace, plus the small register that says whose they are.
-#: Built at import like the other stores, so a misconfigured MinIO refuses to
+#: Built at import like the other stores, so a misconfigured S3 store refuses to
 #: start rather than failing at somebody's first backup.
 BACKUPS = BlendBackups(backup_blobs_from_env(), backup_register_from_env())
 
@@ -1106,7 +1106,7 @@ async def put_asset(room_id: str, request: Request,
     2 GB file was a 2 GB `bytes` in this process. Now the body goes chunk by
     chunk into a file beside the upload sessions, hashed on the way, and the
     file is handed to the store (`put_file`: a rename on a directory store, a
-    multipart `fput_object` on MinIO). The answer is the same as before, byte
+    multipart `upload_file` on S3). The answer is the same as before, byte
     for byte, for a small body and a big one.
 
     `expected_sha256` (query) or the `X-EM-Expected-SHA256` header: what the
@@ -1192,7 +1192,7 @@ async def put_asset_reference(room_id: str, body: AssetReferenceIn,
 async def _store_file(path: pathlib.Path, digest: str, size: int,
                       media_type: str) -> Dict[str, Any]:
     """Hand a file to the asset store without reading it into memory — in a
-    worker thread, because a store write (a rename, a multipart upload to MinIO)
+    worker thread, because a store write (a rename, a multipart upload to S3)
     blocks, and an event loop blocked for the length of a 2 GB upload is a
     relay that stops relaying for everybody else in every room."""
     from starlette.concurrency import run_in_threadpool
@@ -1690,7 +1690,7 @@ async def get_asset(room_id: str, ref: str, request: Request) -> Response:
       (`Content-Length` the size, `Accept-Ranges: bytes`), no body. Whoever may
       not have the bytes gets the GET's refusal, not a hint;
     * **one interval** → 206 with `Content-Range`, read from the store with a
-      ranged read (`read_range`: an S3 ranged GET on MinIO, a seek on disk);
+      ranged read (`read_range`: an S3 ranged GET on the bucket, a seek on disk);
       out of the file → 416 with `Content-Range: bytes */<size>`; several →
       200 with everything (see `_byte_range`);
     * **If-Range** with anything but this ETag → 200 with everything.
@@ -2594,7 +2594,7 @@ def merge_corpus_endpoint(request: Request,
 
 # ── IIIF · the authorisation the image server does not have ───────────────────
 #
-# Cantaloupe reads MinIO by sha256 and StratiGraph Server is NOT in the path of a pixel.
+# Cantaloupe reads the S3 bucket by sha256 and StratiGraph Server is NOT in the path of a pixel.
 # Taking the canvas out of the manifest withholds the digest — which is real,
 # because the manifest is where a digest comes from — but somebody who already
 # has the hex reaches the image directly. That is the hole this closes.
@@ -5180,7 +5180,7 @@ async def node_storage(request: Request) -> StorageOut:
       while it slept. That one is a refusal waiting to happen, and an operator
       should meet it here rather than in somebody else's 409.
 
-    MinIO is behind StratiGraph Server here as everywhere else: this reads the store
+    The object store is behind StratiGraph Server here as everywhere else: this reads the store
     through the same interface the asset route uses, and hands back numbers. No
     presigned URL, no bucket listing to a browser.
     """
@@ -5256,7 +5256,7 @@ async def forget_asset(ref: str, request: Request) -> AssetForgotten:
     ## THE ASYMMETRY THIS CLOSES
 
     Until 8 October 2026 this node could put an asset, serve it, and describe
-    it. Taking one out meant going into MinIO by hand, which is the one place
+    it. Taking one out meant going into the object store by hand, which is the one place
     where it should not be done — and the cost was not tidiness: it was having
     to tell somebody whose photograph should never have been uploaded that the
     node cannot forget.
@@ -5285,7 +5285,7 @@ async def forget_asset(ref: str, request: Request) -> AssetForgotten:
     **Not a room deletion.** `POST /rooms/{id}/archive` still says «Not a
     deletion, and there is no deletion», and that stands.
 
-    **Nothing MinIO-specific.** It calls `AssetStore.delete`, which three
+    **Nothing store-specific.** It calls `AssetStore.delete`, which three
     implementations answer and a fourth will.
     """
     _require_operator(request)
@@ -5569,7 +5569,7 @@ def _digests_in(document: Optional[Dict[str, Any]]) -> set:
 def _stored_digests() -> set:
     """What the asset store holds, when it can say.
 
-    Only the stores that can enumerate answer; MinIO's client can list a bucket
+    Only the stores that can enumerate answer; the S3 client can list a bucket
     but this does not ask it to — a listing of every object on a shared bucket is
     an expensive question to answer on a page load, and an orphan report that is
     silently partial is worse than one that says so. When the store cannot
@@ -5578,10 +5578,10 @@ def _stored_digests() -> set:
     **AND UNTIL 8 OCTOBER 2026 NOBODY ANSWERED.** Measured: none of the three
     implementations had `refs`, `digests`, `keys` or `_data`, so this returned an
     empty set on EVERY backend and `orphan_assets` had never in its life
-    contained anything. The console's sentence blamed MinIO, which was true and
+    contained anything. The console's sentence blamed the object store, which was true and
     incomplete — it was true of the directory store on somebody's laptop too.
     The two local stores answer now (`InMemoryAssetStore.refs`,
-    `DirectoryAssetStore.refs`); MinIO still does not, on purpose.
+    `DirectoryAssetStore.refs`); the S3 store still does not, on purpose.
     """
     for name in ("refs", "digests", "keys"):
         lister = getattr(ASSET_STORE, name, None)
@@ -6300,7 +6300,7 @@ def knock_now() -> Reachability:
     """Bussa adesso a ogni dipendenza dichiarata, e aggiorna la salute.
 
     **POST e non GET**, anche se non scrive niente nel grafo: apre connessioni
-    verso MinIO e verso il realm e sostituisce l'osservazione del processo. Un
+    verso l'object store e verso il realm e sostituisce l'osservazione del processo. Un
     verbo che dice «fa qualcosa» tiene questa rotta fuori da ciò che un
     monitoraggio interroga per abitudine — che è precisamente il ciclo che
     martella da cui `/health` è stato tenuto lontano.
@@ -6331,7 +6331,7 @@ def health_probe() -> Health:
 #
 #   P1 — DONE: Keycloak bearer tokens on the shared realm (`app/auth.py`). ORCID as
 #        the user identity is configured in the realm, not here.
-#   P2 — MinIO assets: the same stable-ID resolver s3Dgraphy already has
+#   P2 — S3 assets: the same stable-ID resolver s3Dgraphy already has
 #   P3 — the op-log WebSocket (ADR-002: one host per session, CRDT later)
 #   P4 — deployment (WP6)
 

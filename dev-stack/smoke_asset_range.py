@@ -3,7 +3,7 @@
 
 `tests/test_get_asset_range.py` proves the route in-process. What it cannot
 prove is the chain a viewer actually walks: the browser's Range crosses Caddy,
-reaches StratiGraph Server, and becomes a ranged GET on MinIO. This drives that
+reaches StratiGraph Server, and becomes a ranged GET on RustFS. This drives that
 chain with the requests EMStudio's `.3tz` reader makes
 (`frontend/src/tiles3tz.ts`: `bytes=-1` for the size, the last kilobyte, the
 index, a tile) and measures the bytes that moved.

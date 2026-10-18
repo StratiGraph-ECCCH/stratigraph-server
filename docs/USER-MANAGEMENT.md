@@ -12,11 +12,11 @@ Both call the same endpoints. If a rule changes in `app/access.py`, both change
 with it, because neither of them holds a copy.
 
 ```
-Keycloak authenticates ─────► StratiGraph Server authorises ─────► MinIO stores
+Keycloak authenticates ─────► StratiGraph Server authorises ─────► RustFS stores
    (who you are, ORCID)         (per-room ACL  +  per-asset DTC)     (bytes)
 ```
 
-MinIO is never addressed by a client. Every byte goes through StratiGraph Server, which
+The object store is never addressed by a client. Every byte goes through StratiGraph Server, which
 reads the graph to decide whether you may have it — that is the second layer, and
 it is older than this document (`app/corpus.py`, `s3dgraphy.rights`).
 
@@ -42,7 +42,7 @@ it is older than this document (`app/corpus.py`, `s3dgraphy.rights`).
 
 ```bash
 cd stratigraph-server/dev-stack
-./fcn-up.sh                       # Keycloak + MinIO + StratiGraph Server + Caddy (https)
+./fcn-up.sh                       # Keycloak + RustFS + StratiGraph Server + Caddy (https)
 curl -sk https://em.localhost:8443/em/health | python3 -m json.tool
 ```
 
@@ -54,7 +54,7 @@ recognised:
 "room_store":   "directory (beside the snapshots)",
 "invite_store": "directory (beside the ACLs)",
 "acl_store":    "directory (beside the snapshots)",
-"asset_store":  "minio (http://minio:9000, bucket em-assets)",
+"asset_store":  "s3 (http://rustfs:9000, bucket em-assets)",
 "operators":    "realm role «em-operator» or 1 allow-listed ORCID(s)"
 ```
 
@@ -138,7 +138,7 @@ memory (never in web storage) and the console then asks the node
     declared (`implicit`), with members, roles, and the invitation links;
   * **Storage** — the three stores by name, per-room asset counts, containers that
     are missing, orphan digests, and *archive / restore*;
-  * **Node Health** — every service this node depends on (itself, MinIO, Keycloak,
+  * **Node Health** — every service this node depends on (itself, the S3 store, Keycloak,
     IIIF, StratiGraph Catalog) as `ok` · `degraded` · `unreachable` · `not configured`,
     with latency, what the bucket is holding, and the versions in view.
 

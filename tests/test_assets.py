@@ -175,8 +175,11 @@ def test_4b_the_production_store_is_named_and_real():
         assert method in source
     # it is the same class the deployment runs — not a dev double beside it
     assert "class S3AssetStore" in source and "moto" not in source
-    # …and the old name is the SAME class, not a second store beside it
-    assert assets.MinioAssetStore is assets.S3AssetStore
+    # …and there is ONE name for it. The old vendor alias was removed with
+    # the vendor's client (October 2026): a second name for the same class is
+    # a second thing a reader has to learn is not a second store.
+    assert not hasattr(assets, "MinioAssetStore")
+    assert "from . import s3client" in source, "the client is built in one place"
 
 
 def test_4c_health_says_where_the_bytes_live(client):
@@ -190,22 +193,22 @@ def test_4c_health_says_where_the_bytes_live(client):
 def test_5_a_half_configured_object_store_stops_the_process():
     """The most important assertion in this file.
 
-    A process given three of the four MinIO settings must NOT quietly fall back
+    A process given three of the four S3 settings must NOT quietly fall back
     to a local directory: it would look healthy while putting the institution's
     assets somewhere nobody backs up — silent until it is expensive. Same rule
     `auth.py` applies to a half-configured realm.
     """
     with pytest.raises(RuntimeError) as exc:
         assets.asset_store_from_env({
-            "MINIO_ENDPOINT": "http://minio:9000",
-            "MINIO_ACCESS_KEY": "key",
-            "MINIO_BUCKET": "em-assets",          # …and no secret
+            "EM_ASSET_S3_ENDPOINT": "http://rustfs:9000",
+            "EM_ASSET_S3_ACCESS_KEY": "key",
+            "EM_ASSET_S3_BUCKET": "em-assets",    # …and no secret
             "EM_ASSET_DIR": "/srv/em-data/assets",
         })
     message = str(exc.value)
     assert "half configured" in message
     assert "secret_key" in message                # says WHICH one is missing
-    assert "MINIO_BUCKET" in message              # …and what the four are
+    assert "EM_ASSET_S3_BUCKET" in message        # …and what the four are
 
 
 def test_5b_nothing_configured_is_memory_and_a_directory_is_a_directory(tmp_path):
@@ -215,54 +218,61 @@ def test_5b_nothing_configured_is_memory_and_a_directory_is_a_directory(tmp_path
     assert isinstance(store, DirectoryAssetStore)
 
 
-def test_5c_the_ansible_spelling_of_the_settings_is_understood():
-    """Two names for one setting, with a precedence — not two settings that will
-    one day disagree. The Ansible role writes `EM_ASSET_S3_*`; MinIO's own docs
-    and the dev stack use `MINIO_*`."""
+def test_5c_the_settings_have_one_spelling():
+    """`EM_ASSET_S3_*` — what the Ansible role writes, and a name that is true
+    whatever S3 answers. One name per setting: the old `MINIO_*` spelling is
+    no longer read (October 2026, when the dev stack moved to RustFS)."""
     settings = assets._s3_settings({
-        "EM_ASSET_S3_ENDPOINT": "https://minio.example.org",
+        "EM_ASSET_S3_ENDPOINT": "https://s3.example.org",
         "EM_ASSET_S3_ACCESS_KEY": "key",
         "EM_ASSET_S3_SECRET_KEY": "secret",
         "EM_ASSET_S3_BUCKET": "em-assets",
     })
-    assert settings["endpoint"] == "https://minio.example.org"
+    assert settings["endpoint"] == "https://s3.example.org"
     assert settings["secure"] is True, "https means TLS without being told"
     plain = assets._s3_settings({
-        "MINIO_ENDPOINT": "http://minio:9000", "MINIO_ACCESS_KEY": "k",
-        "MINIO_SECRET_KEY": "s", "MINIO_BUCKET": "b"})
+        "EM_ASSET_S3_ENDPOINT": "http://rustfs:9000", "EM_ASSET_S3_ACCESS_KEY": "k",
+        "EM_ASSET_S3_SECRET_KEY": "s", "EM_ASSET_S3_BUCKET": "b"})
     assert plain["secure"] is False, "http means somebody chose plain HTTP"
     assert assets._s3_settings({}) is None
-    assert assets._minio_settings is assets._s3_settings, "the old name still works"
+    assert not hasattr(assets, "_minio_settings"), "one name for one function"
 
 
-def test_5d_the_neutral_name_wins_and_the_old_one_still_works_and_says_so(caplog):
-    """RustFS, 17 October 2026: the store behind the settings need not be MinIO,
-    so the neutral `EM_ASSET_S3_*` is read FIRST. The old `MINIO_*` keeps every
-    deployment that uses it working — with a warning that names the new one."""
+def test_5d_an_old_name_alone_REFUSES_to_start_it_is_not_ignored():
+    """The old `MINIO_*` names are no longer read — and a deployment that still
+    sets them must not find out by losing data. Ignoring them would give it the
+    in-memory or directory store while it believes it writes to the bucket:
+    the half-configured story of test 5, with all four settings missing at once.
+    So the process refuses, and the sentence names the variable to set."""
+    old = {"MINIO_ENDPOINT": "https://s3.example.org", "MINIO_ACCESS_KEY": "k",
+           "MINIO_SECRET_KEY": "s", "MINIO_BUCKET": "b"}
+    for build in (assets._s3_settings, assets.asset_store_from_env):
+        with pytest.raises(RuntimeError) as exc:
+            build(dict(old, EM_ASSET_DIR="/srv/em-data/assets"))
+        message = str(exc.value)
+        assert "MINIO_ENDPOINT → EM_ASSET_S3_ENDPOINT" in message
+        assert "MINIO_BUCKET → EM_ASSET_S3_BUCKET" in message
+        assert "no longer reads" in message
+        assert "s3.example.org" not in message and " s " not in message, \
+            "the refusal names the setting, never its value"
+    # ONE old name is enough: a lone MINIO_SECURE is still somebody's intent
+    with pytest.raises(RuntimeError, match="EM_ASSET_S3_SECURE"):
+        assets._s3_settings({"MINIO_SECURE": "false"})
+
+
+def test_5e_an_old_name_beside_its_new_one_is_a_leftover_and_the_new_one_wins():
+    """Refusing THAT would stop a node whose configuration is right."""
     both = assets._s3_settings({
-        "EM_ASSET_S3_ENDPOINT": "http://rustfs:9000", "MINIO_ENDPOINT": "http://minio:9000",
+        "EM_ASSET_S3_ENDPOINT": "http://rustfs:9000", "MINIO_ENDPOINT": "http://old:9000",
         "EM_ASSET_S3_ACCESS_KEY": "k", "EM_ASSET_S3_SECRET_KEY": "s",
         "EM_ASSET_S3_BUCKET": "b"})
     assert both["endpoint"] == "http://rustfs:9000"
 
-    assets._warned_old_names.clear()
-    with caplog.at_level("WARNING", logger="stratigraph.assets"):
-        old = assets._s3_settings({
-            "MINIO_ENDPOINT": "https://s3.example.org", "MINIO_ACCESS_KEY": "k",
-            "MINIO_SECRET_KEY": "s", "MINIO_BUCKET": "b"})
-    assert old["endpoint"] == "https://s3.example.org" and old["secure"] is True
-    said = caplog.text
-    assert "MINIO_ENDPOINT is the old name of EM_ASSET_S3_ENDPOINT" in said
-    assert "MINIO_BUCKET is the old name of EM_ASSET_S3_BUCKET" in said
-    assert "s3.example.org" not in said and " s " not in said, \
-        "the warning names the setting, never its value"
 
-
-def test_5e_secure_has_a_neutral_name_too():
+def test_5f_secure_is_said_with_the_same_name():
     base = {"EM_ASSET_S3_ENDPOINT": "https://s3.example.org", "EM_ASSET_S3_ACCESS_KEY": "k",
             "EM_ASSET_S3_SECRET_KEY": "s", "EM_ASSET_S3_BUCKET": "b"}
     assert assets._s3_settings({**base, "EM_ASSET_S3_SECURE": "false"})["secure"] is False
-    assert assets._s3_settings({**base, "MINIO_SECURE": "false"})["secure"] is False
     assert assets._s3_settings(base)["secure"] is True
 
 

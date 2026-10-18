@@ -3,7 +3,7 @@
 Two rules that look like configuration and are really design.
 
 **Every service→service URL has two forms.** The one this process dials
-(`minio:9000`, `keycloak:8080`, `cantaloupe:8182` — names on the container
+(`rustfs:9000`, `keycloak:8080`, `cantaloupe:8182` — names on the container
 network) and the one it writes into documents other people's software will fetch
 (`https://host/iiif/3`). Confusing them fails *opaquely*: a 403, an empty body, a
 mixed-content block, a canvas with a placeholder size. Three separate bugs in
@@ -305,7 +305,7 @@ def test_3d_the_only_outbound_calls_read_their_address_from_config():
     because it needs an answer; that one dials to find out whether anybody is
     there, which is the whole of `/health` finally doing what it claimed. Its
     address comes from configuration like the others — it is the SAME
-    `jwks_uri`, the SAME MinIO client — because a prober with an address of its
+    `jwks_uri`, the SAME S3 client — because a prober with an address of its
     own would be measuring a different deployment.
     """
     import re

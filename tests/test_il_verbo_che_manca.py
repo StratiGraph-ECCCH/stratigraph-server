@@ -5,18 +5,19 @@
 
     app/assets.py:48   class AssetStore(Protocol)   put · get · head
                                                     nessun delete
-    tre implementazioni                             InMemory · Directory · Minio
+    tre implementazioni                             InMemory · Directory · S3
 
 Aggiungere si poteva quasi ovunque; togliere da nessuna parte, e l'unico posto
-dove si poteva era quello dove non si dovrebbe — dentro MinIO, a mano. Il costo
+dove si poteva era quello dove non si dovrebbe — dentro l'object store, a mano. Il costo
 non era l'ordine: era dover dire a qualcuno, la cui fotografia non doveva essere
 caricata, che il nodo non sa dimenticare.
 
 ## E IL VERBO STA NEL PROTOCOLLO, NON IN UN BACKEND
 
-MinIO potrebbe non essere più supportato per la comunità e PSNC potrebbe
-proporre un proprio store. Una cancellazione scritta contro MinIO sarebbe un
-debito da pagare due volte. Quindi:
+Lo store sotto il nodo è già cambiato una volta — quello con cui la dev-stack
+era nata ha smesso di essere supportato per la comunità, e oggi c'è RustFS — e
+PSNC potrebbe proporre un proprio store. Una cancellazione scritta contro un
+fornitore sarebbe un debito da pagare due volte. Quindi:
 
 * `delete` entra in `AssetStore`, e tre implementazioni lo rispondono;
 * questo file **scopre le implementazioni DAL protocollo** (`runtime_checkable`
@@ -74,9 +75,9 @@ def _implementazioni():
     interfaccia» significa qui. Un backend nuovo in `app/assets.py` entra da
     solo — è il cancello che varrà il giorno che arriva quello di PSNC.
     """
-    # per IDENTITÀ, non per nome: `MinioAssetStore` è il vecchio nome di
-    # `S3AssetStore` (17 ottobre 2026) e `getmembers` vede la stessa classe due
-    # volte — un'implementazione, non due
+    # per IDENTITÀ, non per nome: un alias (ce n'è stato uno, il vecchio nome
+    # di `S3AssetStore`, tolto in ottobre 2026) farebbe vedere a `getmembers`
+    # la stessa classe due volte — un'implementazione, non due
     trovate = [c for _n, c in inspect.getmembers(assets_module, inspect.isclass)
                if c is not AssetStore and issubclass(c, AssetStore)]
     return list(dict.fromkeys(trovate))
@@ -112,11 +113,11 @@ def test_E_UNO_SENZA_delete_NON_E_UN_AssetStore():
     assert issubclass(StoreIntero, AssetStore)
 
 
-#: I due che si possono costruire senza rete. `MinioAssetStore` non entra in
+#: I due che si possono costruire senza rete. `S3AssetStore` non entra in
 #: questa lista e non è una dimenticanza: il suo `__init__` apre una
 #: connessione, e un test che la aprisse misurerebbe la rete. Il suo `delete` è
 #: sotto il cancello dei metodi qui sopra, e il suo comportamento è provato
-#: dallo smoke della dev-stack contro un MinIO vero.
+#: contro un S3 vero da `tests/test_assets_s3.py` e dallo smoke della dev-stack.
 def _costruibili(tmp_path):
     return [InMemoryAssetStore(), DirectoryAssetStore(str(tmp_path / "blob"))]
 
@@ -193,8 +194,8 @@ def test_I_DUE_STORE_LOCALI_SANNO_ELENCARE(tmp_path):
     `main._stored_digests()` chiede a uno store `refs`, `digests` o `keys` e
     ricade su un dizionario `_data`. **Nessuna implementazione aveva nessuno dei
     quattro**, quindi `orphan_assets` è stato `[]` da quando il referto esiste —
-    su OGNI backend, non solo su MinIO. La console dava la colpa a MinIO, che
-    era vero e incompleto.
+    su OGNI backend, non solo su quello S3. La console dava la colpa all'object
+    store, che era vero e incompleto.
 
     Contare una cosa che non si può toccare è il modo più sicuro per insegnare a
     non guardare quel numero; contarla SEMPRE ZERO è peggio, perché sembra una
@@ -209,15 +210,15 @@ def test_I_DUE_STORE_LOCALI_SANNO_ELENCARE(tmp_path):
         assert store.refs() == [due], type(store).__name__
 
 
-def test_E_MINIO_NON_ELENCA_e_questo_e_deliberato():
+def test_E_S3_NON_ELENCA_e_questo_e_deliberato():
     """Non un'omissione: il client saprebbe listare un bucket, questa classe non
     lo offre. Un elenco di ogni oggetto di un bucket condiviso al caricamento di
     una pagina è una domanda cara, e la regola di `storage.js` — il browser non
     indirizza lo store — resta comunque."""
-    from app.assets import MinioAssetStore
+    from app.assets import S3AssetStore
 
     for verbo in ("refs", "digests", "keys"):
-        assert not callable(getattr(MinioAssetStore, verbo, None)), verbo
+        assert not callable(getattr(S3AssetStore, verbo, None)), verbo
 
 
 def test_E_UN_SIDECAR_NON_E_UN_ASSET(tmp_path):

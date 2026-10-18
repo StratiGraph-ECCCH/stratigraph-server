@@ -1,12 +1,12 @@
-# The DEV stack: MinIO + Keycloak + em-server, on a laptop.
+# The DEV stack: RustFS + Keycloak + em-server, on a laptop.
 #
 # NOT a second deployment path. The real server — a local FCN and an
 # institutional node are the same service — is provisioned with the Ansible /
 # compose of production (heriverse-ansible). What runs here is the SAME
-# em-server image, the SAME wire, and the SAME MinIO implementation of the
-# AssetStore. This file only puts the two things it depends on next to it, so
-# the promotion arc can be exercised against a REAL object store without a
-# remote host.
+# em-server image, the SAME wire, and the SAME S3 implementation of the
+# AssetStore (RustFS here since 18 October 2026: MinIO is deprecated and gone).
+# This file only puts the two things it depends on next to it, so the promotion
+# arc can be exercised against a REAL object store without a remote host.
 #
 #   docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 #
@@ -109,11 +109,12 @@ x-s3dgraphy-version: &s3dgraphy_version "${S3DGRAPHY_VERSION:-1.6.0.dev58}"
 #
 # ## 3 · E UNA CHE NON STA IN NESSUNA DELLE DUE, DETTA INVECE DI FORZATA
 #
-#   EM_MINIO_CONSOLE_URL      `http://localhost:9001`, E DEVE RESTARE COSÌ
+#   EM_ASSET_S3_CONSOLE_URL   `http://localhost:9001/rustfs/console/`, E DEVE
+#                             RESTARE COSÌ
 #
-# La 9001 è la console di amministrazione di MinIO, con le credenziali di root:
+# La 9001 è la console di amministrazione di RustFS, con le credenziali di root:
 # è legata a `127.0.0.1` di proposito (vedi la sua riga, più sopra) e Caddy NON
-# la serve — misurato, `/minio/` dà 404. Quindi:
+# la serve (`/assets/*` va alla 9000, l'API S3, e basta). Quindi:
 #
 #   · relativa non può essere: sul nodo non c'è nessun percorso che la serva;
 #   · seguire il nome primario sarebbe una BUGIA: `fcn.local:9001` non è
@@ -158,9 +159,10 @@ x-public-addresses:
     EM_SITE: >-
       è l'ELENCO dei nomi che Caddy serve — contiene em.localhost perché il nodo
       continua a rispondere anche su quel nome, e deve
-    EM_MINIO_CONSOLE_URL: >-
-      categoria 3: la 9001 è la console di amministrazione di MinIO, legata a
-      127.0.0.1 e NON servita da Caddy (misurato, /minio/ dà 404). localhost è
+    EM_ASSET_S3_CONSOLE_URL: >-
+      categoria 3: la 9001 è la console di amministrazione di RustFS, legata a
+      127.0.0.1 e NON servita da Caddy (Caddy manda /assets/* all'API S3 sulla
+      9000, e nient'altro). localhost è
       giusto perché in un browser è la macchina di chi guarda, e quella è
       l'unica da cui quella porta si apre
     ORCID_ISSUER: >-
@@ -220,7 +222,17 @@ services:
   # =======================================================================
   # OBJECT STORE — where the assets actually live (content-addressed)
   # =======================================================================
-  minio:
+  rustfs:
+    # ── PERCHÉ RUSTFS, E DA QUANDO ──────────────────────────────────────────
+    #
+    # Fino al 18 ottobre 2026 qui c'era MinIO. MinIO community si è allontanata
+    # dall'open source ed è deprecata per questo progetto; RustFS (Apache-2.0)
+    # parla lo stesso S3. La prova del 17 ottobre (`docker-compose.rustfs.yml`,
+    # ora tolto: la storia è nel git) ha misurato che ogni chiamata del server,
+    # di Cantaloupe, del catalogo e del chatbot è un'operazione S3 standard, e
+    # che smoke e suite passano invariati. Chi ha ancora i dati nel volume
+    # `em-dev_minio_data` li porta qui con `migra-minio-rustfs.sh` (una volta).
+    #
     # ── PINNATA, E IL DIGEST ACCANTO ────────────────────────────────────────
     #
     # Un tag mobile è un'immagine che cambia sotto i piedi di chi la specchia, e
@@ -228,16 +240,24 @@ services:
     # versione si può ricostruire e ripuntare, e il digest è l'unico nome che
     # resta fermo — scritto accanto, si VEDE quando qualcuno lo ha spostato.
     #
-    # Misurato il 22 settembre 2026 su questa macchina, e il pin è stato scelto
-    # per NON cambiare ciò che gira: il tag `RELEASE.2025-09-07T16-13-09Z` risolve allo STESSO
-    # digest che `:latest` aveva già tirato qui. Il pin non aggiorna niente,
-    # scrive soltanto quello che c'era.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z  # sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    container_name: em-dev-minio
-    command: server /data --console-address ":9001"
+    # Misurato il 17 ottobre 2026: `rustfs/rustfs:1.0.2` (rilascio stabile del
+    # 16 ottobre 2026) risolve a questo digest — è l'indice multi-architettura;
+    # sul Mac ha dato l'immagine arm64.
+    image: rustfs/rustfs:1.0.2  # sha256:7e948dad4748bda48f8985fda7195f8cf2e4259427011f6120acc2c9acf51587
+    container_name: em-dev-rustfs
     environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD}"
+      # Un volume, un disco. La pila d'esempio di RustFS ne usa quattro per
+      # l'erasure coding; un nodo di sviluppo (e un Pi) ne ha uno.
+      RUSTFS_VOLUMES: "/data"
+      RUSTFS_ADDRESS: "0.0.0.0:9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: "0.0.0.0:9001"
+      # Dal `.env.dev`, e senza default qui. NON con `${…:?}`: `fcn-down.sh` e
+      # `bump-s3dgraphy.sh` rendono questo file senza `--env-file`, e un `down`
+      # che si rifiuta di spegnere perché manca una chiave è peggio del male.
+      # La guardia sta prima, in `sg_need_env_dev` (platform.sh).
+      RUSTFS_ACCESS_KEY: "${RUSTFS_ACCESS_KEY}"
+      RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
     ports:
       # `127.0.0.1:` DAVANTI. Il nodo di campo, per progetto, FA DA HOTSPOT ai
       # tablet del cantiere: «siamo tutti sulla stessa rete» non e' un
@@ -255,77 +275,66 @@ services:
       # negoziabile: e' la porta del nodo, ed e' quella da cui passera' la
       # prova a due macchine sulla rete locale.
       #
-      # 9001 e' la CONSOLE DI AMMINISTRAZIONE di MinIO, con le credenziali di
+      # 9001 e' la CONSOLE DI AMMINISTRAZIONE di RustFS, con le credenziali di
       # root in `.env.dev`. Su loopback resta apribile dal browser di questo
-      # Mac — `EM_MINIO_CONSOLE_URL` la nomina come `http://localhost:9001`, e
-      # `localhost` in un browser e' sempre stata la macchina di chi guarda,
-      # quindi per un altro dispositivo non ha mai funzionato e non cambia
-      # niente.
-      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+      # Mac — `EM_ASSET_S3_CONSOLE_URL` la nomina come
+      # `http://localhost:9001/rustfs/console/`, e `localhost` in un browser e'
+      # sempre stata la macchina di chi guarda.
+      - "127.0.0.1:${RUSTFS_API_PORT:-9000}:9000"
+      - "127.0.0.1:${RUSTFS_CONSOLE_PORT:-9001}:9001"
     volumes:
-      - minio_data:/data
+      # L'immagine gira come 10001 e la sua `/data` è già di 10001: un volume
+      # nominato e vuoto ne eredita il proprietario alla prima creazione, quindi
+      # niente `chown` a parte (misurato il 17 ottobre). Volume NUOVO, non
+      # `minio_data`: il formato su disco di MinIO non è quello di RustFS.
+      - rustfs_data:/data
     healthcheck:
       # the readiness endpoint, not a port check: a listening socket is not a
-      # store that will accept an object
-      test: ["CMD", "mc", "ready", "local"]
+      # store that will accept an object. curl is in the image.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
       interval: 5s
       timeout: 3s
       retries: 20
     # `unless-stopped` COME TUTTI GLI ALTRI, e fino al 2026-09-19 questa chiave
-    # mancava — non era una decisione scritta, era un'assenza. Misurato: il
-    # file ha `restart: unless-stopped` su ogni servizio di lunga durata
-    # (cantaloupe, caddy, stratigraph-server, chatbot, catalog, nodeodm,
-    # couchdb, pyarchinit-mini) e `restart: "no"` UNA volta sola, su
-    # `minio-init`, che e' un one-shot e li' e' giusto. Nessun commento, in
-    # nessun punto del file o di `fcn-up.sh`, spiegava l'assenza qui.
-    #
-    # La conseguenza l'ha mostrata un riavvio della VM di Colima: il nodo e'
-    # risalito con sei servizi su e sani e SENZA identita' e SENZA object store,
-    # che e' la condizione peggiore — sembra accesso e non lo e'.
-    #
-    # E il rischio di far ripartire Keycloak da solo e' misurato, non sperato:
-    # un RESTART riusa il filesystem del container, quindi il database interno
-    # di `start-dev` sopravvive, l'import non rigira e le chiavi del realm NON
-    # cambiano. E' un RECREATE che le rifa' — ed e' quello che serve dopo una
-    # modifica al realm (vedi `keycloak/README.md`).
+    # mancava (allora su MinIO). Un riavvio della VM di Colima ha riportato su il
+    # nodo con sei servizi sani e SENZA object store, che e' la condizione
+    # peggiore — sembra accesso e non lo e'.
     restart: unless-stopped
 
   # A one-shot: create the bucket, then exit. em-server would create it itself
-  # (its `_ensure_bucket`), but doing it here means the bucket exists before the
+  # (its `ensure_bucket`), but doing it here means the bucket exists before the
   # first request even if em-server is started with credentials that are not
   # allowed to create buckets — which is what production looks like.
-  minio-init:
-    # ── PINNATA, E IL DIGEST ACCANTO ────────────────────────────────────────
-    #
-    # Un tag mobile è un'immagine che cambia sotto i piedi di chi la specchia, e
-    # qui c'è chi specchia davvero. Il digest NON è decorazione: un tag di
-    # versione si può ricostruire e ripuntare, e il digest è l'unico nome che
-    # resta fermo — scritto accanto, si VEDE quando qualcuno lo ha spostato.
-    #
-    # Misurato il 22 settembre 2026 su questa macchina, e il pin è stato scelto
-    # per NON cambiare ciò che gira: come per minio, il tag di release risolve allo STESSO
-    # digest già in uso. Il pin non aggiorna niente.
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z  # sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
-    container_name: em-dev-minio-init
+  #
+  # Senza `mc`, che è uno strumento di MinIO: una `PUT /<bucket>` firmata SigV4
+  # con il curl dell'immagine di RustFS è la CreateBucket di S3 e nient'altro;
+  # 409 (BucketAlreadyOwnedByYou) è «c'è già». Stessa immagine, stesso digest.
+  rustfs-init:
+    image: rustfs/rustfs:1.0.2  # sha256:7e948dad4748bda48f8985fda7195f8cf2e4259427011f6120acc2c9acf51587
+    container_name: em-dev-rustfs-init
     depends_on:
-      minio:
+      rustfs:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD}"
-      MINIO_BUCKET: "${MINIO_BUCKET}"
-    entrypoint: >
-      /bin/sh -c "
-        mc alias set dev http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
-        mc mb --ignore-existing dev/$$MINIO_BUCKET &&
-        mc ls dev &&
-        echo 'bucket ready: '$$MINIO_BUCKET
-      "
+      RUSTFS_ACCESS_KEY: "${RUSTFS_ACCESS_KEY}"
+      RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
+      RUSTFS_BUCKET: "${RUSTFS_BUCKET}"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        code=$$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+          --aws-sigv4 'aws:amz:us-east-1:s3' \
+          --user "$$RUSTFS_ACCESS_KEY:$$RUSTFS_SECRET_KEY" \
+          "http://rustfs:9000/$$RUSTFS_BUCKET")
+        case "$$code" in
+          200|409) echo "bucket ready: $$RUSTFS_BUCKET ($$code)" ;;
+          *) echo "bucket NOT created: HTTP $$code"; exit 1 ;;
+        esac
     restart: "no"
 
   # A one-shot: i VOLUMI DEI DATI all'utente con cui girano le immagini, poi
-  # esce. Come `minio-init`, e per la stessa ragione: una cosa che deve essere
+  # esce. Come `rustfs-init`, e per la stessa ragione: una cosa che deve essere
   # vera prima della prima richiesta si fa prima, non si spera.
   #
   # ── IL GUASTO CHE CHIUDE, MISURATO IL 28 SETTEMBRE 2026 ─────────────────────
@@ -386,7 +395,7 @@ services:
   # IIIF IMAGE API — Cantaloupe, reading straight from the bucket
   # =======================================================================
   #
-  # It takes its images from MinIO with the **digest as the identifier**, which
+  # It takes its images from RustFS (S3) with the **digest as the identifier**, which
   # is the whole reason this is cheap: the assets are already content-addressed,
   # so no second copy, no import step, no thumbnail pipeline to keep in sync.
   #
@@ -420,7 +429,7 @@ services:
     image: islandora/cantaloupe@sha256:938d15c162c3da1436f10f79cd1c81c8cf412f996fb625c55874194c28bc0077  # Cantaloupe 5.0.7, era :main
     container_name: em-dev-cantaloupe
     depends_on:
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
     environment:
       CANTALOUPE_HTTP_ENABLED: "true"
@@ -437,12 +446,12 @@ services:
       CANTALOUPE_ENDPOINT_HEALTH_ENABLED: "true"
       # --- the source: the SAME bucket em-server writes to -------------------
       CANTALOUPE_SOURCE_STATIC: "S3Source"
-      CANTALOUPE_S3SOURCE_ENDPOINT: "http://minio:9000"
-      CANTALOUPE_S3SOURCE_ACCESS_KEY_ID: "${MINIO_ROOT_USER}"
-      CANTALOUPE_S3SOURCE_SECRET_KEY: "${MINIO_ROOT_PASSWORD}"
+      CANTALOUPE_S3SOURCE_ENDPOINT: "http://rustfs:9000"
+      CANTALOUPE_S3SOURCE_ACCESS_KEY_ID: "${RUSTFS_ACCESS_KEY}"
+      CANTALOUPE_S3SOURCE_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
       CANTALOUPE_S3SOURCE_REGION: "us-east-1"
       CANTALOUPE_S3SOURCE_LOOKUP_STRATEGY: "BasicLookupStrategy"
-      CANTALOUPE_S3SOURCE_BASICLOOKUPSTRATEGY_BUCKET_NAME: "${MINIO_BUCKET}"
+      CANTALOUPE_S3SOURCE_BASICLOOKUPSTRATEGY_BUCKET_NAME: "${RUSTFS_BUCKET}"
       # NO path prefix and NO suffix: the IIIF identifier IS the sha256 hex,
       # which is exactly the object's key. One name for one thing.
       CANTALOUPE_S3SOURCE_BASICLOOKUPSTRATEGY_PATH_PREFIX: ""
@@ -537,7 +546,7 @@ services:
     depends_on:
       - stratigraph-server
       - cantaloupe
-      - minio
+      - rustfs
     ports:
       # SU `0.0.0.0`, DELIBERATAMENTE, e l'unica del dev-stack che ci resta.
       # E' la porta del nodo: tutto il resto e' stato legato al loopback il
@@ -651,8 +660,9 @@ services:
     # file ha `restart: unless-stopped` su ogni servizio di lunga durata
     # (cantaloupe, caddy, stratigraph-server, chatbot, catalog, nodeodm,
     # couchdb, pyarchinit-mini) e `restart: "no"` UNA volta sola, su
-    # `minio-init`, che e' un one-shot e li' e' giusto. Nessun commento, in
-    # nessun punto del file o di `fcn-up.sh`, spiegava l'assenza qui.
+    # `minio-init` (oggi `rustfs-init`), che e' un one-shot e li' e' giusto.
+    # Nessun commento, in nessun punto del file o di `fcn-up.sh`, spiegava
+    # l'assenza qui.
     #
     # La conseguenza l'ha mostrata un riavvio della VM di Colima: il nodo e'
     # risalito con sei servizi su e sani e SENZA identita' e SENZA object store,
@@ -680,7 +690,7 @@ services:
   # riga nuova. Cosa ci va e cosa NON ci va, che e' la meta' importante:
   #
   #   · ci va IL RECORD  — il documento em.json della stanza, versionato;
-  #   · restano in MinIO I CORPI — glb, pdf, tileset, immagini: byte indirizzati
+  #   · restano in RustFS (S3) I CORPI — glb, pdf, tileset, immagini: byte indirizzati
   #     dal loro digest, che in un database sarebbero una colonna `bytea` grande
   #     e nient'altro (vedi `app/assets.py`, che li serve gia' bene);
   #   · resta nel volume `em_data` L'OPLOG — `<stanza>.oplog.jsonl`, che e' un
@@ -718,7 +728,7 @@ services:
     healthcheck:
       # `pg_isready` con il database E l'utente veri, non solo la porta: un
       # socket in ascolto non e' un database che accetta una connessione — e'
-      # la stessa distinzione che il healthcheck di MinIO fa qui sopra
+      # la stessa distinzione che il healthcheck di RustFS fa qui sopra
       # («a listening socket is not a store that will accept an object»).
       # Durante l'inizializzazione Postgres ascolta gia' e rifiuta ancora.
       test: ["CMD-SHELL", "pg_isready -U \"${EM_DOCUMENTS_USER:-em}\" -d \"${EM_DOCUMENTS_DB:-em_documents}\" -q"]
@@ -743,7 +753,7 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       # i volumi all'utente dell'immagine, PRIMA di scriverci: vedi `volumi-init`
       volumi-init:
@@ -779,11 +789,11 @@ services:
       # `/v1/auth-config` as `native_client_id`.
       EM_NATIVE_CLIENT_ID: "${EM_NATIVE_CLIENT_ID:-em-tools}"
       # --- the object store: the PRODUCTION implementation -------------------
-      MINIO_ENDPOINT: "http://minio:9000"
-      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER}"
-      MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD}"
-      MINIO_BUCKET: "${MINIO_BUCKET}"
-      MINIO_SECURE: "false"
+      EM_ASSET_S3_ENDPOINT: "http://rustfs:9000"
+      EM_ASSET_S3_ACCESS_KEY: "${RUSTFS_ACCESS_KEY}"
+      EM_ASSET_S3_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
+      EM_ASSET_S3_BUCKET: "${RUSTFS_BUCKET}"
+      EM_ASSET_S3_SECURE: "false"
       # --- room documents: LA CASA, e la directory che resta accanto ---------
       # I documenti vanno in Postgres (`app/documents.py`), uno per riga per
       # revisione. Mezza configurazione qui SOLLEVA invece di ripiegare sulla
@@ -801,7 +811,7 @@ services:
       # invece di restituire `None` in silenzio dopo il trasloco.
       EM_SNAPSHOT_DIR: "/srv/em-data/snapshots"
       # --- the resident DTC corpus ------------------------------------------
-      # The register rides in the MinIO bucket above (no setting needed for that).
+      # The register rides in the S3 bucket above (no setting needed for that).
       # What DOES need saying is who may read the WHOLE of it: the lot is the
       # provenance of every study on the instance, so it is a CURATION read and
       # off by default. Here the dev user is the curator, which is what lets
@@ -921,14 +931,14 @@ services:
       # --- the NODE MAP's browser addresses ------------------------------------
       # HERE they are real and known, which is exactly why they are set here and
       # empty in the production template: on this stack Keycloak's console and
-      # MinIO's console are published on the same origin as everything else, and
+      # RustFS's console are published on this machine, and
       # an operator opening the map wants to click through to them. On somebody
       # else's host neither is a given — see `heriverse-ansible`.
       # RELATIVO (categoria 1). Era CABLATA: nessuna variabile d'ambiente poteva
       # cambiarla, quindi la console di Keycloak nella mappa del nodo nominava
       # `em.localhost` anche su un nodo che si chiama altrimenti.
       EM_KEYCLOAK_CONSOLE_URL: "${EM_KEYCLOAK_CONSOLE_URL:-/auth/admin/}"
-      EM_MINIO_CONSOLE_URL: "http://localhost:${MINIO_CONSOLE_PORT:-9001}"
+      EM_ASSET_S3_CONSOLE_URL: "http://localhost:${RUSTFS_CONSOLE_PORT:-9001}/rustfs/console/"
       # …but the field assistant is NOT one of those: it is a container in this
       # stack, up whenever the stack is, served by Caddy at /chat/. The reason
       # for the empty default above does not apply to it, and leaving it empty
@@ -1034,7 +1044,7 @@ services:
     image: stratigraph-chatbot:dev
     container_name: em-dev-chatbot
     depends_on:
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       # i volumi all'utente dell'immagine, PRIMA di scriverci: vedi `volumi-init`
       volumi-init:
@@ -1063,12 +1073,13 @@ services:
       EM_CHATBOT_CLIENT_ID: "${EM_CHATBOT_CLIENT_ID:-em-console}"
       # --- the object store: the SAME variables the server reads --------------
       # Reused rather than paralleled: two spellings of one bucket is how one of
-      # them ends up pointing somewhere else.
-      MINIO_ENDPOINT: "http://minio:9000"
-      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER}"
-      MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD}"
-      MINIO_BUCKET: "${MINIO_BUCKET}"
-      MINIO_SECURE: "false"
+      # them ends up pointing somewhere else. Il chatbot legge `EM_ASSET_S3_*`
+      # accanto ai suoi vecchi `MINIO_*` (`stratigraph-chatbot/app/assets.py`).
+      EM_ASSET_S3_ENDPOINT: "http://rustfs:9000"
+      EM_ASSET_S3_ACCESS_KEY: "${RUSTFS_ACCESS_KEY}"
+      EM_ASSET_S3_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
+      EM_ASSET_S3_BUCKET: "${RUSTFS_BUCKET}"
+      EM_ASSET_S3_SECURE: "false"
       # --- where what is said ends up ----------------------------------------
       # A container on a volume, not a room: see the note above. The path is
       # under the data volume so a node that loses power keeps what was recorded.
@@ -1097,8 +1108,8 @@ services:
       # servizio sulla rete di compose.
       EM_ROOM_SERVERS: "${EM_CHATBOT_ROOM_SERVERS:-${EM_PUBLIC_BASE:-https://em.localhost:${HTTPS_PORT:-8443}/em}=http://stratigraph-server:8000}"
       # --- LA DISPENSA: dove aspettano i byte che non sono ancora saliti ------
-      # Misurato il 30 settembre, staccando MinIO con il servizio in piedi: una
-      # foto di cantiere impiega 306 s a fallire e poi non e' da nessuna parte,
+      # Misurato il 30 settembre, staccando l'object store (allora MinIO) con
+      # il servizio in piedi: una foto di cantiere impiega 306 s a fallire e poi non e' da nessuna parte,
       # mentre l'US scritta un istante prima esiste. Il ponte accanto al
       # container accoda OPERAZIONI (173 byte l'una) e una foto sono quattro
       # megabyte: i byte hanno bisogno di un posto loro.
@@ -1144,7 +1155,7 @@ services:
   #
   # A PULLED DEPENDENCY, not our code (design §7-bis): the processing connector
   # in s3Dgraphy drives it over three REST endpoints, and the only bespoke part
-  # is that connector. It is here for the same reason MinIO and Cantaloupe are —
+  # is that connector. It is here for the same reason RustFS and Cantaloupe are —
   # a service of the node, brought up with it.
   #
   # PINNED, never `latest`. 3.5.6 is the newest semver tag published for BOTH
@@ -1201,7 +1212,7 @@ services:
     # THE TRADE-OFF, said out loud: after this window the engine deletes the
     # task, so its `all.zip` is gone and `GET /task/{uuid}/info` 404s. That is
     # safe for US because the connector downloads the archive and publishes it to
-    # MinIO *before* it writes anything to the graph — the bytes we keep are the
+    # the object store *before* it writes anything to the graph — the bytes we keep are the
     # ones in the object store, not the ones on the engine. What it does cost is
     # re-downloading a run from NodeODM's own dashboard an hour later. Raise
     # NODEODM_CLEANUP_AFTER on a node where somebody works that way.
@@ -1255,7 +1266,7 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
       # i volumi all'utente dell'immagine, PRIMA di scriverci: vedi `volumi-init`
       volumi-init:
@@ -1274,12 +1285,14 @@ services:
       OIDC_JWKS_URI: "http://keycloak:8080/auth/realms/${DEV_REALM}/protocol/openid-connect/certs"
       OIDC_AUDIENCE: "${DEV_CLIENT_ID}"
       # --- the studies: the SAME bucket as the assets, under `studies/` -------
-      MINIO_ENDPOINT: "http://minio:9000"
-      MINIO_ACCESS_KEY: "${MINIO_ROOT_USER}"
-      MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD}"
-      MINIO_BUCKET: "${MINIO_BUCKET}"
-      # (no MINIO_SECURE: the scheme of the endpoint decides — `http://` means
+      # `EM_ASSET_S3_*`: il catalogo le legge accanto ai suoi vecchi `MINIO_*`
+      # (`stratigraph-catalog/app/store.py`), quindi un nome solo per tutta la
+      # pila. (no _SECURE: the scheme of the endpoint decides — `http://` means
       # somebody chose plain. One fact, one place.)
+      EM_ASSET_S3_ENDPOINT: "http://rustfs:9000"
+      EM_ASSET_S3_ACCESS_KEY: "${RUSTFS_ACCESS_KEY}"
+      EM_ASSET_S3_SECRET_KEY: "${RUSTFS_SECRET_KEY}"
+      EM_ASSET_S3_BUCKET: "${RUSTFS_BUCKET}"
       # --- the library you are editing, first on the path --------------------
       PYTHONPATH: "/srv/s3dgraphy-src"
       # --- the index: DERIVED, so a volume is a convenience, not a safety net.
@@ -1421,7 +1434,7 @@ volumes:
   couchdb_data:
   caddy_data:      # the internal CA + issued certs — losing it means re-trusting
   caddy_config:
-  minio_data:
+  rustfs_data:        # gli asset (glb, pdf, immagini) per digest — DATI DI STUDIO
   em_data:
   cantaloupe_cache:   # derivatives: a cache, recomputable — not study data
   nodeodm_data:       # the engine's tasks and the archives it still serves

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end smoke of the dev stack — the proof that MinIO is REAL.
+"""End-to-end smoke of the dev stack — the proof that the object store is REAL.
 
 Everything below could be faked by a server that kept the bytes in a dict, and
 that is exactly what this script is written to rule out. So it does not only ask
@@ -13,7 +13,7 @@ What it checks, in order, and what each one would catch:
    nothing after it means anything;
 2. **PUT** an asset → the reference is the sha256 of the bytes we sent (a store
    that invented its own name would show up here);
-3. **the object is in MinIO**, verified against the bucket directly, and its size
+3. **the object is in RustFS (S3)**, verified against the bucket directly, and its size
    and content-type are read with a `head` that does not download it;
 4. **GET** returns the same bytes, byte for byte;
 5. **no token → refused**, and nothing is stored;
@@ -150,9 +150,8 @@ def main() -> int:
     health = json.loads(body)
     ok("StratiGraph Server is enforcing tokens", health.get("auth") == "keycloak",
        str(health.get("auth")))
-    # `s3 (…)` since 17 October 2026 (MinIO and RustFS are both S3 to the
-    # node); `minio (…)` is what an older server says
-    ok("the asset store is S3", str(health.get("asset_store")).startswith(("s3", "minio")),
+    # `s3 (…)` since 17 October 2026: the node cannot tell which S3 answers
+    ok("the asset store is S3", str(health.get("asset_store")).startswith("s3"),
        str(health.get("asset_store")))
 
     # ── 1 · a token from the dev realm ──────────────────────────────────────
@@ -204,29 +203,36 @@ def main() -> int:
 
     # ── 3 · and it is REALLY in the bucket ───────────────────────────────────
     try:
-        from minio import Minio
+        import boto3
+        from botocore.config import Config
     except ImportError:
-        skip("the object is in the MinIO bucket",
-             "the `minio` client is not installed in this interpreter "
-             "(pip install minio) — StratiGraph Server's own answer is not proof")
+        skip("the object is in the S3 bucket",
+             "the `boto3` client is not installed in this interpreter "
+             "(pip install boto3) — StratiGraph Server's own answer is not proof")
     else:
-        client = Minio(f"localhost:{env('MINIO_API_PORT', '9000')}",
-                       access_key=env("MINIO_ROOT_USER", "minioadmin"),
-                       secret_key=env("MINIO_ROOT_PASSWORD", "minioadmin"),
-                       secure=False)
-        bucket = env("MINIO_BUCKET", "em-assets")
+        # the keys from `.env.dev` (load_env_file), never a default: a smoke
+        # that guesses credentials would pass against a store nobody configured
+        client = boto3.client(
+            "s3", endpoint_url=f"http://localhost:{env('RUSTFS_API_PORT', '9000')}",
+            aws_access_key_id=env("RUSTFS_ACCESS_KEY"),
+            aws_secret_access_key=env("RUSTFS_SECRET_KEY"),
+            region_name="us-east-1",
+            config=Config(s3={"addressing_style": "path"},
+                          signature_version="s3v4"))
+        bucket = env("RUSTFS_BUCKET", "em-assets")
         key = digest.split(":", 1)[1]
-        stat = client.stat_object(bucket, key)
-        ok("the object is in the MinIO bucket, keyed by its digest",
-           stat.size == len(payload), f"{bucket}/{key[:16]}… {stat.size} B")
+        stat = client.head_object(Bucket=bucket, Key=key)
+        ok("the object is in the S3 bucket, keyed by its digest",
+           stat["ContentLength"] == len(payload),
+           f"{bucket}/{key[:16]}… {stat['ContentLength']} B")
         ok("…with the media type it was uploaded with",
-           stat.content_type == "model/gltf-binary", str(stat.content_type))
-        response = client.get_object(bucket, key)
+           stat.get("ContentType") == "model/gltf-binary",
+           str(stat.get("ContentType")))
+        response = client.get_object(Bucket=bucket, Key=key)["Body"]
         try:
             in_bucket = response.read()
         finally:
             response.close()
-            response.release_conn()
         ok("…and the bytes IN THE BUCKET are the bytes we sent",
            in_bucket == payload)
 

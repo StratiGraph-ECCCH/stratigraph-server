@@ -32,7 +32,7 @@ sys.path.insert(0, str(HERE))
 from smoke_common import _TLS, Tally, arguments, call  # noqa: E402
 
 #: The routes this node really serves. `/assets` and `/iiif` are answered by
-#: MinIO and Cantaloupe, which have their own opinions about a missing object —
+#: RustFS and Cantaloupe, which have their own opinions about a missing object —
 #: what matters here is that the answer comes from THEM.
 ROUTED = [
     ("/em/v1/health", 200, "the room API"),

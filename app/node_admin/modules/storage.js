@@ -6,7 +6,7 @@
  * of the assets a room references the store actually has, and which stored
  * digests **no** room mentions.
  *
- * MinIO is not addressed here. It never is from a browser: the numbers come from
+ * The object store is not addressed here. It never is from a browser: the numbers come from
  * `/v1/admin/storage`, which reads the store through the same interface the asset
  * route uses. No bucket listing, no presigned URL, nothing that would make the
  * client a second door to the bytes.
@@ -66,14 +66,14 @@ async function render(root) {
     // Until 8 October 2026 this list said «Named, not deleted», and that half
     // was right: no sweep, no timer. But counting a thing nobody can touch is
     // the surest way to teach people not to look at the number — and there was
-    // nowhere else to touch it except inside MinIO, by hand.
+    // nowhere else to touch it except inside the object store, by hand.
     //
     // So each digest gets its own button, and it asks the node rather than the
     // store: `DELETE /v1/admin/assets/{ref}` re-checks who references those
     // bytes AT THE MOMENT OF ASKING and refuses with the list. This report may
     // be a minute old; the refusal is not.
     //
-    // `storage.js`'s rule stands: MinIO is not addressed from here. No bucket
+    // `storage.js`'s rule stands: the object store is not addressed from here. No bucket
     // listing, no presigned URL, no second door to the bytes.
     orphans.innerHTML = `<h2>Orphan assets
         <span class="tag warn">${report.orphan_assets.length}</span></h2>
@@ -90,11 +90,13 @@ async function render(root) {
   } else {
     // «NONE» AND «CANNOT SAY» ARE TWO DIFFERENT ANSWERS, and until 8 October
     // 2026 this branch collapsed them: NO implementation could enumerate, so
-    // the list was always empty and the sentence blamed MinIO — true, and
-    // incomplete. The two local stores answer now; MinIO still does not, and
-    // that is a decision (a bucket listing on a page load is an expensive
-    // question, and `storage.js`'s rule stands either way).
-    const muto = /minio|s3/i.test(String(report.asset_store || ""));
+    // the list was always empty and the sentence blamed the object store —
+    // true, and incomplete. The two local stores answer now; the S3 store
+    // still does not, and that is a decision (a bucket listing on a page load
+    // is an expensive question, and `storage.js`'s rule stands either way).
+    // The node names it `s3 (<endpoint>, bucket <name>)` — `assets.describe`,
+    // whatever S3-compatible server answers — so the word to look for is `s3`.
+    const muto = /^s3\b/i.test(String(report.asset_store || ""));
     orphans.innerHTML = `<h2>Orphan assets</h2>
       <p class="muted">${muto
         ? `This store does not enumerate (<b>${escapeHtml(report.asset_store)}</b>,

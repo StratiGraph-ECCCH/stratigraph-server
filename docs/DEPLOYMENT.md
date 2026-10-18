@@ -7,6 +7,16 @@ The map of the pieces is [`ARCHITECTURE-SYSTEM.md`](ARCHITECTURE-SYSTEM.md);
 this is the operational half. The playbook itself lives in the
 [`heriverse-ansible`](../../heriverse-ansible) repository.
 
+> **MinIO → RustFS (18 October 2026).** The dev stack runs RustFS since that
+> day, and StratiGraph Server talks to its object store with `boto3`, reading
+> only `EM_ASSET_S3_*` (an old `MINIO_*` name stops it at startup, by name). The
+> production role below **still deploys MinIO** — its variables (`minio_enabled`,
+> `minio_root_user`, …) and its service are named for it, and that role lives in
+> `heriverse-ansible`, not here. It already writes `EM_ASSET_S3_*` for the
+> server, so the server is ready; swapping the role's MinIO for RustFS (and
+> copying the bucket across, as `dev-stack/migra-minio-rustfs.sh` does on a
+> laptop) is that repository's change, still to be made.
+
 ---
 
 ## What comes up
@@ -244,9 +254,10 @@ What to look for, in both answers:
 
 * `"auth": "keycloak"` — **not** `dev-no-auth`. If it says the latter, the
   service did not get its OIDC environment and is answering to anybody;
-* StratiGraph Server: `"asset_store": "minio (…)"` — if it says `memory`, uploads are
+* StratiGraph Server: `"asset_store": "s3 (…)"` — if it says `memory`, uploads are
   living in a process and will vanish with it;
-* StratiGraph Catalog: `"container_store": "minio (…)"` and `"index": "couchdb (…)"`.
+* StratiGraph Catalog: `"container_store": "minio (…)"` (the catalogue's own
+  word for its S3 store) and `"index": "couchdb (…)"`.
 
 Then the one that proves the architecture rather than the wiring:
 

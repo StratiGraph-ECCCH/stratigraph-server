@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LIVE smoke: the RESIDENT corpus makes the rights bite when an asset is served.
 
-The hole this measures was demonstrated on 17 Aug: an asset in MinIO whose
+The hole this measures was demonstrated on 17 Aug: an asset in the object store whose
 licence lived in a per-project corpus **file** came back with `x-em-license:
 null`, because the enforcement reads the rights out of a document StratiGraph Server
 holds. With the corpus resident (one register per instance, in the same bucket as

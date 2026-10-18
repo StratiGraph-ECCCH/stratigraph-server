@@ -306,7 +306,7 @@ def test_4b_a_cold_room_is_rebuilt_from_the_store(client, fresh_rooms):
 
 def test_4c_the_directory_store_actually_writes_bytes(tmp_path):
     """Not a mock: a snapshot store is only a store if something is on the other
-    side of it. (The production one is MinIO — declared, not wired.)"""
+    side of it. (The S3 one is declared, not wired; a deployment uses Postgres.)"""
     store = DirectorySnapshotStore(tmp_path)
     store.put("scavo", {"graphs": {"scavo": {"nodes": [], "edges": []}}})
     written = list(pathlib.Path(tmp_path).glob("*.em.json"))
@@ -527,7 +527,7 @@ def test_7c_the_durable_truth_is_an_interface_not_a_path():
         assert not sorgenti.importa_python(source, ("pathlib",)), \
             f"{name}: il relay importa pathlib"
     store_source = (_REPO / "app" / "store.py").read_text(encoding="utf-8")
-    assert "class MinioSnapshotStore" in store_source, \
+    assert "class S3SnapshotStore" in store_source, \
         "the production target is named, so the swap is configuration"
     assert "NotImplementedError" in store_source, \
         "…and it fails with a sentence rather than pretending to work"
@@ -538,7 +538,7 @@ def test_7d_the_health_route_says_where_the_truth_is(client):
     their snapshots survive a restart."""
     payload = client.get("/health").json()
     assert "snapshot_store" in payload
-    assert payload["snapshot_store"].startswith(("memory", "directory", "minio"))
+    assert payload["snapshot_store"].startswith(("memory", "directory", "postgres", "s3"))
 
 
 def test_7e_an_edge_op_keeps_its_endpoints(client, fresh_rooms):

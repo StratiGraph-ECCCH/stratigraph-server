@@ -72,9 +72,10 @@ COPY pyproject.toml README.md ./
 # PyJWT[crypto] is here and NOT behind a build arg on purpose: an image that
 # cannot verify a token is an image that would come up in the open dev mode on
 # the shared infrastructure. The auth dependency is not optional (P1).
-# `minio` is here and not behind a build arg for the same reason PyJWT is: an
-# image that cannot reach the object store would come up serving assets from a
-# container filesystem that disappears with the container. 400 KB.
+# `boto3` (the S3 client: RustFS in the dev stack, any S3-compatible store in
+# production) is here and not behind a build arg for the same reason PyJWT is:
+# an image that cannot reach the object store would come up serving assets from
+# a container filesystem that disappears with the container.
 # `psycopg[binary,pool]` is here for the THIRD time the same reason: da quando i
 # documenti hanno una casa (`app/documents.py`) un'immagine senza il driver non
 # potrebbe aprirla, e `EM_DOCUMENTS_*` configurato senza il client fallirebbe
@@ -86,7 +87,7 @@ RUN set -eu; \
     spec="s3dgraphy${S3DGRAPHY_EXTRAS:+[${S3DGRAPHY_EXTRAS}]}==${S3DGRAPHY_VERSION}"; \
     pip install --upgrade pip && \
     pip install "$spec" "fastapi>=0.110" "uvicorn[standard]>=0.27" \
-                "PyJWT[crypto]>=2.8" "minio>=7.2" "psycopg[binary,pool]>=3.1"
+                "PyJWT[crypto]>=2.8" "boto3>=1.34" "psycopg[binary,pool]>=3.1"
 
 COPY app ./app
 

@@ -4,6 +4,30 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
 
 ## Unreleased
 
+### Cambiato
+
+- **MinIO esce, RustFS entra** (18 ott 2026). MinIO community è deprecata; la
+  prova del 17 ottobre aveva misurato RustFS 1.0.2 con smoke e suite invariati.
+  - **Dev stack:** i servizi `minio` / `minio-init` diventano `rustfs` /
+    `rustfs-init` (`rustfs/rustfs:1.0.2`, pinnata col digest; il bucket con una
+    `PUT` SigV4, senza `mc`), volume nuovo `rustfs_data`, `Caddyfile.dev`
+    `/assets/*` → `rustfs:9000`. In `.env.dev` le chiavi sono `RUSTFS_*`; server,
+    catalogo e chatbot ricevono tutti `EM_ASSET_S3_*`. La pila di prova
+    (`docker-compose.rustfs.yml`, `README-RUSTFS.md`) è tolta: ha fatto il suo.
+  - **Migrazione, una volta:** `dev-stack/migra-minio-rustfs.sh` aggiunge le
+    chiavi `RUSTFS_*` a `.env.dev` (stessi valori), copia il bucket dalla
+    vecchia MinIO e lo verifica (conteggi, byte, sha256 di un campione). Il
+    volume `em-dev_minio_data` resta come copia. `fcn-up.sh` si ferma su un
+    `.env.dev` di prima, con il comando da lanciare.
+  - **Server:** il client è `boto3` (`app/s3client.py`), non più `minio-py`;
+    extra `[s3]` = `boto3>=1.34`. Via gli alias `Minio*`. Si leggono solo
+    `EM_ASSET_S3_*` (e `EM_ASSET_S3_CONSOLE_URL`); un vecchio `MINIO_*` ferma
+    l'avvio con una frase che nomina quello nuovo. Il controllo di salute del
+    nodo si chiama `s3` e bussa a `<endpoint>/health`.
+  - **Non qui:** il ruolo di produzione (`heriverse-ansible`) porta ancora
+    MinIO; il catalogo e il chatbot usano ancora `minio-py` dentro i loro
+    repository (parlano S3 a RustFS senza problemi).
+
 ### Aggiunto
 
 - **Cancellare una stanza, e tenere i suoi asset** (MICRO «spazio 3D 2»,

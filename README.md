@@ -18,14 +18,14 @@ bucket, same realm, different question.
 |---|---|
 | see how all the pieces stand together | [`docs/ARCHITECTURE-SYSTEM.md`](docs/ARCHITECTURE-SYSTEM.md) |
 | run the whole thing on a laptop | [`dev-stack/README-DEV.md`](dev-stack/README-DEV.md) |
-| the one-command cheat-sheet (+ connect EMtools to MinIO) | [`dev-stack/CHEATSHEET.md`](dev-stack/CHEATSHEET.md) |
+| the one-command cheat-sheet (+ connect EMtools to the object store) | [`dev-stack/CHEATSHEET.md`](dev-stack/CHEATSHEET.md) |
 | deploy it on a real host | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
 | know which URL is internal and which public | [`docs/URL-TOPOLOGY.md`](docs/URL-TOPOLOGY.md) |
 | know why the two Heriverse images are not publishable yet | [`docs/HERIVERSE-IMMAGINI.md`](docs/HERIVERSE-IMMAGINI.md) |
 
-> **Status: P0–P4.5.** Read endpoints, Keycloak auth, the MinIO asset store, the
-> IIIF image layer, the WIRE 2 envelope, the room relay and structural real-time
-> are all in and measured. What is left is ops (an institutional host) and the
+> **Status: P0–P4.5.** Read endpoints, Keycloak auth, the S3 asset store
+> (RustFS; MinIO until 18 Oct 2026), the IIIF image layer, the WIRE 2 envelope,
+> the room relay and structural real-time are all in and measured. What is left is ops (an institutional host) and the
 > halves declared in the reports under `.claude/wip/reports/`.
 
 ## The two rules that shape this repo
@@ -52,7 +52,7 @@ of state enters this service, and it comes with three fences that keep rule 2
 meaningful rather than abandoned:
 
 * **The durable truth is outside the process.** A room's snapshot goes to an
-  object store (`app/store.py`; MinIO in the deployment). What lives in RAM is a
+  store (`app/store.py`; Postgres in the deployment). What lives in RAM is a
   *working copy*, rebuilt from the snapshot when a cold room is opened — the
   process may die, the study does not live inside it. `GET /health` reports
   `snapshot_store`, so "do my snapshots survive a restart?" is one unauthenticated
@@ -397,7 +397,7 @@ Il resto di questa sezione è misurato.)*
 ```
 
 Ten of those skip instead of failing when the dev stack is **down** — they are the
-ones that talk to a real MinIO, and they say so by name. A skip means *not
+ones that talk to a real S3 store (RustFS), and they say so by name. A skip means *not
 measured*, never *passed*.
 
 The tests skip rather than fail when an optional dependency is absent, and the
@@ -448,7 +448,7 @@ refer to them that way.
 |---|---|---|
 | **P0** | the read API over s3Dgraphy — validate, export-ttl, reproject, resolve-authority | **done** |
 | **P1** | **Keycloak** bearer auth on the shared realm; **ORCID** as the identity a room grants a role to | **done**, running against a real realm on the dev stack |
-| **P2** | **MinIO assets**, content-addressed by sha256, with the IIIF image layer reading the same bucket | **done** |
+| **P2** | **S3 assets** (MinIO then, RustFS now), content-addressed by sha256, with the IIIF image layer reading the same bucket | **done** |
 | **P3** | **the room relay** — the WIRE 2 envelope, five idempotent ops, snapshots, presence | **done**. The conflict policy landed as convergence by merge, not the one-host-per-session ADR-002 allowed for |
 | **P4** | **deployment** (WP6) — the dev stack is arranged like production; the Ansible role lives in `heriverse-ansible` | **done on the dev stack**; an institutional host is the open half |
 | **P4.2 · P4.5** | one room, one live graph; the register, ACLs, roles, groups and invites; the front door split by verb; the node map | **done** |

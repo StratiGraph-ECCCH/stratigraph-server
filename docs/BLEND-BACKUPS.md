@@ -77,7 +77,7 @@ file.
 | variable | what it does |
 | --- | --- |
 | `EM_BACKUP_BUCKET` | a whole bucket for backups instead of a prefix inside the asset bucket |
-| `EM_BACKUP_DIR` | a directory, when the node has no MinIO |
+| `EM_BACKUP_DIR` | a directory, when the node has no S3 store |
 | `EM_BACKUP_REGISTER_DIR` | where the per-room records live (defaults beside the snapshots) |
 
 `GET /health` reports `blend_backup_store`, including the honest caveats

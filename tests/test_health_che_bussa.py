@@ -1,8 +1,8 @@
 """`/health` deve BUSSARE a ciò che dichiara.
 
 Prima di stanotte ogni riga di `/health` era una rilettura della
-configurazione: «asset_store: minio (http://minio:9000, bucket em-assets)» si
-stampava identica con MinIO acceso, spento o mai esistito.
+configurazione: «asset_store: s3 (http://rustfs:9000, bucket em-assets)» si
+stampava identica con l'object store acceso, spento o mai esistito.
 
 Non è un'astrazione. Il 24 settembre il chatbot è stato puntato a un nome di
 servizio che su quella rete non esiste, ha ripiegato in silenzio sul suo
@@ -175,7 +175,7 @@ def test_lo_stesso_elenco_per_lavvio_e_per_la_richiesta():
 # Misurato il 12 ottobre: con `EM_DOCUMENTS_*` presenti `/v1/health` diceva
 # `snapshot_store: off` — «absent by configuration» — nella stessa risposta che
 # dichiarava «postgres (…) — every revision a row», con 134 righe in tabella.
-# `_probe_for` conosceva memoria, MinIO e directory; Postgres no.
+# `_probe_for` conosceva memoria, S3 e directory; Postgres no.
 
 class _Conn:
     def __init__(self, answer):

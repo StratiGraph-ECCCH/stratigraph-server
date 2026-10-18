@@ -1202,8 +1202,8 @@ async function setArchived(roomId, archived) {
 //
 // The three zones above are for somebody who came to WORK. This one is for
 // somebody who came to make the node work, and it exists because that person's
-// twenty questions a day — is Keycloak up, is the realm the right one, does MinIO
-// have the bucket, where is the OpenAPI, is the catalogue answering or is Caddy
+// twenty questions a day — is Keycloak up, is the realm the right one, does the S3
+// store have the bucket, where is the OpenAPI, is the catalogue answering or is Caddy
 // answering for it — live in three places that are not this page: a cheatsheet,
 // `docker ps`, and the memory of whoever brought the stack up.
 //
@@ -1347,8 +1347,9 @@ function mapRow({ label, state, detail, browser, internal, facts,
       copy.title = t("map.curlTitle");
       copy.addEventListener("click", async () => {
         // WHERE it has to be run is part of the answer. A probe's URL is on the
-        // node's OWN network — measured: `curl http://minio:9000/...` from the
-        // operator's laptop gets nothing, and the same line run where the node
+        // node's OWN network — measured: a `curl` of the object store's
+        // internal address (`http://<store>:9000/...`, a container name) from
+        // the operator's laptop gets nothing, and the same line run where the node
         // runs gets the 200 this row is reporting. A button that copied the line
         // without saying so would send somebody off to debug DNS.
         //

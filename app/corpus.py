@@ -2,7 +2,7 @@
 
 ## The hole this closes (measured, 17 Aug 2026)
 
-An asset was uploaded to MinIO and its rights were declared in a **file** corpus —
+An asset was uploaded to the object store and its rights were declared in a **file** corpus —
 the per-project `DTCCorpus` member that travels inside an em.json. Serving the
 asset, `GET …/asset/<ref>` answered `x-em-license: null`: the enforcement reads
 the rights from the **room's document**, and a file on somebody's laptop is not a
@@ -151,7 +151,7 @@ class S3CorpusStore:
     unlike an asset, this object is meant to be replaced, and a reader must be
     able to find the current one without being told its version.
 
-    The `minio` client is an OPTIONAL dependency: a build without it fails
+    The `boto3` client is an OPTIONAL dependency: a build without it fails
     **here**, at construction, with a sentence — not at the first append with a
     stack trace from inside a request.
     """
@@ -162,45 +162,36 @@ class S3CorpusStore:
 
     def __init__(self, endpoint: str, access_key: str, secret_key: str,
                  bucket: str, secure: bool = True) -> None:
+        from . import s3client
+
         try:
-            from minio import Minio  # type: ignore
+            self._client = s3client.make_client(endpoint, access_key,
+                                                secret_key, secure)
         except ImportError as exc:   # pragma: no cover — depends on the build
             raise RuntimeError(
-                "the S3 corpus store needs the `minio` client, which this "
+                "the S3 corpus store needs the `boto3` client, which this "
                 "build does not have: install StratiGraph Server[s3] (or unset the S3 "
                 "environment and use EM_CORPUS_DIR)") from exc
         self.bucket = bucket
         self.endpoint = endpoint
-        host = endpoint.split("://", 1)[-1].rstrip("/")
-        self._client = Minio(host, access_key=access_key, secret_key=secret_key,
-                             secure=secure)
 
     def get(self) -> Optional[Dict[str, Any]]:
-        from minio.error import S3Error  # type: ignore
+        from . import s3client
 
-        response = None
         try:
-            response = self._client.get_object(self.bucket, self.OBJECT_KEY)
-            return json.loads(response.read().decode("utf-8"))
-        except S3Error as exc:
-            if exc.code in ("NoSuchKey", "NoSuchObject", "NotFound"):
+            response = self._client.get_object(Bucket=self.bucket,
+                                               Key=self.OBJECT_KEY)
+        except Exception as exc:                   # noqa: BLE001 — re-raised
+            if s3client.is_not_found(exc):
                 return None
             raise
-        finally:
-            if response is not None:
-                response.close()
-                response.release_conn()
+        return json.loads(s3client.read_body(response).decode("utf-8"))
 
     def put(self, document: Dict[str, Any]) -> None:
-        import io
-
         blob = json.dumps(document, ensure_ascii=False, indent=1).encode("utf-8")
-        self._client.put_object(self.bucket, self.OBJECT_KEY, io.BytesIO(blob),
-                               len(blob), content_type="application/json")
-
-
-#: the old name, the same class
-MinioCorpusStore = S3CorpusStore
+        self._client.put_object(Bucket=self.bucket, Key=self.OBJECT_KEY,
+                                Body=blob, ContentLength=len(blob),
+                                ContentType="application/json")
 
 
 def corpus_store_from_env(environ: Optional[Dict[str, str]] = None) -> CorpusStore:

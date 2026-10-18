@@ -755,7 +755,7 @@ class Room:
 #
 # **THIN** — `{room_id, title, container_refs, created_by, created_at}` and
 # nothing else. Every heavy thing stays where it already lives: the graph in the
-# em.json containers, the bytes in MinIO, the rights in the DTC corpus. The
+# em.json containers, the bytes in the object store, the rights in the DTC corpus. The
 # register is a small table, not a second truth. The day it starts carrying a
 # copy of something the container already says, it becomes a thing to keep in
 # step, and the copy will be the one somebody reads.

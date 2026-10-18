@@ -1,7 +1,7 @@
 """The RESIDENT corpus: the documentation StratiGraph Server can read, so the rights bite.
 
 The hole these tests close was measured on 17 Aug against the live stack: an
-asset was uploaded to MinIO and its licence declared in a per-project corpus
+asset was uploaded to the object store and its licence declared in a per-project corpus
 **file**, and `GET …/asset/<ref>` still answered `x-em-license: null` — the
 enforcement reads the rights out of a document the server holds, and a member of
 somebody's em.json is not one.

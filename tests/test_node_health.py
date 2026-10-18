@@ -12,7 +12,7 @@ two failures that would destroy that:
   addresses behind it, walks past it. So the deadline is a wall clock, and the
   test below is a stopwatch, not a reading of the code.
 
-Plus the thing a health page must not do: print a credential. A MinIO endpoint
+Plus the thing a health page must not do: print a credential. An S3 endpoint
 can carry one in its userinfo, and this page is a screenshot waiting to happen.
 """
 
@@ -33,15 +33,15 @@ class Blackhole:
     bucket = "em-assets"
 
     class _Client:
-        def list_objects(self, *a, **k):
+        def list_objects_v2(self, **k):
             time.sleep(60)                          # never reached, bounded run
-            return []
+            return {}
 
     _client = _Client()
 
 
 class Credentialed:
-    endpoint = "http://minioadmin:sup3rs3cret@127.0.0.1:9/"
+    endpoint = "http://rustfsadmin:sup3rs3cret@127.0.0.1:9/"
     bucket = "em-assets"
     _client = None
 
@@ -88,7 +88,7 @@ def test_the_bound_is_a_wall_clock_not_a_socket_option(monkeypatch):
     monkeypatch.setattr(nh, "PROBE_DEADLINE", 1.0)
     monkeypatch.setattr(nh, "SOCKET_TIMEOUT", 60.0)
     started = time.monotonic()
-    check = nh._timed(lambda: nh._probe_minio(Blackhole()), "minio")
+    check = nh._timed(lambda: nh._probe_s3(Blackhole()), "s3")
     elapsed = time.monotonic() - started
     assert check.state == nh.UNREACHABLE
     assert elapsed < 2.0, f"the page waited {elapsed:.1f}s — the bound did not bite"
@@ -100,19 +100,19 @@ def test_a_probe_that_raises_is_unreachable_not_a_500(monkeypatch):
     the other four services."""
     def explode() -> nh.Check:
         raise RuntimeError("the client library changed its mind")
-    check = nh._timed(explode, "minio")
+    check = nh._timed(explode, "s3")
     assert check.state == nh.UNREACHABLE
     assert "the probe itself failed" in check.detail
 
 
 def test_the_page_never_prints_a_credential():
     """`_host_of` is what the report shows, and userinfo is exactly the part of a
-    MinIO endpoint that must not leave the process."""
+    S3 endpoint that must not leave the process."""
     assert nh._host_of(Credentialed.endpoint) == "http://127.0.0.1:9"
-    check = nh._probe_minio(Credentialed())
+    check = nh._probe_s3(Credentialed())
     printed = f"{check.target} {check.detail} {check.facts}"
     assert "sup3rs3cret" not in printed
-    assert "minioadmin" not in printed
+    assert "rustfsadmin" not in printed
 
 
 def test_an_http_status_is_an_answer_not_a_silence(monkeypatch):
@@ -144,9 +144,16 @@ def test_a_capped_count_says_that_it_is_capped(monkeypatch):
     monkeypatch.setattr(nh, "COUNT_CAP", 3)
 
     class Client:
-        def list_objects(self, *a, **k):
-            return [type("O", (), {"size": 10, "object_name": f"o{i}"})()
-                    for i in range(50)]
+        """ListObjectsV2, the way S3 pages it: two pages of 25, the first one
+        saying there is more. The probe must stop at the cap on page one."""
+        pages = 0
+
+        def list_objects_v2(self, **k):
+            Client.pages += 1
+            first = "ContinuationToken" not in k
+            return {"Contents": [{"Key": f"o{i}", "Size": 10} for i in range(25)],
+                    "IsTruncated": first,
+                    **({"NextContinuationToken": "t1"} if first else {})}
 
     class Many:
         endpoint = "http://127.0.0.1:9000"
@@ -154,10 +161,65 @@ def test_a_capped_count_says_that_it_is_capped(monkeypatch):
         _client = Client()                # the probe borrows the store's client
 
     monkeypatch.setattr(nh, "_fetch", lambda url, **k: (200, None, None))
-    check = nh._probe_minio(Many())
+    check = nh._probe_s3(Many())
     assert check.facts["objects"] == 3
     assert check.facts["truncated"] is True
     assert check.facts["count_cap"] == 3
+    assert check.facts["bytes"] == 30
+    assert Client.pages == 1, "a capped count does not ask for the next page"
+
+
+def test_the_store_is_called_s3_and_knocked_at_its_health_door(monkeypatch):
+    """`s3`, not a vendor's name — the node cannot tell which S3 answers — and
+    the liveness URL is `<endpoint>/health`, which RustFS answers without
+    credentials. The URL under `probe` is the one actually asked, so an
+    operator can paste it into `curl` and compare."""
+    asked = []
+
+    def fetch(url, **k):
+        asked.append(url)
+        return (200, None, None)
+
+    class Store:
+        endpoint = "http://rustfs:9000/"
+        bucket = "em-assets"
+        _client = None
+
+    monkeypatch.setattr(nh, "_fetch", fetch)
+    check = nh._probe_s3(Store())
+    assert check.name == "s3"
+    assert check.state == nh.OK
+    assert asked == ["http://rustfs:9000/health"] and check.probe == asked[0]
+    assert nh._probe_s3(None).name == "s3", "absent is still called s3"
+
+
+def test_the_console_link_has_ONE_name(monkeypatch):
+    """`EM_ASSET_S3_CONSOLE_URL`. The old vendor-named variable is not read: a
+    link nobody configured is no link, and a missing link is the worst it can
+    cost."""
+    monkeypatch.setattr(nh, "_fetch", lambda url, **k: (200, None, None))
+    monkeypatch.delenv("EM_ASSET_S3_CONSOLE_URL", raising=False)
+    monkeypatch.setenv("EM_MINIO_CONSOLE_URL", "http://localhost:9001")
+    assert nh._probe_s3(Credentialed()).browser is None
+    monkeypatch.setenv("EM_ASSET_S3_CONSOLE_URL", "http://localhost:9001/")
+    assert nh._probe_s3(Credentialed()).browser == "http://localhost:9001"
+
+
+def test_the_node_needs_its_store_by_the_new_name(monkeypatch):
+    """`s3` is in the set that makes the whole node unreachable when it is."""
+    class Down:
+        endpoint = "http://127.0.0.1:9"
+        bucket = "em-assets"
+        _client = None
+
+    monkeypatch.setattr(nh, "_fetch",
+                        lambda url, **k: (0, None, "URLError: refused"))
+    report = nh.node_health(version="0.0.0", s3dgraphy=None, asset_store=Down(),
+                            environ={})
+    states = {c["name"]: c["state"] for c in report["checks"]}
+    assert "minio" not in states
+    assert states["s3"] == nh.UNREACHABLE
+    assert report["verdict"] == nh.UNREACHABLE
 
 
 # ── the engine: THREE answers, and only one of them is a fault ───────────────

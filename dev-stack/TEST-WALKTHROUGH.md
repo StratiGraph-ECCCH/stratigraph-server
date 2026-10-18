@@ -6,17 +6,17 @@ Guida ai test della stack StratiGraph di campo. Presuppone l'FCN acceso:
 ## Tappa 1 — i servizi sono vivi (browser)
 - StratiGraph Server   → https://em.localhost:8443/em/v1/health
 - catalog     → https://em.localhost:8443/catalog/health
-- MinIO cons. → http://localhost:9001   (credenziali in `.env.dev`)
+- RustFS cons. → http://localhost:9001/rustfs/console/   (chiavi `RUSTFS_*` in `.env.dev`)
 - Keycloak    → http://localhost:8085   (realm `em-dev`)
 
 ## Tappa 2 — gli smoke end-to-end (la prova vera)
-Da `~/Documents/GitHub/StratiGraph Server` (servono i pacchetti `requests` e `minio`:
-`pip3 install requests minio --break-system-packages`):
+Da `~/Documents/GitHub/StratiGraph Server` (servono i pacchetti `requests` e `boto3`:
+`pip3 install requests boto3 --break-system-packages`):
 
-    python3 dev-stack/smoke.py          # AssetStore/MinIO reale: PUT→sha256→GET, auth, promozione DP-76
-    python3 dev-stack/smoke_iiif.py     # immagini: MinIO → Cantaloupe → info.json/thumbnail/regione + manifest IIIF
+    python3 dev-stack/smoke.py          # AssetStore/S3 (RustFS) reale: PUT→sha256→GET, auth, promozione DP-76
+    python3 dev-stack/smoke_iiif.py     # immagini: RustFS → Cantaloupe → info.json/thumbnail/regione + manifest IIIF
     python3 dev-stack/smoke_catalog.py  # Catalog: registra studi, public/restricted, TTL-publish nasconde il tombstone,
-                                        #          e RICOSTRUISCE l'indice dai container in MinIO (l'indice è derivato)
+                                        #          e RICOSTRUISCE l'indice dai container nel bucket (l'indice è derivato)
     python3 dev-stack/smoke_embargo_viewer.py
                                         # il CANCELLO con una persona vera: viewer→403 (con la data), dev→200,
                                         #          anonimo→401, embargo tolto→200 per tutti
@@ -36,13 +36,13 @@ di verificare — atteso, non un guasto. Un token per l'uno o per l'altro:
     ./dev-stack/token.sh                 # dev   (owner della stanza che tocca)
     ./dev-stack/token.sh --user viewer   # viewer (autenticato, senza membership)
 
-Atteso: tutti verdi, **zero SKIP** (con `minio` installato, gli smoke aprono il bucket e verificano da soli —
+Atteso: tutti verdi, **zero SKIP** (con `boto3` installato, gli smoke aprono il bucket e verificano da soli —
 non si fidano della parola di StratiGraph Server).
 
 ## Tappa 3 — vedi gli effetti
-- MinIO console → bucket `em-assets`: asset nominati col loro **sha256**, prefisso `studies/` coi container.
+- RustFS console → bucket `em-assets`: asset nominati col loro **sha256**, prefisso `studies/` coi container.
 - Catalog → https://em.localhost:8443/catalog/studies (i due studi) · vista HDT `…/catalog/hdt/<hc2>`.
-- IIIF → l'`info.json`/thumbnail stampati da `smoke_iiif` (Cantaloupe pesca da MinIO per sha256).
+- IIIF → l'`info.json`/thumbnail stampati da `smoke_iiif` (Cantaloupe pesca da RustFS per sha256).
 - Reader (dissemination) → https://em.localhost:8443/catalog/study/<id>/narrative (se lo studio ha una narrativa;
   public = senza token, restricted = 401).
 
@@ -146,6 +146,6 @@ di là in tempo reale. Sull'altro Mac va copiato e fidato anche `caddy-em-root.c
 - Altro computer: serve un **hostname** (Bonjour `.local` / hosts / dominio), mai un IP nudo (rompe il TLS
   della CA interna), e le due macchine devono vedersi in rete (hotspot che isola → travel-router / Tailscale).
 - Spegni: `./fcn-down.sh` (o `--stop` / `--wipe` / `--colima`).
-- **Persistenza:** i dati (studi, stanze, **asset e corpus** in MinIO, realm, CA) vivono su volumi *named* e
+- **Persistenza:** i dati (studi, stanze, **asset e corpus** in RustFS, realm, CA) vivono su volumi *named* e
   **restano fra i riavvii** — `./fcn-down.sh` poi `./fcn-up.sh` (o un restart) li ritrova. **Solo `--wipe`
   cancella** tutto (e dopo serve `./fcn-trust-ca.sh` per la nuova CA). `--help` di `fcn-down`/`fcn-up` lo ricorda.

@@ -3,7 +3,7 @@
 `/v1/health` answers *«is StratiGraph Server up, and what can this build do»*: a public
 probe, for an orchestrator. This module answers a different question, and it is
 the operator's: **are the things StratiGraph Server depends on answering, and how much are
-they holding?** MinIO, Keycloak, the IIIF server, the Catalog — a node is not
+they holding?** The object store (S3), Keycloak, the IIIF server, the Catalog — a node is not
 healthy because its own process is.
 
 Four states, and the fourth is the one a two-state health check gets wrong:
@@ -96,7 +96,7 @@ class Check:
     #: WHERE A BROWSER GOES for this face — and empty when nobody said.
     #:
     #: Only ever from configuration this node already reads, or from a variable
-    #: added for the purpose (`EM_KEYCLOAK_CONSOLE_URL`, `EM_MINIO_CONSOLE_URL`).
+    #: added for the purpose (`EM_KEYCLOAK_CONSOLE_URL`, `EM_ASSET_S3_CONSOLE_URL`).
     #: NEVER derived from the internal endpoint, and never `http://localhost:9001`
     #: for convenience: a console URL nobody configured is a button that works on
     #: the laptop of whoever wrote it, which is a default that is an assertion.
@@ -155,7 +155,7 @@ def _console(*names: str, environ: Optional[Dict[str, str]] = None) -> Optional[
 
 def _host_of(url: str) -> str:
     """The host and scheme, which is all an operator needs to recognise a service
-    — and all that is safe to print: a MinIO endpoint can carry credentials in
+    — and all that is safe to print: an S3 endpoint can carry credentials in
     its userinfo, and a health page is a screenshot waiting to happen."""
     parts = urlsplit(url)
     return f"{parts.scheme}://{parts.hostname}" + (
@@ -261,45 +261,50 @@ def _probe_self(version: str, s3dgraphy: Optional[str],
                         "host": socket.gethostname()})
 
 
-def _probe_minio(store: Any) -> Check:
+def _probe_s3(store: Any) -> Check:
     """The object store, asked TWO questions: is it alive, and what is it holding.
 
-    `/minio/health/live` is MinIO's own probe. The holding half is a bounded
-    listing (see `COUNT_CAP`) through the client the asset store already has —
-    not a second connection, and not a bucket policy read.
+    `<endpoint>/health` is the liveness door of the S3 server the dev stack runs
+    (RustFS answers `GET /health` with 200, no credentials). It is asked as a
+    plain GET, like every other probe on this page, so the URL printed under
+    `probe` is one an operator can paste into `curl`. A store that answers it
+    with anything but 200/204 reads `degraded`, not `unreachable`: it answered.
+
+    The holding half is a bounded listing (see `COUNT_CAP`) through the client
+    the asset store already has — not a second connection, and not a bucket
+    policy read.
     """
     endpoint = getattr(store, "endpoint", None)
     bucket = getattr(store, "bucket", None)
     if not endpoint or not bucket:
-        return Check(name="minio", state=ABSENT,
-                     detail="this node stores assets locally (no MinIO "
+        return Check(name="s3", state=ABSENT,
+                     detail="this node stores assets locally (no S3 store "
                             "configured) — see /health for which store is in use")
     target = _host_of(endpoint)
-    asked = endpoint.rstrip("/") + "/minio/health/live"
-    # the neutral name first, the old one still read (`assets._setting` warns
-    # about the old store names; this one is a browser link, and a missing
-    # link is the worst it can cost)
-    console = _console("EM_ASSET_S3_CONSOLE_URL", "EM_MINIO_CONSOLE_URL")
+    asked = endpoint.rstrip("/") + "/health"
+    console = _console("EM_ASSET_S3_CONSOLE_URL")
     status, _, error = _fetch(asked)
     if error:
-        return Check(name="minio", state=UNREACHABLE, target=target,
+        return Check(name="s3", state=UNREACHABLE, target=target,
                      browser=console, probe=asked,
                      detail=f"the object store did not answer — {error}")
-    check = Check(name="minio", target=target, browser=console, probe=asked,
+    check = Check(name="s3", target=target, browser=console, probe=asked,
                   state=OK if status in (200, 204) else DEGRADED,
-                  detail=f"health/live answered {status}",
+                  detail=f"health answered {status}",
                   facts={"bucket": bucket})
     # …and what is in it. Failures here do not make the store unreachable: it
     # answered, we simply could not count — said as a fact, not as a state.
     client = getattr(store, "_client", None)
     if client is not None:
         try:
+            from .s3client import iter_objects
+
             objects = 0
             total = 0
             truncated = False
-            for item in client.list_objects(bucket, recursive=True):
+            for item in iter_objects(client, bucket):
                 objects += 1
-                total += int(getattr(item, "size", 0) or 0)
+                total += int(item.get("size") or 0)
                 if objects >= COUNT_CAP:
                     truncated = True
                     break
@@ -536,7 +541,7 @@ def node_health(*, version: str, s3dgraphy: Optional[str], asset_store: Any,
     env = environ if environ is not None else os.environ
     checks: List[Check] = [
         _timed(lambda: _probe_self(version, s3dgraphy, _STARTED_AT), "stratigraph-server"),
-        _timed(lambda: _probe_minio(asset_store), "minio"),
+        _timed(lambda: _probe_s3(asset_store), "s3"),
         _timed(lambda: _probe_keycloak(env.get("OIDC_JWKS_URI"),
                                        env.get("OIDC_ISSUER")), "keycloak"),
         _timed(lambda: _probe_iiif(env.get("EM_IIIF_INTERNAL")
@@ -549,7 +554,7 @@ def node_health(*, version: str, s3dgraphy: Optional[str], asset_store: Any,
 
     # The node's verdict, and the rule is the pessimistic one: anything the node
     # NEEDS being unreachable makes the node unhealthy, whatever else is fine.
-    needed = {"stratigraph-server", "minio", "keycloak"}
+    needed = {"stratigraph-server", "s3", "keycloak"}
     states = {c.name: c.state for c in checks}
     if any(states.get(name) == UNREACHABLE for name in needed):
         verdict = UNREACHABLE

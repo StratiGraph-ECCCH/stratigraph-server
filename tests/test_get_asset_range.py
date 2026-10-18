@@ -32,7 +32,7 @@ from fastapi.testclient import TestClient
 from app import ws as ws_module
 from app.access import Acl, InMemoryAclStore
 from app.assets import (DirectoryAssetStore, InMemoryAssetStore,
-                        MinioAssetStore)
+                        S3AssetStore)
 from app.main import _byte_range
 from app.rooms import RoomRegistry
 from app.store import InMemorySnapshotStore
@@ -316,7 +316,7 @@ def test_the_range_parser_on_its_own():
 # ── the three stores read a range without reading the rest ──────────────────
 
 def test_every_store_offers_a_ranged_read():
-    for cls in (InMemoryAssetStore, DirectoryAssetStore, MinioAssetStore):
+    for cls in (InMemoryAssetStore, DirectoryAssetStore, S3AssetStore):
         assert callable(getattr(cls, "read_range", None)), cls.__name__
 
 

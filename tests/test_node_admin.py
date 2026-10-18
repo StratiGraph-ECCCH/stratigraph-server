@@ -305,7 +305,8 @@ def test_the_report_answers_about_this_node(client, enforcing, operator):
     report = client.get("/v1/admin/health", headers=AUTH).json()
     names = [check["name"] for check in report["checks"]]
     assert names[0] == "stratigraph-server"
-    assert {"minio", "keycloak", "iiif", "stratigraph-catalog"} <= set(names)
+    assert {"s3", "keycloak", "iiif", "stratigraph-catalog"} <= set(names)
+    assert "minio" not in names, "the store is called what it speaks, not who sells it"
     assert report["checks"][0]["state"] == "ok"
     assert report["deadline_s"] > 0, "the page says what bound it ran under"
     assert report["versions"]["em_server"]

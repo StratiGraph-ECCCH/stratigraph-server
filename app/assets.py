@@ -7,8 +7,8 @@ would push every collaborator back to sending files by hand.
 
 Same shape as `store.py`, and for the same reason: **the durable truth is not on
 the process's disk.** The interface is three methods, the implementation for
-tests keeps bytes in memory, and the production one is MinIO — a line of
-configuration, not a rewrite.
+tests keeps bytes in memory, and the production one is an S3 bucket — a line
+of configuration, not a rewrite.
 
 **Content-addressed.** The reference IS the digest of the content
 (`sha256:<hex>`), which buys three things at once and no cleverness:
@@ -34,6 +34,8 @@ import os
 import pathlib
 import threading
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+
+from . import s3client
 
 
 #: What a room's assets are addressed by. The prefix is not decoration: it is
@@ -96,13 +98,15 @@ class AssetStore(Protocol):
         THE FOURTH VERB, added 2026-10-08, and it goes HERE and not in a bucket.
 
         Until now this interface could put, get and ask. The only way to take
-        something out was inside MinIO, by hand — an asymmetry whose cost is
+        something out was inside the object store, by hand — an asymmetry whose cost is
         paid by whoever has to explain, to somebody whose photograph should not
         have been uploaded, that the node cannot forget.
 
-        **It is in the protocol rather than in a backend on purpose.** MinIO may
-        stop being supported for the community and PSNC may propose a store of
-        their own; a deletion written against MinIO would be a debt paid twice.
+        **It is in the protocol rather than in a backend on purpose.** The
+        object store under it already changed once (the one the dev stack first
+        ran stopped being supported for the community; it runs RustFS now) and PSNC may
+        propose a store of their own; a deletion written against one vendor
+        would be a debt paid twice.
         Three implementations already exercise these three methods, which is the
         evidence that a fourth will fit — and `tests/test_il_verbo_che_manca.py`
         discovers the implementations FROM THIS PROTOCOL rather than listing
@@ -128,7 +132,7 @@ class InMemoryAssetStore:
     """For tests and a single-process laptop run — and it says so.
 
     Not the deployment target: it dies with the process, which is exactly the
-    property the MinIO implementation exists to remove.
+    property the S3 implementation exists to remove.
     """
 
     def __init__(self) -> None:
@@ -188,12 +192,12 @@ class InMemoryAssetStore:
         `main._stored_digests()` asks a store for `refs`, `digests` or `keys` and
         falls back to a `_data` dict. **No implementation had any of the four**,
         so `orphan_assets` in `/v1/admin/storage` has been `[]` since the report
-        was written — on every backend, not only on MinIO. The console said
-        «None reported. Note that a store which cannot enumerate (MinIO, on
-        purpose…)», and the parenthetical made a general emptiness look like one
-        store's policy.
+        was written — on every backend, not only on the S3 one. The console
+        said «None reported. Note that a store which cannot enumerate (the
+        object store, on purpose…)», and the parenthetical made a general
+        emptiness look like one store's policy.
 
-        So the two LOCAL stores answer now, and MinIO deliberately still does
+        So the two LOCAL stores answer now, and S3 deliberately still does
         not: listing a shared bucket on a page load is an expensive question,
         and `storage.js`'s rule — the browser never addresses the store — is
         untouched either way. A report that is silently partial is worse than
@@ -345,14 +349,15 @@ class S3AssetStore:
     run the same class; `dev-stack/` only puts an object store next to it on a
     laptop.
 
-    **S3, not MinIO.** The service behind it is any S3-compatible store: MinIO
-    in the dev stack and in production today, RustFS in the trial stack
-    (`dev-stack/docker-compose.rustfs.yml`, measured on 17 October 2026 — the
-    smokes and the suite pass unchanged). `minio` survives only as the name of
-    the Python CLIENT, which speaks plain S3: every call below is a standard S3
-    operation (HeadBucket, CreateBucket, HeadObject, PutObject — multipart for
-    `put_file` —, GetObject with a Range, DeleteObject). Nothing here uses
-    MinIO's admin API, policies, notifications or console.
+    **Plain S3, through `boto3`.** The service behind it is any S3-compatible
+    store: RustFS in the dev stack (`dev-stack/`), whatever the institution runs
+    in production. Every call below is a standard S3 operation (HeadBucket,
+    CreateBucket, HeadObject, PutObject — multipart for `put_file` —, GetObject
+    with a Range, DeleteObject), and the client is built in one place
+    (`s3client.make_client`: path-style addressing, SigV4, bounded timeouts),
+    because the settings that make a client talk to a store that is not Amazon
+    are the ones that are easy to get wrong once in four. Nothing here uses a
+    vendor's admin API, policies, notifications or console.
 
     The object KEY is the digest itself (`<hex>`, without the `sha256:` prefix —
     the prefix belongs to the reference, not to the bucket's namespace). That is
@@ -365,7 +370,7 @@ class S3AssetStore:
       that still points at it, because a different content is a different key;
     * **verifiability** — anybody can hash what they fetched and check.
 
-    The `minio` client is an OPTIONAL dependency (`pip install StratiGraph Server[s3]`).
+    The `boto3` client is an OPTIONAL dependency (`pip install StratiGraph Server[s3]`).
     A build without it fails **here**, at construction, with a sentence — not at
     the first upload with a stack trace from inside a request.
     """
@@ -373,21 +378,17 @@ class S3AssetStore:
     def __init__(self, endpoint: str, access_key: str, secret_key: str,
                  bucket: str, secure: bool = True) -> None:
         try:
-            from minio import Minio  # type: ignore
+            self._client = s3client.make_client(endpoint, access_key,
+                                                secret_key, secure)
         except ImportError as exc:   # pragma: no cover — depends on the build
             raise RuntimeError(
-                "the S3 asset store needs the `minio` client (an S3 client, "
+                "the S3 asset store needs the `boto3` client (an S3 client, "
                 "whatever the store behind it), which this build does not "
                 "have: install StratiGraph Server[s3] (or unset the S3 "
                 "environment and use EM_ASSET_DIR)") from exc
 
         self.bucket = bucket
         self.endpoint = endpoint
-        # the client wants host:port WITHOUT a scheme, and takes the scheme as a
-        # flag — passing the URL whole is the first thing that goes wrong here
-        host = endpoint.split("://", 1)[-1].rstrip("/")
-        self._client = Minio(host, access_key=access_key, secret_key=secret_key,
-                             secure=secure)
         self._ensure_bucket()
 
     def _ensure_bucket(self) -> None:
@@ -399,18 +400,17 @@ class S3AssetStore:
         causes named — a bucket that is not there and credentials that may not be
         allowed to make one look identical from a stack trace.
         """
-        from minio.error import S3Error  # type: ignore
+        ClientError = s3client.client_error()
 
         try:
-            if not self._client.bucket_exists(self.bucket):
-                self._client.make_bucket(self.bucket)
-        except S3Error as exc:
+            s3client.ensure_bucket(self._client, self.bucket)
+        except ClientError as exc:
             raise RuntimeError(
                 f"the asset bucket '{self.bucket}' is not usable at "
-                f"{self.endpoint}: {exc.code}. Either it does not exist and these "
-                f"credentials may not create it, or they may not read it — "
-                f"create the bucket in the object store, or give the key access "
-                f"to it") from exc
+                f"{self.endpoint}: {s3client.error_code(exc)}. Either it does "
+                f"not exist and these credentials may not create it, or they "
+                f"may not read it — create the bucket in the object store, or "
+                f"give the key access to it") from exc
         except Exception as exc:      # network, DNS, TLS: not an S3 answer at all
             raise RuntimeError(
                 f"the object store at {self.endpoint} did not answer: {exc}. "
@@ -423,83 +423,61 @@ class S3AssetStore:
         return ref.split(":", 1)[-1]
 
     def put(self, data: bytes, media_type: str) -> Dict[str, Any]:
-        import io
-
-        from minio.error import S3Error  # type: ignore
-
         ref = content_id(data)
         key = self._key(ref)
-        existed = False
-        try:
-            self._client.stat_object(self.bucket, key)
-            existed = True
-        except S3Error as exc:
-            if exc.code not in ("NoSuchKey", "NoSuchObject", "NotFound"):
-                raise
+        existed = s3client.exists(self._client, self.bucket, key)
         if not existed:
-            self._client.put_object(self.bucket, key, io.BytesIO(data), len(data),
-                                    content_type=media_type)
+            self._client.put_object(Bucket=self.bucket, Key=key, Body=bytes(data),
+                                    ContentLength=len(data),
+                                    ContentType=media_type)
         return {"ref": ref, "sha256": key, "media_type": media_type,
                 "size": len(data), "created": not existed}
 
     def put_file(self, path: str | os.PathLike[str], sha256: str, size: int,
                  media_type: str) -> Dict[str, Any]:
-        """`fput_object`: a multipart upload read from the file, part by part
-        (5 MiB parts by default) — what the server holds at any moment is a few
-        parts, not the object. Asked first with a `stat`, like `put`, so the
+        """`upload_file`: a multipart upload read from the file, part by part
+        (`_TRANSFER`: 8 MiB parts) — what the server holds at any moment is a
+        few parts, not the object. Asked first with a HEAD, like `put`, so the
         same bytes twice are one object and the answer says `created: false`."""
-        from minio.error import S3Error  # type: ignore
-
         key = sha256
-        existed = False
-        try:
-            self._client.stat_object(self.bucket, key)
-            existed = True
-        except S3Error as exc:
-            if exc.code not in ("NoSuchKey", "NoSuchObject", "NotFound"):
-                raise
+        existed = s3client.exists(self._client, self.bucket, key)
         if not existed:
-            self._client.fput_object(self.bucket, key, str(path),
-                                     content_type=media_type)
+            self._client.upload_file(str(path), self.bucket, key,
+                                     ExtraArgs={"ContentType": media_type},
+                                     Config=_transfer_config())
         return {"ref": f"{DIGEST_PREFIX}:{key}", "sha256": key,
                 "media_type": media_type, "size": int(size),
                 "created": not existed}
 
     def get(self, ref: str) -> Optional[bytes]:
-        from minio.error import S3Error  # type: ignore
-
-        response = None
         try:
-            response = self._client.get_object(self.bucket, self._key(ref))
-            return response.read()
-        except S3Error as exc:
-            if exc.code in ("NoSuchKey", "NoSuchObject", "NotFound"):
+            response = self._client.get_object(Bucket=self.bucket,
+                                               Key=self._key(ref))
+        except Exception as exc:                   # noqa: BLE001 — re-raised
+            if s3client.is_not_found(exc):
                 return None
             raise
-        finally:
-            if response is not None:
-                response.close()
-                response.release_conn()
+        return s3client.read_body(response)
 
     def read_range(self, ref: str, start: int, length: int) -> Optional[bytes]:
-        """`GetObject` with `offset`/`length`, i.e. an S3 ranged GET: the store
+        """`GetObject` with `Range: bytes=a-b`, i.e. an S3 ranged GET: the store
         sends only these bytes, so a tile read from the end of a 200 MB `.3tz`
-        costs the tile and not the archive."""
-        from minio.error import S3Error  # type: ignore
+        costs the tile and not the archive.
 
-        response = None
+        An EMPTY interval is answered without a GET: `bytes=a-(a-1)` is not a
+        range S3 accepts, and the answer — nothing, if the object is there — is
+        the one every other store gives for `length == 0`."""
+        if length <= 0:
+            return b"" if self.head(ref) is not None else None
         try:
-            response = self._client.get_object(self.bucket, self._key(ref),
-                                               offset=start, length=length)
-            return response.read()
-        except S3Error as exc:
-            if exc.code in ("NoSuchKey", "NoSuchObject", "NotFound"):
+            response = self._client.get_object(
+                Bucket=self.bucket, Key=self._key(ref),
+                Range=f"bytes={int(start)}-{int(start) + int(length) - 1}")
+        except Exception as exc:                   # noqa: BLE001 — re-raised
+            if s3client.is_not_found(exc):
                 return None
             raise
-        finally:
-            if response is not None:
-                response.close()
-                response.release_conn()
+        return s3client.read_body(response)
 
     def head(self, ref: str) -> Optional[Dict[str, Any]]:
         """Size and type **without moving the bytes** — a `HEAD`, not a `GET`.
@@ -507,17 +485,15 @@ class S3AssetStore:
         Worth its own method precisely because an asset can be a hundred
         megabytes: asking "is it there, how big is it" must not cost a download.
         """
-        from minio.error import S3Error  # type: ignore
-
         try:
-            stat = self._client.stat_object(self.bucket, self._key(ref))
-        except S3Error as exc:
-            if exc.code in ("NoSuchKey", "NoSuchObject", "NotFound"):
+            stat = self._client.head_object(Bucket=self.bucket, Key=self._key(ref))
+        except Exception as exc:                   # noqa: BLE001 — re-raised
+            if s3client.is_not_found(exc):
                 return None
             raise
         return {"ref": ref, "sha256": self._key(ref),
-                "media_type": stat.content_type or "application/octet-stream",
-                "size": stat.size}
+                "media_type": stat.get("ContentType") or "application/octet-stream",
+                "size": int(stat.get("ContentLength") or 0)}
 
     #: NO `refs()` HERE, and it is a decision rather than an omission. The
     #: client can list a bucket; this class does not offer it, so
@@ -528,7 +504,7 @@ class S3AssetStore:
     #: for the measurement that put those two there.
 
     def delete(self, ref: str) -> Dict[str, Any]:
-        """`remove_object`, and the `stat` before it is what makes the answer
+        """`DeleteObject`, and the HEAD before it is what makes the answer
         honest.
 
         S3 deletion is idempotent by design: removing a key that is not there
@@ -536,73 +512,83 @@ class S3AssetStore:
         told «removed» about an object that was never in the bucket learns
         nothing. So it asks first, and the two answers stay distinguishable.
 
-        The race is named and accepted: between the `stat` and the `remove`
+        The race is named and accepted: between the HEAD and the delete
         somebody could upload the same bytes, and then `removed: True` would be
         about an object that came back. It is a content-addressed store, so what
         came back IS the same bytes — the report is imprecise about the instant
         and correct about the state, which is the trade a lock across a network
         would not improve.
         """
-        from minio.error import S3Error  # type: ignore
-
         key = self._key(ref)
-        existed = True
-        try:
-            self._client.stat_object(self.bucket, key)
-        except S3Error as exc:
-            if exc.code not in ("NoSuchKey", "NoSuchObject", "NotFound"):
-                raise
-            existed = False
+        existed = s3client.exists(self._client, self.bucket, key)
         if existed:
-            self._client.remove_object(self.bucket, key)
+            self._client.delete_object(Bucket=self.bucket, Key=key)
         return {"ref": ref, "removed": existed}
 
 
-#: The old name of the class, kept so that nothing that imported it breaks. It is
-#: the SAME class (`MinioAssetStore is S3AssetStore`), not a second store.
-MinioAssetStore = S3AssetStore
+def _transfer_config() -> Any:
+    """How `put_file` cuts a file into parts: 8 MiB from 8 MiB up, a handful of
+    parts in flight. Built at the call, because `boto3` is optional and this
+    module is imported on every node."""
+    from boto3.s3.transfer import TransferConfig  # type: ignore
+
+    mib = 1024 * 1024
+    return TransferConfig(multipart_threshold=8 * mib, multipart_chunksize=8 * mib,
+                          max_concurrency=4)
 
 
-#: The S3 settings, in the two spellings that exist in the wild, and NOW IN THIS
-#: ORDER: the neutral `EM_ASSET_S3_*` first — what the Ansible role writes, and a
-#: name that is true whatever store answers — and the old `MINIO_*` second, still
-#: read so that no deployment breaks, with a warning naming the new one. One
-#: setting, two names, and a precedence, like `auth.py` reads the issuer.
+#: The S3 settings, ONE spelling: `EM_ASSET_S3_*` — what the Ansible role
+#: writes, and a name that is true whatever store answers.
 #:
-#: The order used to be the other way round. Flipping it changes nothing that
-#: runs, and that was measured before flipping (17 October 2026): the dev stack
-#: sets only `MINIO_*`, the production template only `EM_ASSET_S3_*`, so no
-#: deployment sets both. No third spelling (`EM_S3_*`) was added: the neutral
-#: name already existed, and a third would be a third thing to keep aligned.
+#: There used to be a second one, `MINIO_*`, read after it with a warning. It is
+#: no longer read (October 2026, when the dev stack moved to RustFS), and
+#: it is not silently ignored either: see `_LEGACY_S3_NAMES`.
 _S3_KEYS = {
-    "endpoint": ("EM_ASSET_S3_ENDPOINT", "MINIO_ENDPOINT"),
-    "access_key": ("EM_ASSET_S3_ACCESS_KEY", "MINIO_ACCESS_KEY"),
-    "secret_key": ("EM_ASSET_S3_SECRET_KEY", "MINIO_SECRET_KEY"),
-    "bucket": ("EM_ASSET_S3_BUCKET", "MINIO_BUCKET"),
-    "secure": ("EM_ASSET_S3_SECURE", "MINIO_SECURE"),
+    "endpoint": "EM_ASSET_S3_ENDPOINT",
+    "access_key": "EM_ASSET_S3_ACCESS_KEY",
+    "secret_key": "EM_ASSET_S3_SECRET_KEY",
+    "bucket": "EM_ASSET_S3_BUCKET",
+    "secure": "EM_ASSET_S3_SECURE",
 }
-_MINIO_KEYS = _S3_KEYS   # the old name of this table, for whoever imported it
+
+#: The names this node USED to read, each with the one that replaced it. A
+#: deployment that still sets one of them, and not its replacement, believes it
+#: writes to the shared bucket; reading nothing would quietly give it a local
+#: directory — the data-loss story `_s3_settings` exists to refuse — so the
+#: process refuses to start instead, naming the variable to rename.
+_LEGACY_S3_NAMES = {
+    "MINIO_ENDPOINT": "EM_ASSET_S3_ENDPOINT",
+    "MINIO_ACCESS_KEY": "EM_ASSET_S3_ACCESS_KEY",
+    "MINIO_SECRET_KEY": "EM_ASSET_S3_SECRET_KEY",
+    "MINIO_BUCKET": "EM_ASSET_S3_BUCKET",
+    "MINIO_SECURE": "EM_ASSET_S3_SECURE",
+}
 
 log = logging.getLogger("stratigraph.assets")
-_warned_old_names: set = set()
 
 
 def _setting(env: Dict[str, str], field: str) -> str:
-    """One setting, the neutral name first; the old one still works and says so
-    — ONCE per process and per name, because a warning at every request is a
-    log nobody reads."""
-    neutral, old = _S3_KEYS[field]
-    value = (env.get(neutral) or "").strip()
-    if value:
-        return value
-    value = (env.get(old) or "").strip()
-    if value and old not in _warned_old_names:
-        _warned_old_names.add(old)
-        log.warning("%s is the old name of %s: it is still read, and it will "
-                    "keep working — rename it when the deployment is next "
-                    "touched (the store behind it need not be MinIO)",
-                    old, neutral)
-    return value
+    return (env.get(_S3_KEYS[field]) or "").strip()
+
+
+def _refuse_legacy_names(env: Dict[str, str]) -> None:
+    """Raise when an old name is set and its replacement is not.
+
+    Only then: an old name beside its new one is a leftover the new one
+    overrules, and refusing it would stop a node whose configuration is right.
+    """
+    stale = sorted(old for old, new in _LEGACY_S3_NAMES.items()
+                   if (env.get(old) or "").strip()
+                   and not (env.get(new) or "").strip())
+    if stale:
+        renames = ", ".join(f"{old} → {_LEGACY_S3_NAMES[old]}" for old in stale)
+        raise RuntimeError(
+            f"{', '.join(stale)} {'is' if len(stale) == 1 else 'are'} set, and "
+            f"StratiGraph Server no longer reads that name: the object store is "
+            f"configured with EM_ASSET_S3_ENDPOINT / EM_ASSET_S3_ACCESS_KEY / "
+            f"EM_ASSET_S3_SECRET_KEY / EM_ASSET_S3_BUCKET (and "
+            f"EM_ASSET_S3_SECURE). Rename {renames}. It will not start on a "
+            f"local directory the operator did not ask for.")
 
 
 def _s3_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
@@ -612,7 +598,10 @@ def _s3_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
     deployment that believes it writes to the shared bucket and quietly writes
     to a local directory instead is a data-loss story, and it is silent until it
     is expensive — the same rule `auth.py` applies to a half-configured realm.
+    The same reason makes it refuse the old `MINIO_*` names rather than ignore
+    them (`_refuse_legacy_names`).
     """
+    _refuse_legacy_names(env)
     found = {field: _setting(env, field)
              for field in ("endpoint", "access_key", "secret_key", "bucket")}
     given = [field for field, value in found.items() if value]
@@ -626,9 +615,7 @@ def _s3_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
             "missing. StratiGraph Server will not fall back to a local directory the "
             "operator did not ask for — set all four "
             "(EM_ASSET_S3_ENDPOINT / EM_ASSET_S3_ACCESS_KEY / "
-            "EM_ASSET_S3_SECRET_KEY / EM_ASSET_S3_BUCKET, or their old names "
-            "MINIO_ENDPOINT / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / "
-            "MINIO_BUCKET) or none of them.")
+            "EM_ASSET_S3_SECRET_KEY / EM_ASSET_S3_BUCKET) or none of them.")
     secure_raw = _setting(env, "secure").lower()
     if secure_raw:
         secure = secure_raw in ("1", "true", "yes", "on")
@@ -639,10 +626,6 @@ def _s3_settings(env: Dict[str, str]) -> Optional[Dict[str, Any]]:
         secure = not found["endpoint"].startswith("http://")
     found["secure"] = secure
     return found
-
-
-#: the old name, for the modules and scripts that imported it
-_minio_settings = _s3_settings
 
 
 class ReferenceAssetStore:
@@ -766,7 +749,7 @@ def asset_store_from_env(environ: Optional[Dict[str, str]] = None) -> AssetStore
     Precedence, and each step is a deliberate answer to "what did the operator
     actually ask for?":
 
-    1. **S3** (MinIO, RustFS, any S3-compatible store) when its settings are there — the deployment store, durable and
+    1. **S3** (RustFS, any S3-compatible store) when its settings are there — the deployment store, durable and
        outside this process (rule #2). Half-configured **refuses to start**.
     2. `EM_ASSET_DIR` — a directory. Honest for one instance, wrong for replicas.
     3. nothing — in-memory, which dies with the process. Loudly wrong for a
@@ -814,8 +797,8 @@ def describe(store: AssetStore) -> str:
     if isinstance(store, S3AssetStore):
         # the bucket and the host, never the key: `/v1/health` is public enough
         # that a credential printed there is a credential in a screenshot.
-        # `s3`, not `minio`: the node cannot tell which S3 answers, and the
-        # node console already reads either word (`storage.js`).
+        # `s3`, not a vendor's name: the node cannot tell which S3 answers,
+        # and the node console reads exactly this word (`storage.js`).
         return f"s3 ({store.endpoint}, bucket {store.bucket})"
     return {
         "InMemoryAssetStore": "memory (not durable — dies with the process)",

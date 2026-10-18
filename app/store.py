@@ -5,7 +5,7 @@ module is one of the three fences that keep that introduction honest (the others
 are in `rooms.py`: convergence stays in the library, presence stays ephemeral).
 
 The fence here: **the durable truth is not on the process's disk.** A room's
-snapshot goes to an object store — MinIO in the deployment — and what StratiGraph Server
+snapshot goes to a durable store — Postgres or an S3 bucket in the deployment — and what StratiGraph Server
 keeps in RAM is a *working copy* that can be rebuilt from it. The process may die
 and come back; the study does not live inside it. That is what keeps rule 2 of
 this repo (stateless, 12-factor) meaningful in the presence of a relay: the state
@@ -49,8 +49,8 @@ class InMemorySnapshotStore:
     """For tests and for a single-process laptop run.
 
     It is NOT the deployment target, and saying so matters: an in-memory store
-    dies with the process, which is precisely the property the MinIO
-    implementation exists to remove. Copies on the way in and out, so a caller
+    dies with the process, which is precisely the property the durable
+    implementations exist to remove. Copies on the way in and out, so a caller
     that keeps mutating its working copy cannot rewrite history.
     """
 
@@ -286,15 +286,17 @@ class PostgresSnapshotStore:
         return (bytes(row[0]), row[1], row[2]) if row is not None else None
 
 
-class MinioSnapshotStore:
-    """The deployment target — **not implemented tonight, and it says so.**
+class S3SnapshotStore:
+    """The S3 target — **not implemented, and it says so.**
 
     The shape is already fixed by the interface above: a bucket, one object per
     room, `get`/`put`. What it needs is the bucket and the credentials the shared
     infrastructure will provide (the mail-spec to Romano: realm + bucket +
-    routing), and the `minio` client as an optional dependency — so a build
-    without it fails at construction with a sentence, not at the first snapshot
-    with a stack trace.
+    routing), and the `boto3` client as an optional dependency, built where the
+    other S3 stores build theirs (`s3client.make_client`) — so a build without
+    it fails at construction with a sentence, not at the first snapshot with a
+    stack trace. Postgres (`PostgresSnapshotStore`) is the store a deployment
+    uses today; this one waits for a reason to exist.
 
     Left as a class rather than a comment because the point of the interface is
     that the swap is a line of configuration, and an empty class makes that
@@ -303,9 +305,10 @@ class MinioSnapshotStore:
 
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         raise NotImplementedError(
-            "the MinIO snapshot store is the P4.2 deployment target and is not "
+            "the S3 snapshot store is the P4.2 deployment target and is not "
             "wired yet: it needs the shared bucket + credentials. Use "
-            "InMemorySnapshotStore (tests) or DirectorySnapshotStore (local).")
+            "InMemorySnapshotStore (tests), DirectorySnapshotStore (local) or "
+            "PostgresSnapshotStore (EM_DOCUMENTS_*).")
 
 
 # ── the room's own durable record ────────────────────────────────────────────
@@ -466,7 +469,7 @@ def describe(store: SnapshotStore) -> str:
     return {
         "InMemorySnapshotStore": "memory (not durable — dies with the process)",
         "DirectorySnapshotStore": "directory (local only — not for replicas)",
-        "MinioSnapshotStore": "minio",
+        "S3SnapshotStore": "s3",
     }.get(type(store).__name__, type(store).__name__)
 
 

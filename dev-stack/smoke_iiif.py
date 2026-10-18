@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""End-to-end smoke of the IMAGE layer: MinIO → Cantaloupe → manifest.
+"""End-to-end smoke of the IMAGE layer: RustFS → Cantaloupe → manifest.
 
     python dev-stack/smoke_iiif.py       # after `docker compose … up -d`
 
 The arc it measures, and every step of it is a real request to a real service:
 
-1. an image is uploaded through StratiGraph Server and lands in **MinIO**;
+1. an image is uploaded through StratiGraph Server and lands in **RustFS** (S3);
 2. **Cantaloupe** serves `info.json` for it — from the object store, with the
    asset's sha256 as the identifier, so nothing was copied or imported;
 3. a **thumbnail** is a size request (no thumbnail pipeline exists in this
@@ -204,7 +204,7 @@ def main() -> int:
     token = json.loads(body)["access_token"]
     auth = {"Authorization": f"Bearer {token}"}
 
-    # ── 1 · the image goes into MinIO through StratiGraph Server ─────────────────────
+    # ── 1 · the image goes into RustFS through StratiGraph Server ─────────────────────
     png = make_png(WIDTH, HEIGHT)
     digest = "sha256:" + hashlib.sha256(png).hexdigest()
     status, body, _ = request(f"{server}/v1/rooms/{ROOM}/asset?media_type=image/png",

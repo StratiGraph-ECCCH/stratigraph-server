@@ -197,7 +197,7 @@ def main() -> int:
              f"an operator gets the report ({status})",
              f"verdict: {report.get('verdict')} in {elapsed:.2f}s")
     states = {c["name"]: c for c in report.get("checks", [])}
-    for service in ("stratigraph-server", "minio", "keycloak", "iiif",
+    for service in ("stratigraph-server", "s3", "keycloak", "iiif",
                     "stratigraph-catalog"):
         check = states.get(service, {})
         tally.ok(check.get("state") in ("ok", "degraded", "unreachable",
@@ -206,7 +206,8 @@ def main() -> int:
                  f"{check.get('latency_ms')}ms · {check.get('detail', '')[:70]}")
     tally.ok(states.get("stratigraph-server", {}).get("state") == "ok",
              "the node reports on ITSELF (it answered, so it is ok)")
-    # A stopped service must not read «ok». Measured for real by stopping MinIO —
+    # A stopped service must not read «ok». Measured for real by stopping the
+    # object store (then MinIO) —
     # see docs/NODE-CONSOLE.md; here we assert the weaker property the smoke can
     # check on a healthy stack: nothing is «ok» without having been asked.
     for name, check in states.items():
@@ -219,7 +220,7 @@ def main() -> int:
              f"the page came back inside the declared bound ({deadline}s/probe)",
              f"{elapsed:.2f}s for {len(states)} probes")
     tally.ok("sup3r" not in raw.decode("utf-8", "replace")
-             and "@" not in str(states.get("minio", {}).get("target") or ""),
+             and "@" not in str(states.get("s3", {}).get("target") or ""),
              "no credential in the report (host only, never a URL with userinfo)")
 
     return tally.report("node-admin")

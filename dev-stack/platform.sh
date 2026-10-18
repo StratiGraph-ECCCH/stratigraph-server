@@ -189,7 +189,7 @@ sg_compose_array() {
 #: Era dentro `fcn-up.sh` (9 ottobre 2026: un clone fresco moriva con
 #: «couldn't find env file»). Sta qui dal 3 ottobre perché lo vuole anche
 #: `bump-s3dgraphy.sh --build`, che il 2 ottobre ha ricreato il server SENZA
-#: `--env-file`: niente chiavi di MinIO, e il server è andato in crash a
+#: `--env-file`: niente chiavi dell'object store, e il server è andato in crash a
 #: ripetizione. Due script, un solo messaggio. Va chiamata da `dev-stack/`.
 sg_need_env_dev() {
   [ -f .env.dev ] && return 0
@@ -200,11 +200,32 @@ sg_need_env_dev() {
     echo >&2
     echo "      cp .env.dev.example .env.dev" >&2
     echo >&2
-    echo "  (dentro ci sono minioadmin/minioadmin e un realm em-dev: valori che" >&2
+    echo "  (dentro ci sono chiavi S3 di sviluppo e un realm em-dev: valori che" >&2
     echo "   sarebbero una vulnerabilità su qualcosa di raggiungibile.)" >&2
   else
     echo "  E non trovo nemmeno \`.env.dev.example\`: questo checkout è incompleto." >&2
   fi
+  return 1
+}
+
+#: `.env.dev` è di PRIMA di RustFS? Se sì lo dice, con il comando, e ritorna 1.
+#:
+#: Dal 18 ottobre 2026 l'object store è RustFS e le sue chiavi si chiamano
+#: `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY` / `RUSTFS_BUCKET`. Un `.env.dev`
+#: germogliato prima ha ancora `MINIO_ROOT_USER` e compagnia, e il compose non
+#: le legge più: senza questa guardia la pila partirebbe con chiavi VUOTE. Il
+#: caso preciso, e solo quello: un file con le chiavi nuove, o senza nessuna
+#: delle due (un `.env.dev` di prova), passa. Va chiamata da `dev-stack/`.
+sg_need_s3_keys() {
+  grep -q '^RUSTFS_ACCESS_KEY=.' .env.dev 2>/dev/null && return 0
+  grep -q '^MINIO_ROOT_USER=' .env.dev 2>/dev/null || return 0
+  echo "✖ \`dev-stack/.env.dev\` è di prima di RustFS: ha \`MINIO_ROOT_USER\` e non" >&2
+  echo "  \`RUSTFS_ACCESS_KEY\`. MinIO non c'è più (18 ottobre 2026). Una volta sola:" >&2
+  echo >&2
+  echo "      ./migra-minio-rustfs.sh" >&2
+  echo >&2
+  echo "  aggiunge le chiavi RUSTFS_* (con i valori di prima) e copia gli asset dal" >&2
+  echo "  volume di MinIO in RustFS, verificandoli. Vedi README-DEV.md." >&2
   return 1
 }
 

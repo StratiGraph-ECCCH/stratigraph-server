@@ -1,4 +1,4 @@
-# Cheat-sheet — run the stack & connect EMtools to MinIO
+# Cheat-sheet — run the stack & connect EMtools to the object store (RustFS)
 
 Quick reference. The full explanation is in [`README-DEV.md`](README-DEV.md); this
 is the "what do I type" version, plus the one thing it does not cover: pointing
@@ -35,10 +35,10 @@ cp .env.dev.example .env.dev                    # once
 
 | service | where | notes |
 |---|---|---|
-| **MinIO** | API `:9000`, console `:9001` | bucket `em-assets` auto-created |
+| **RustFS** (S3) | API `:9000`, console `:9001/rustfs/console/` | bucket `em-assets` auto-created; keys `RUSTFS_*` in `.env.dev`. MinIO until 18 Oct 2026 — an old stack migrates once with `./migra-minio-rustfs.sh` (README-DEV.md) |
 | **Keycloak** | `:8085` and `…:8443/auth` | realm `em-dev`; ONE public issuer (https, through Caddy) whichever door you use — see `keycloak/README.md` |
 | **Cantaloupe / IIIF** | `:8182` | reads the SAME bucket, key = asset sha256 |
-| **Postgres** | `:5433` (`em`/`em`, db `em_documents`) | the room documents — one row per `(project_id, revision)`. Bodies stay in MinIO; the oplog stays in `em_data` |
+| **Postgres** | `:5433` (`em`/`em`, db `em_documents`) | the room documents — one row per `(project_id, revision)`. Bodies stay in RustFS; the oplog stays in `em_data` |
 | **StratiGraph Server** | via Caddy `/em/v1` | the room API |
 | **StratiGraph Catalog** | `:8010` | the register (published studies) |
 | **NodeODM** | `:3010` (its own dashboard) | **not started by `fcn-up.sh`** — opt-in, see §1-bis |
@@ -82,7 +82,7 @@ python dev-stack/smoke_photogrammetry.py --images ~/photos/US12 --wait 1800
 > shrinking the window — `colima stop && colima start --disk 120` keeps the
 > volumes. Note the trade-off of a short window: after it, the engine deletes the
 > task, so its `all.zip` is gone and `GET /task/{uuid}/info` 404s. Safe for us —
-> the connector publishes the produced bytes to MinIO *before* writing anything to
+> the connector publishes the produced bytes to the object store *before* writing anything to
 > the graph — but raise `NODEODM_CLEANUP_AFTER` on a node where somebody
 > re-downloads runs from NodeODM's own dashboard.
 
@@ -213,17 +213,18 @@ The stack is written for **Colima** (`fcn-up.sh` runs `colima start --cpu 4 --me
 If `docker ps` fails, run `docker context use colima`. Alternatives exist (Docker
 Desktop — mind the org licensing; OrbStack; Podman) but the scripts assume Colima.
 
-## 3 · Connect EMtools (Blender) to the local MinIO
+## 3 · Connect EMtools (Blender) to the local object store (RustFS)
 
 EMtools promotes an asset **in-process via s3Dgraphy** (`promote_resource_to_minio`
 → `api.ingest_minio_resource`), and s3Dgraphy's MinIO backend reads the
-**Heriverse-aligned `S3_*` env vars** (`minio_backend.from_env`). So launch Blender
-from a shell that carries them, pointing at the dev-stack MinIO:
+**Heriverse-aligned `S3_*` env vars** (`minio_backend.from_env` — s3Dgraphy's
+names, not this stack's: it is plain S3 and talks to RustFS unchanged). So launch Blender from a shell that carries
+them, pointing at the dev-stack RustFS:
 
 ```bash
 export S3_ENDPOINT=http://localhost:9000        # http:// = insecure (dev)
-export S3_ACCESS_KEY_ID=minioadmin
-export S3_SECRET_ACCESS_KEY=minioadmin
+export S3_ACCESS_KEY_ID=<RUSTFS_ACCESS_KEY from .env.dev>
+export S3_SECRET_ACCESS_KEY=<RUSTFS_SECRET_KEY from .env.dev>
 export S3_BUCKET=em-assets                       # the SAME bucket server + Cantaloupe use
 # optional: S3_PREFIX, S3_REGION, S3_FORCE_PATH_STYLE (default true)
 /Applications/Blender.app/Contents/MacOS/Blender
@@ -232,11 +233,12 @@ export S3_BUCKET=em-assets                       # the SAME bucket server + Cant
 Then in EMtools ▸ **Resources** ▸ "Object store (MinIO)" ▸ **Promote to MinIO**:
 the local bytes go up content-addressed, and the LinkNode locator is repointed to
 the returned `s3_uri` (one ID space, FS ↔ MinIO). Needs the `minio` extra in
-Blender's Python, else `MissingDependency`. Inspect the object at the MinIO console
-`http://localhost:9001`.
+Blender's Python, else `MissingDependency` (EMtools' own label: the bytes land in
+RustFS). Inspect the object at the RustFS console
+`http://localhost:9001/rustfs/console/`.
 
 > **Direct vs gated — read this once.** This `S3_*` path writes **straight to
-> MinIO**, which is fine for local single-user work but **bypasses the StratiGraph Server
+> the object store**, which is fine for local single-user work but **bypasses the StratiGraph Server
 > gate** (per-room ACL + per-asset DTC). The shared / production path goes through
 > StratiGraph Server, which enforces rights before the object store. Use the direct path for
 > local dev; do not wire it into a shared node.

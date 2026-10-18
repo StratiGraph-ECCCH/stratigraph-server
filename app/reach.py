@@ -5,7 +5,7 @@
 
 `/health` elencava le sue dipendenze così:
 
-    "asset_store": "minio (http://minio:9000, bucket em-assets)",
+    "asset_store": "s3 (http://rustfs:9000, bucket em-assets)",
     "snapshot_store": "directory (local only — not for replicas)",
 
 Ogni riga è una **descrizione della configurazione**. Nessuna di quelle stringhe
@@ -41,7 +41,7 @@ difetto — una risposta che riporta l'intenzione invece del fatto:
 ════════════════════════════════════════════════════════════════════════════════
 ## ALL'AVVIO E SU RICHIESTA, MAI IN UN CICLO
 
-Bussare costa: una connessione a MinIO, una GET al realm. Farlo a ogni `/health`
+Bussare costa: una connessione all'object store, una GET al realm. Farlo a ogni `/health`
 significherebbe che l'healthcheck di Docker — ogni pochi secondi, per sempre —
 martella l'identity provider di ogni nodo dell'ecosistema.
 
@@ -128,19 +128,23 @@ def probe_directory(path: str) -> Callable[[], str]:
 
 
 def probe_s3(store: Any) -> Callable[[], str]:
-    """HeadBucket through the store's own client: standard S3, so it reaches
-    MinIO and RustFS (and any S3) the same way."""
+    """HeadBucket attraverso il client dello store stesso: S3 standard, quindi
+    raggiunge RustFS (e qualunque S3) allo stesso modo. Un bucket che non c'è è
+    una risposta — «non c'è» — e diventa un `unreachable` con la sua frase; ogni
+    altro errore sale com'è e la ragione finisce nel `detail`."""
     def go() -> str:
+        from .s3client import is_not_found
+
         client = getattr(store, "_client")
         bucket = getattr(store, "bucket")
-        if not client.bucket_exists(bucket):
-            raise RuntimeError(f"bucket {bucket!r} is not there")
+        try:
+            client.head_bucket(Bucket=bucket)
+        except Exception as exc:                  # noqa: BLE001 — risale
+            if is_not_found(exc):
+                raise RuntimeError(f"bucket {bucket!r} is not there") from exc
+            raise
         return f"{getattr(store, 'endpoint', '?')} · bucket {bucket}"
     return go
-
-
-#: the old name, the same probe
-probe_minio = probe_s3
 
 
 def probe_postgres(store: Any) -> Callable[[], str]:

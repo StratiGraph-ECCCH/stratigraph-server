@@ -3,7 +3,7 @@
 
 Not a unit test: this drives **EMtools' own client** (`sync_manager/room.py`,
 loaded headless from the sibling checkout) against a real StratiGraph Server with a real
-MinIO behind it. What it measures is the chain nobody can measure in isolation —
+RustFS behind it. What it measures is the chain nobody can measure in isolation —
 that the bytes leave Blender's side, land in the backup namespace and not among
 the publishable assets, dedup on content, and come back byte-identical.
 

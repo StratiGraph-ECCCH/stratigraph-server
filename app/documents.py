@@ -138,10 +138,10 @@ def dsn_from_env(environ: Optional[Dict[str, str]] = None) -> Optional[str]:
     """Il DSN che questo processo deve usare, o None se non gliene hanno dato uno.
 
     `EM_DOCUMENTS_DSN` per intero, oppure i pezzi alla maniera degli altri
-    servizi di questa stack (`MINIO_ACCESS_KEY` e compagnia): un indirizzo, un
+    servizi di questa stack (`EM_ASSET_S3_ACCESS_KEY` e compagnia): un indirizzo, un
     utente, una parola d'ordine, un database. **Mezza configurazione è rifiutata**
     e non completata con dei default, per la stessa ragione per cui
-    `assets._minio_settings` la rifiuta: un default silenzioso è un processo che
+    `assets._s3_settings` la rifiuta: un default silenzioso è un processo che
     si collega a un posto che nessuno ha scelto.
     """
     env = environ if environ is not None else os.environ
@@ -195,7 +195,7 @@ def open_pool(dsn: str, *, min_size: int = 1, max_size: int = 4) -> Any:
 
     `rooms()` sta sul percorso del gate IIIF, che è il più caldo che c'è: aprire
     una connessione per ogni tile sarebbe pagare una stretta di mano per pixel.
-    Il pool è `psycopg_pool`, dipendenza **opzionale** come il client MinIO — e
+    Il pool è `psycopg_pool`, dipendenza **opzionale** come il client S3 (`boto3`) — e
     come quello fallisce **qui**, alla costruzione, con una frase.
     """
     try:

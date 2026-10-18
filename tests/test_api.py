@@ -301,7 +301,7 @@ def test_the_openapi_schema_is_served():
                       # Added 2026-10-08, and this inventory is exactly where it
                       # had to be argued. Until then this service could put an
                       # asset, serve it and describe it; the only way to take one
-                      # out was inside MinIO, by hand. That is not an untidiness
+                      # out was inside the object store, by hand. That is not an untidiness
                       # — it is having to tell somebody whose photograph should
                       # not have been uploaded that the node cannot forget.
                       #

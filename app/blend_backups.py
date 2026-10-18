@@ -174,8 +174,8 @@ class DirectoryBackupBlobs:
 
 
 class S3BackupBlobs:
-    """The node's S3 store (MinIO, RustFS…), in its own **prefix** inside the
-    node's bucket. HeadObject / PutObject / GetObject, nothing else.
+    """The node's S3 store (RustFS, any S3-compatible one), in its own **prefix**
+    inside the node's bucket. HeadObject / PutObject / GetObject, nothing else.
 
     A prefix rather than a second bucket, and the reason is operational: a bucket
     is a thing somebody has to create, give a policy and remember; a prefix
@@ -183,24 +183,27 @@ class S3BackupBlobs:
     the assets' flat digest keys sees `blend-backups/…`, which is what the
     invariant asks for. A deployment that wants a whole bucket sets
     `EM_BACKUP_BUCKET`.
+
+    The client is `s3client.make_client`'s, the same configuration the asset
+    store uses — one place where «talk to an S3 that is not Amazon» is spelled.
     """
 
     def __init__(self, endpoint: str, access_key: str, secret_key: str,
                  bucket: str, secure: bool = True,
                  prefix: str = BACKUP_PREFIX) -> None:
+        from . import s3client
+
         try:
-            from minio import Minio  # type: ignore
+            self._client = s3client.make_client(endpoint, access_key,
+                                                secret_key, secure)
         except ImportError as exc:   # pragma: no cover — depends on the build
             raise RuntimeError(
-                "the backup store needs the `minio` client, which this build "
+                "the backup store needs the `boto3` client, which this build "
                 "does not have: install StratiGraph Server[s3], or unset the S3 "
                 "environment and use EM_BACKUP_DIR") from exc
         self.bucket = bucket
         self.endpoint = endpoint
         self.prefix = prefix
-        host = endpoint.split("://", 1)[-1].rstrip("/")
-        self._client = Minio(host, access_key=access_key, secret_key=secret_key,
-                             secure=secure)
 
     def _key(self, sha256: str) -> str:
         safe = "".join(c for c in str(sha256).lower() if c in "0123456789abcdef")
@@ -209,49 +212,43 @@ class S3BackupBlobs:
         return f"{self.prefix}{safe}"
 
     def put(self, data: bytes) -> Dict[str, Any]:
-        import io
-
-        from minio.error import S3Error  # type: ignore
+        from . import s3client
 
         key = self._key(digest_of(data))
-        existed = False
-        try:
-            self._client.stat_object(self.bucket, key)
-            existed = True
-        except S3Error as exc:
-            if exc.code not in ("NoSuchKey", "NoSuchObject", "NotFound"):
-                raise
+        existed = s3client.exists(self._client, self.bucket, key)
         if not existed:
-            self._client.put_object(self.bucket, key, io.BytesIO(data), len(data),
-                                    content_type=BLEND_MEDIA_TYPE)
+            self._client.put_object(Bucket=self.bucket, Key=key, Body=bytes(data),
+                                    ContentLength=len(data),
+                                    ContentType=BLEND_MEDIA_TYPE)
         return {"sha256": digest_of(data), "size": len(data),
                 "created": not existed}
 
     def get(self, sha256: str) -> Optional[bytes]:
-        from minio.error import S3Error  # type: ignore
+        from . import s3client
 
+        # Every S3 answer is «not here» for this store, as it always was: a
+        # backup that cannot be read is reported missing by the register, not
+        # raised through somebody's restore. A network failure is NOT an S3
+        # answer, and it still raises.
+        ClientError = s3client.client_error()
         try:
-            answer = self._client.get_object(self.bucket, self._key(sha256))
-        except (S3Error, ValueError):
+            answer = self._client.get_object(Bucket=self.bucket,
+                                             Key=self._key(sha256))
+        except (ClientError, ValueError):
             return None
-        try:
-            return answer.read()
-        finally:
-            answer.close()
-            answer.release_conn()
+        return s3client.read_body(answer)
 
     def head(self, sha256: str) -> Optional[Dict[str, Any]]:
-        from minio.error import S3Error  # type: ignore
+        from . import s3client
 
+        ClientError = s3client.client_error()
         try:
-            stat = self._client.stat_object(self.bucket, self._key(sha256))
-        except (S3Error, ValueError):
+            stat = self._client.head_object(Bucket=self.bucket,
+                                            Key=self._key(sha256))
+        except (ClientError, ValueError):
             return None
-        return {"sha256": str(sha256).lower(), "size": int(stat.size or 0)}
-
-
-#: the old name, the same class
-MinioBackupBlobs = S3BackupBlobs
+        return {"sha256": str(sha256).lower(),
+                "size": int(stat.get("ContentLength") or 0)}
 
 
 # ── the register ─────────────────────────────────────────────────────────────

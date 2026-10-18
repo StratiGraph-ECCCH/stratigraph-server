@@ -107,13 +107,14 @@ def e_interno(nome: str, valore: str, servizi) -> bool:
     Due modi di riconoscerlo, e nessuno dei due è un elenco a mano:
 
       · il NOME lo dichiara (`*_INTERNAL`, più i tre che il codice usa così);
-      · l'HOST è un servizio di QUESTO compose — `http://minio:9000`,
+      · l'HOST è un servizio di QUESTO compose — `http://rustfs:9000`,
         `http://keycloak:8080`. I nomi dei servizi vengono dal reso, quindi un
         servizio nuovo è coperto da sé.
 
     Il secondo modo è stato aggiunto eseguendo: la prima versione guardava solo
     il suffisso e inciampava su `CANTALOUPE_S3SOURCE_ENDPOINT` e
-    `MINIO_ENDPOINT`, che nominano container e non macchine.
+    `MINIO_ENDPOINT` (oggi `EM_ASSET_S3_ENDPOINT`), che nominano container e
+    non macchine.
     """
     if (nome.endswith("_INTERNAL") or nome.endswith("_INTERNAL_BASE")
             or nome in _INTERNI_PER_NOME):

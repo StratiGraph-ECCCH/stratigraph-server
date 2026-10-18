@@ -3,7 +3,7 @@
 Every service→service URL in a StratiGraph deployment exists in **two forms**:
 
 * the **internal** one, a service name on the container network
-  (`minio:9000`, `keycloak:8080`, `cantaloupe:8182`), which is how one process
+  (`rustfs:9000`, `keycloak:8080`, `cantaloupe:8182`), which is how one process
   dials another;
 * the **public** one, the host a browser can reach
   (`https://<host>/em/…`, `https://<host>/iiif/3/…`), which is what goes into
@@ -57,7 +57,7 @@ Corollary for the next parameter: if it does not have a strong reason to exist
 |---|---|---|
 | **IIIF image service** | `EM_IIIF_INTERNAL` — StratiGraph Server → Cantaloupe, to read `info.json` | `EM_IIIF_PUBLIC` — written into every manifest and every image URL a client renders |
 | **Identity** | `OIDC_JWKS_URI` — StratiGraph Server → Keycloak, to fetch the signing keys | `OIDC_ISSUER` — what the TOKEN says, i.e. the address the user's browser got it from |
-| **Object store** | `EM_ASSET_S3_ENDPOINT` (old name `MINIO_ENDPOINT`, still read, with a warning) — StratiGraph Server → the S3 store (MinIO, RustFS) | `/assets/*` on the public host, for clients that fetch an asset by digest |
+| **Object store** | `EM_ASSET_S3_ENDPOINT` (the old name `MINIO_ENDPOINT` stops the server at startup, by name) — StratiGraph Server → the S3 store (RustFS on the dev stack) | `/assets/*` on the public host, for clients that fetch an asset by digest |
 | **The room API** | (none: nobody dials StratiGraph Server from inside) | `/em/*` on the public host — the base EMStudio and EMtools are configured with |
 
 Older spellings are still read, in this order, so nothing breaks on upgrade:
@@ -82,7 +82,7 @@ and every internal form is a service name:
 ```
 https://<host>/em/*      → StratiGraph Server:8000     (handle_path: the app's own prefix)
 https://<host>/iiif/*    → cantaloupe:8182    (handle: the IIIF version is IN the path)
-https://<host>/assets/*  → minio:9000
+https://<host>/assets/*  → rustfs:9000
 https://<host>/auth/*    → keycloak:8080
 ```
 

@@ -226,7 +226,7 @@
 
 	# The object store, for clients that fetch an asset by its digest.
 	handle_path /assets/* {
-		reverse_proxy minio:9000
+		reverse_proxy rustfs:9000
 	}
 
 	# Identity, on the same origin as everything else.

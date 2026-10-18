@@ -1,4 +1,4 @@
-# The dev stack — MinIO + Keycloak + StratiGraph Server on a laptop
+# The dev stack — RustFS + Keycloak + StratiGraph Server on a laptop
 
 *macOS (Colima or Docker Desktop) · Linux (native) · Windows (WSL 2)*
 
@@ -6,13 +6,15 @@
 path. The real server — and a local FCN and an institutional node are the same
 service, only differently addressed — is provisioned with the production
 Ansible/compose (`heriverse-ansible`). What runs here is the **same StratiGraph Server
-image**, the **same wire**, and the **same MinIO implementation of the
-AssetStore**. The only thing this directory adds is the two things StratiGraph Server
+image**, the **same wire**, and the **same S3 implementation of the
+AssetStore** — on RustFS since 18 October 2026 (MinIO is deprecated and gone;
+see [From MinIO to RustFS](#from-minio-to-rustfs-once) below). The only thing
+this directory adds is the two things StratiGraph Server
 depends on, next to it, so the promotion arc can be exercised against a **real
 object store** without a remote host.
 
 **What it is not.** Not a place for production secrets, and not a different code
-path. `.env.dev.example` holds `minioadmin`/`minioadmin` and a realm called
+path. `.env.dev.example` holds dev-only S3 keys (`em-dev-s3`) and a realm called
 `em-dev`: every value in it would be a vulnerability on anything reachable.
 
 ---
@@ -348,7 +350,7 @@ docker-compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 ```
 
 That builds StratiGraph Server and StratiGraph Catalog from their own `Dockerfile`s and starts the
-rest: MinIO, a one-shot that **creates the bucket**, Keycloak with the **dev
+rest: RustFS, a one-shot that **creates the bucket**, Keycloak with the **dev
 realm imported**, Cantaloupe for IIIF, **Postgres for the room documents**, and
 the two services pointed at all of them. First run takes a few minutes (the image builds); after that it is seconds
 — **~15 s** for a full `up -d`, measured.
@@ -357,8 +359,8 @@ the two services pointed at all of them. First run takes a few minutes (the imag
 |---|---|---|
 | StratiGraph Server (the room) | <http://localhost:8000/v1/health> | a bearer token (below) |
 | StratiGraph Catalog (the studies) | <http://localhost:8010/health> | idem |
-| MinIO console | <http://localhost:9001> | `minioadmin` / `minioadmin` |
-| MinIO API | <http://localhost:9000> | idem |
+| RustFS console | <http://localhost:9001/rustfs/console/> | `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY` from `.env.dev` |
+| RustFS S3 API | <http://localhost:9000> | idem |
 | Keycloak | <http://localhost:8085> | `admin` / `admin` |
 | Cantaloupe (IIIF) | <http://localhost:8182/iiif/3> | none — public by design |
 | Postgres (the room documents) | `localhost:5433` | `em` / `em`, database `em_documents` |
@@ -396,7 +398,7 @@ Measured on this machine: 122 documents in, 122 rows out, every one of them byte
 for byte and digest for digest identical to its file.
 
 What does **not** live there, and the split is the point: the **bodies** (glb,
-pdf, tilesets, images) stay in MinIO, addressed by their digest; the **oplog**
+pdf, tilesets, images) stay in RustFS, addressed by their digest; the **oplog**
 stays in the `em_data` volume beside the ACLs and the invites, because a replay
 log is a different question from a versioned document. `EM_SNAPSHOT_DIR` is
 therefore still set, and the server passes it to the store as `journal_root`.
@@ -419,7 +421,7 @@ curl -s http://localhost:8000/v1/health | jq
 ```
 
 A healthy stack answers `"auth": "keycloak"` and
-`"asset_store": "minio (http://minio:9000, bucket em-assets)"`. If it says
+`"asset_store": "s3 (http://rustfs:9000, bucket em-assets)"`. If it says
 `dev-no-auth` or `memory`, StratiGraph Server did not get its environment — look at
 `docker logs em-dev-server`.
 
@@ -451,12 +453,12 @@ curl -s -X PUT "http://localhost:8000/v1/rooms/demo/asset?media_type=model/gltf-
 ```
 
 The answer's `ref` is `sha256:<hex>` — **the digest of the bytes you sent**. That
-is the object's name in the bucket (visible in the MinIO console under
+is the object's name in the bucket (visible in the RustFS console under
 `em-assets`), which is what makes the reference verifiable and dedup free.
 
 ---
 
-## The smoke test — the proof that MinIO is real
+## The smoke test — the proof that the object store is real
 
 ```bash
 python dev-stack/smoke.py       # from the repo root
@@ -516,7 +518,7 @@ studies rather than a 401 — discovery is the point — and does not leak the r
 python dev-stack/smoke_catalog.py
 ```
 
-It registers two studies, verifies the containers are objects in MinIO by opening
+It registers two studies, verifies the containers are objects in the S3 bucket by opening
 the bucket itself, searches by author / text / digital twin, checks the HDT view
 groups two campaigns of one monument, fetches the container back byte-identical,
 checks that `/ttl` is in **publish mode** (a deleted US is absent from the
@@ -580,9 +582,9 @@ docker-compose --env-file .env.dev -f docker-compose.dev.yml up -d
 ```
 
 What comes back **by itself**, because it is seeded by the stack: the **bucket**
-(the `minio-init` one-shot) and the **realm** (Keycloak's import). Measured
+(the `rustfs-init` one-shot) and the **realm** (Keycloak's import). Measured
 straight after a `down -v`: `/v1/health` says `auth: keycloak` and
-`asset_store: minio (…)`.
+`asset_store: s3 (…)`.
 
 What does **not** come back, and how to put it back:
 
@@ -632,22 +634,64 @@ prove the stack comes up from nothing (and then re-seed as in case 3 above).
 | Keycloak exits at boot with a Jackson error | an unknown key in `realm-em-dev.json`. The importer is strict: **no comments in that file** (that is why its notes live in `keycloak/README.md`) |
 | `403 … the token's audience does not include 'StratiGraph Server'` | the realm's audience mapper is missing. It is the single most common reason a correct-looking token is refused |
 | `401` with a token that looks fine | the issuer. A token minted through `localhost:8085` says `iss: http://localhost:8085/...`; StratiGraph Server is configured with exactly that spelling and fetches the JWKS over the internal `keycloak:8080`. Change one and you must change the other |
-| StratiGraph Server exits saying the store is *half configured* | three of the four `MINIO_*` variables. It refuses rather than falling back to a local directory nobody backs up |
+| StratiGraph Server exits saying the store is *half configured* | three of the four `EM_ASSET_S3_*` variables — or an old `MINIO_*` name, which it refuses by name. It refuses rather than falling back to a local directory nobody backs up |
 | a port is already taken | change it in `.env.dev` — every port in the compose file is a variable |
+
+---
+
+## From MinIO to RustFS (once)
+
+Until 18 October 2026 the object store of this stack was MinIO. MinIO community
+has walked away from open source and is deprecated here; **RustFS** (Apache-2.0,
+`rustfs/rustfs:1.0.2`, pinned with its digest) speaks the same S3. The trial of
+17 October measured every call the server, Cantaloupe, the catalogue and the
+field assistant make: all standard S3, smokes and suite unchanged.
+
+What changed for a stack that already ran:
+
+| before | now |
+|---|---|
+| service `minio`, `minio-init` (with `mc`) | `rustfs`, `rustfs-init` (a SigV4 `PUT` with curl) |
+| volume `em-dev_minio_data` | `em-dev_rustfs_data` — a NEW volume: the on-disk formats differ |
+| `.env.dev`: `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` / `MINIO_BUCKET` / `MINIO_API_PORT` / `MINIO_CONSOLE_PORT` | `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY` / `RUSTFS_BUCKET` / `RUSTFS_API_PORT` / `RUSTFS_CONSOLE_PORT` |
+| the server read `MINIO_*` | it reads only `EM_ASSET_S3_*`, and **refuses to start** on an old `MINIO_*` name |
+| console `http://localhost:9001` | `http://localhost:9001/rustfs/console/` (`EM_ASSET_S3_CONSOLE_URL`) |
+| `/v1/health`: `asset_store: minio (…)`, node check `minio` | `s3 (…)`, node check `s3` (probe: `GET /health`) |
+| the `minio` Python client | `boto3` |
+
+A `.env.dev` from before still has the `MINIO_*` names, and `fcn-up.sh` stops
+on it with the command to run. **Once**:
+
+```bash
+cd dev-stack
+./migra-minio-rustfs.sh     # adds RUSTFS_* to .env.dev (same values), copies
+                            # the bucket into RustFS and VERIFIES it
+./fcn-up.sh
+```
+
+The script reads the old MinIO (its container if it is still there, otherwise a
+temporary one over the volume), never writes to it, counts objects and bytes on
+both sides and recomputes the sha256 of a sample of digest-keyed objects. It
+removes the MinIO **containers** only after the check passes; the **volume**
+`em-dev_minio_data` stays as the backup until you remove it yourself
+(`docker volume rm em-dev_minio_data`).
+
+The sibling services read `EM_ASSET_S3_*` too (both already accepted it as their
+second spelling), so the compose has one name for the bucket everywhere.
 
 ---
 
 ## Versions this was verified on
 
 Colima 0.10.3 · Docker 29.6.1 · docker-compose 5.3.0 (standalone) ·
-MinIO (latest, 2026-08) · Keycloak 24.0.4 · macOS aarch64.
+RustFS 1.0.2 (MinIO until 18 Oct 2026) · Keycloak 24.0.4 · macOS aarch64.
 
 ---
 
 ## The image layer (IIIF)
 
 The stack also runs **Cantaloupe**, a IIIF Image API server, reading the **same
-MinIO bucket** with the asset's `sha256` as the identifier. Nothing is copied,
+S3 bucket** with the asset's `sha256` as the identifier. Nothing is copied,
 nothing is imported, and there is no thumbnail pipeline: a thumbnail is a size
 request, a deep-zoom tile is a region request, and the crop of an annotated
 region is a URL.
@@ -700,7 +744,7 @@ docker compose --profile https --env-file .env.dev -f docker-compose.dev.yml up 
 |---|---|---|
 | `https://em.localhost:8443/em/*` | StratiGraph Server | sì (`handle_path`) |
 | `https://em.localhost:8443/iiif/*` | Cantaloupe | sì (`handle` — la versione sta nel path) |
-| `https://em.localhost:8443/assets/*` | MinIO | sì |
+| `https://em.localhost:8443/assets/*` | RustFS | sì |
 | `https://em.localhost:8443/auth/*` | Keycloak | sì |
 
 Il certificato lo emette la **CA interna di Caddy**. È l'unico gesto che questo

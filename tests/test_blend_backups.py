@@ -128,14 +128,14 @@ def test_a_snapshot_is_not_in_the_assets_namespace(monkeypatch, tmp_path):
     assert store.head(f"sha256:{sha}") is None
 
 
-def test_minio_backups_get_their_own_prefix(monkeypatch):
+def test_s3_backups_get_their_own_prefix(monkeypatch):
     """A prefix, not the flat digest namespace the assets use. Checked on the KEY
     rather than by uploading, because the property is about where it would go."""
-    monkeypatch.setattr("app.blend_backups.MinioBackupBlobs.__init__",
+    monkeypatch.setattr("app.blend_backups.S3BackupBlobs.__init__",
                         lambda self, *a, **k: None)
-    from app.blend_backups import BACKUP_PREFIX, MinioBackupBlobs
+    from app.blend_backups import BACKUP_PREFIX, S3BackupBlobs
 
-    store = MinioBackupBlobs.__new__(MinioBackupBlobs)
+    store = S3BackupBlobs.__new__(S3BackupBlobs)
     store.prefix = BACKUP_PREFIX
     key = store._key(digest_of(BLEND))
     assert key.startswith("blend-backups/")
@@ -145,7 +145,7 @@ def test_minio_backups_get_their_own_prefix(monkeypatch):
 def test_a_node_with_nowhere_to_put_them_does_not_pretend(monkeypatch):
     """Memory is the last resort and it is reported (see `/v1/health`) — a safety
     copy that dies with the process must not be a surprise."""
-    monkeypatch.delenv("MINIO_ENDPOINT", raising=False)
+    monkeypatch.delenv("EM_ASSET_S3_ENDPOINT", raising=False)
     assert isinstance(blobs_from_env({}), InMemoryBackupBlobs)
     assert isinstance(blobs_from_env({"EM_SNAPSHOT_DIR": "/tmp/em-x"}),
                       DirectoryBackupBlobs)

@@ -1547,13 +1547,13 @@ def test_LE_ESENZIONI_sono_ancora_quelle_che_credo(tmp_path):
     """Un'esenzione è un buco nella regola: quando smette di servire va via.
 
     `EM_SITE` deve continuare a contenere ENTRAMBI i nomi (il nodo risponde
-    anche su `em.localhost`, e deve), e `EM_MINIO_CONSOLE_URL` deve continuare a
-    essere loopback — se un giorno Caddy servisse la console di MinIO, quella
+    anche su `em.localhost`, e deve), e `EM_ASSET_S3_CONSOLE_URL` deve continuare
+    a essere loopback — se un giorno Caddy servisse la console di RustFS, quella
     esenzione andrebbe togliendo, non tenuta per abitudine.
     """
     reso, _servizi, _, _doc = _reso_con_primario(tmp_path)
     assert PRIMARIO in reso["EM_SITE"] and "em.localhost" in reso["EM_SITE"]
-    assert reso["EM_MINIO_CONSOLE_URL"].startswith("http://localhost:")
+    assert reso["EM_ASSET_S3_CONSOLE_URL"].startswith("http://localhost:")
 
 
 # ═══ 14 · UNA PORTA PER STRUMENTO, E OGNUNA SU UNA PROVA ═════════════════════
@@ -2497,7 +2497,7 @@ def test_LE_ESENZIONI_VENGONO_DAL_COMPOSE_e_non_da_una_copia(tmp_path):
         "l'esenzione messa nel compose non arriva al banco: da qualche parte "
         "c'è una copia della lista")
     #: …e la voce vera è ancora là, cioè la sonda non ha sostituito il file
-    assert "EM_MINIO_CONSOLE_URL" in esenti
+    assert "EM_ASSET_S3_CONSOLE_URL" in esenti
 
     #: E L'ALTRO VERSO: togliendole tutte, il banco non ne inventa
     y.write_text(y.read_text().replace("x-public-addresses:\n  # Le variabili",

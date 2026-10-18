@@ -106,7 +106,7 @@ each endpoint answers 404.
 
 ## Node Health, in particular
 
-`GET /v1/admin/health` probes StratiGraph Server itself, MinIO, Keycloak, IIIF and
+`GET /v1/admin/health` probes StratiGraph Server itself, the S3 store (`s3`), Keycloak, IIIF and
 StratiGraph Catalog, and reports **four states**:
 
 | state | means |
@@ -144,7 +144,7 @@ timeout inside it, lower so a well-behaved failure reports itself),
 `truncated` — a count that stopped at the cap without saying so would be a wrong
 number wearing a right one's clothes).
 
-The page prints **hosts, never URLs**: a MinIO endpoint can carry credentials in
+The page prints **hosts, never URLs**: an S3 endpoint can carry credentials in
 its userinfo, and a health page is a screenshot waiting to happen
 (`test_the_page_never_prints_a_credential`).
 
@@ -157,7 +157,7 @@ python dev-stack/smoke_node_admin.py        # includes health: states, bound, 40
 By hand, the measure that matters — a stopped service must not read `ok`:
 
 ```bash
-docker-compose --env-file .env.dev -f dev-stack/docker-compose.dev.yml stop minio
-# reload https://em.localhost:8443/em/admin/ → Node Health → minio: unreachable
-docker-compose --env-file .env.dev -f dev-stack/docker-compose.dev.yml start minio
+docker-compose --env-file .env.dev -f dev-stack/docker-compose.dev.yml stop rustfs
+# reload https://em.localhost:8443/em/admin/ → Node Health → s3: unreachable
+docker-compose --env-file .env.dev -f dev-stack/docker-compose.dev.yml start rustfs
 ```

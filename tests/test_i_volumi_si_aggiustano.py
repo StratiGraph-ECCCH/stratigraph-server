@@ -62,7 +62,7 @@ def test_OGNI_VOLUME_DI_DATI_E_MONTATO_E_ASPETTATO(servizio, volume):
 
 def test_NESSUN_ALTRO_VOLUME_E_TOCCATO():
     """Il one-shot gira come root: vede i tre volumi dei servizi con UID 10001 e
-    nient'altro — non MinIO, non Postgres, non la CA di Caddy."""
+    nient'altro — non l'object store, non Postgres, non la CA di Caddy."""
     montati = sorted(m.split(":")[0] for m in INIT["volumes"])
     assert montati == sorted(CHI.values())
 

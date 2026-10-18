@@ -8,7 +8,7 @@
 
 The «personal» profile, measured against the dev stack (8 containers, ~2.8 GB of
 RAM — Keycloak 1.5 GB, Cantaloupe 0.75 GB —, Docker required): ONE process, no
-Docker, no Keycloak, no MinIO, no Postgres. What a person alone needs is the
+Docker, no Keycloak, no S3 store, no Postgres. What a person alone needs is the
 graph, the rooms and the web tools; what stays off is identity (a node that
 listens to this computer only has one person in front of it: the dev-mode
 «open» door), the IIIF server and the object store.
@@ -115,8 +115,14 @@ def start(root: str, data: Path, port: int, lan: bool, name: str) -> dict:
     host = "0.0.0.0" if lan else "127.0.0.1"
     env = dict(os.environ)
     for k in ("OIDC_ISSUER", "OIDC_AUDIENCE", "TOKEN_ENDPOINT", "CLIENT_ID_em",
-              "S3_ENDPOINT", "MINIO_ENDPOINT", "EM_SNAPSHOT_DSN", "DATABASE_URL"):
+              "S3_ENDPOINT", "EM_SNAPSHOT_DSN", "DATABASE_URL"):
         env.pop(k, None)                         # personal: nothing of the stack
+    # …and the object store WHOLE, not its endpoint alone: three of the four
+    # `EM_ASSET_S3_*` left behind are a half-configured store, which the server
+    # refuses to start on. The old `MINIO_*` names go too — the server no longer
+    # reads them, and refuses to start while one is set without its new name.
+    for k in [k for k in env if k.startswith(("EM_ASSET_S3_", "MINIO_"))]:
+        env.pop(k, None)
     env.update({"EM_NODE_PROFILE": "personal", "EM_PERSONAL_ROOT": os.path.abspath(root),
                 "EM_SNAPSHOT_DIR": str(data / "snapshots"), "EM_ASSET_DIR": str(data / "assets"),
                 "EM_NODE_NAME": name, "EM_SERVER_HOST": host, "EM_SERVER_PORT": str(port),
