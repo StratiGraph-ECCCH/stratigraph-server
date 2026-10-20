@@ -8,6 +8,15 @@
 #   ./fcn-up.sh --demo          # …e POPOLA: studi, stanze, immagini IIIF. Idempotente.
 #   ./fcn-up.sh --local-s3d     # s3Dgraphy dal CHECKOUT LOCALE (editi e testi live)
 #   ./fcn-up.sh mac.local --local-s3d
+#   ./fcn-up.sh --no-studio     # …senza il dev server di EMStudio (/em/studio/ dà 502)
+#   ./fcn-up.sh --studio        # …e lo PRETENDE: se il checkout non è pronto, si ferma
+#
+# EMSTUDIO: `/em/studio/` e `/em/read/` sono il dev server Vite di EMStudio, che
+# gira SULL'HOST (porta 5173) e che Caddy raggiunge da `host.docker.internal`.
+# Lo accende questo script, in background, se `../../EMStudio/frontend/
+# node_modules` c'è; altrimenti tace — un nodo di campo non ha EMStudio, e non
+# è rotto. Pid e log in `dev-stack/emstudio-dev.{pid,log}`; lo spegne
+# `./fcn-down.sh`. Se sulla 5173 risponde già qualcosa, non ne avvia un secondo.
 #
 # NB: la CA interna di Caddy NON fa certificati per un IP nudo → per l'altro computer
 # serve un HOSTNAME (il nome mDNS `<host>.local` — Bonjour su macOS, avahi su
@@ -30,12 +39,14 @@ HTTPS_PORT="${HTTPS_PORT:-8443}"
 DEV_REALM="${DEV_REALM:-em-dev}"
 
 # ── argomenti: hostname PRIMARIO opzionale + --local-s3d ─────────────────────
-LOCAL_S3D="no"; DEMO="no"; ARG_HOST=""
+LOCAL_S3D="no"; DEMO="no"; ARG_HOST=""; STUDIO="auto"
 for a in "$@"; do
   case "$a" in
     --local-s3d) LOCAL_S3D="yes" ;;
     --demo)      DEMO="yes" ;;
-    -*) echo "flag sconosciuto: $a (usa --local-s3d | --demo)"; exit 2 ;;
+    --studio)    STUDIO="yes" ;;
+    --no-studio) STUDIO="no" ;;
+    -*) echo "flag sconosciuto: $a (usa --local-s3d | --demo | --studio | --no-studio)"; exit 2 ;;
     *) ARG_HOST="$a" ;;
   esac
 done
@@ -219,7 +230,95 @@ if [ -n "$mancanti" ]; then
   exit 1
 fi
 
+# ── 4-quater · EMSTUDIO: SI DECIDE ADESSO, SI ACCENDE DOPO `up` ───────────────
+#
+# Il dev server resta SULL'HOST e non diventa un container: `vite.config.ts` è
+# scritto per passare da Caddy (`allowedHosts`), e un file-watcher dentro un
+# bind mount di Colima perderebbe l'hot reload senza guadagnare niente. Quindi
+# qui è supervisione, non containerizzazione.
+#
+# Il checkout lo prepara `fcn-install.sh` (clone, `npm install`, `build:reader`).
+# Qui si guarda soltanto. `auto` = acceso se c'è, zitto se non c'è: un nodo di
+# campo non ha EMStudio, e il compose lo dice già (`EM_EMSTUDIO_WEB_URL`,
+# `EM_CATALOG_EMSTUDIO_URL` senza default). `--studio` invece lo pretende, e
+# se manca si ferma QUI, prima dei pull — non dopo.
+#
+# `SG_STUDIO_DIR` e `SG_STUDIO_PIDFILE` esistono per le prove, come
+# `SG_ANNOUNCE_PIDFILE`: girano su questo `dev-stack/` e non devono accendere
+# (o spegnere) il Vite di chi le lancia.
+STUDIO_DIR="${SG_STUDIO_DIR:-../../EMStudio}"
+STUDIO_FRONTEND="$STUDIO_DIR/frontend"
+STUDIO_PIDFILE="${SG_STUDIO_PIDFILE:-./emstudio-dev.pid}"
+STUDIO_LOG="${STUDIO_PIDFILE%.pid}.log"
+STUDIO_PROBE="http://localhost:5173/em/studio/"
+studio_pronto="no"
+[ -f "$STUDIO_FRONTEND/package.json" ] && [ -d "$STUDIO_FRONTEND/node_modules" ] \
+  && command -v npm >/dev/null 2>&1 && studio_pronto="yes"
+if [ "$STUDIO" = "auto" ]; then
+  STUDIO="$studio_pronto"
+elif [ "$STUDIO" = "yes" ] && [ "$studio_pronto" != "yes" ]; then
+  echo "✖ --studio, ma il dev server di EMStudio non si può accendere:" >&2
+  if [ ! -f "$STUDIO_FRONTEND/package.json" ]; then
+    echo "     manca il checkout ($STUDIO_DIR)" >&2
+  elif [ ! -d "$STUDIO_FRONTEND/node_modules" ]; then
+    echo "     manca $STUDIO_FRONTEND/node_modules" >&2
+  else
+    echo "     npm non c'è su questa macchina (non lo installo io)" >&2
+  fi
+  echo >&2
+  echo "      ./fcn-install.sh      (clona EMStudio e fa npm install)" >&2
+  echo >&2
+  echo "  oppure ./fcn-up.sh --no-studio. Non comincio a scaricare immagini." >&2
+  exit 1
+fi
+
 "${COMPOSE[@]}" --profile https up -d --build
+
+# ── 4-quinquies · EMSTUDIO, ACCESO ───────────────────────────────────────────
+#
+# IDEMPOTENTE, e lo dice: se la 5173 risponde già (un `fcn-up` di prima, o un
+# `npm run dev` lanciato a mano in un altro terminale) non se ne avvia un
+# secondo — Vite ripiegherebbe sulla 5174, che Caddy non guarda.
+#
+# `set -m` intorno al lancio: il processo nasce in un GRUPPO SUO, e il pid
+# scritto è quello del gruppo. `npm run dev` è npm → sh → node, e
+# `fcn-down.sh` spegne il gruppo intero: uccidere solo npm lascerebbe vite
+# orfano e la porta occupata.
+studio_attivo="no"
+if [ "$STUDIO" = "yes" ]; then
+  pid_vecchio="$(cat "$STUDIO_PIDFILE" 2>/dev/null || true)"
+  if curl -s -o /dev/null --max-time 2 "$STUDIO_PROBE"; then
+    studio_attivo="yes"
+    if [ -n "$pid_vecchio" ] && kill -0 "$pid_vecchio" 2>/dev/null; then
+      echo "· EMStudio: il dev server è già attivo su :5173 (pid $pid_vecchio): non ne avvio un secondo."
+    else
+      echo "· EMStudio: sulla :5173 risponde già un dev server che non ho acceso io: non ne avvio un secondo."
+    fi
+  elif [ -n "$pid_vecchio" ] && kill -0 "$pid_vecchio" 2>/dev/null; then
+    studio_attivo="yes"
+    echo "· EMStudio: il dev server è già avviato (pid $pid_vecchio) e non risponde ancora: non ne avvio un secondo."
+    echo "  Il suo log: $STUDIO_LOG"
+  else
+    set -m
+    ( cd "$STUDIO_FRONTEND" && exec nohup npm run dev ) >"$STUDIO_LOG" 2>&1 < /dev/null &
+    pid_studio=$!
+    set +m
+    echo "$pid_studio" > "$STUDIO_PIDFILE"
+    #: 30s: Vite parte in un paio di secondi, ma la prima volta ottimizza le
+    #: dipendenze. Se non risponde lo DICE e prosegue — il resto del nodo è su.
+    for _ in $(seq 1 30); do
+      curl -s -o /dev/null --max-time 1 "$STUDIO_PROBE" && { studio_attivo="yes"; break; }
+      kill -0 "$pid_studio" 2>/dev/null || break
+      sleep 1
+    done
+    if [ "$studio_attivo" = "yes" ]; then
+      echo "· EMStudio: dev server acceso su :5173 (pid $pid_studio, log $STUDIO_LOG)."
+    else
+      echo "⚠ EMStudio: ho lanciato \`npm run dev\` (pid $pid_studio) ma la :5173 non risponde." >&2
+      echo "  Guarda il log: $STUDIO_LOG — il resto del nodo è acceso." >&2
+    fi
+  fi
+fi
 
 # ── 4-ter · L'ANNUNCIO SULLA RETE LOCALE ─────────────────────────────────────
 #
@@ -284,6 +383,7 @@ cat <<EOF
   Console del nodo:     https://${PRIMARY}:${HTTPS_PORT}/em/admin/
   Catalogo:             https://${PRIMARY}:${HTTPS_PORT}/catalog/ui/
   Assistente di campo:  https://${PRIMARY}:${HTTPS_PORT}/chat/
+$( [ "$studio_attivo" = "yes" ] && echo "  EMStudio (dev):       https://${PRIMARY}:${HTTPS_PORT}/em/studio/" )
 $( # ── PER L'ALTRO COMPUTER: PROVATO, NON PROMESSO ─────────────────────────
    #
    # Misurato il 7 settembre 2026: avahi è attivo sul Pi e PUBBLICA, e da un Mac

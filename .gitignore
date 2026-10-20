@@ -30,3 +30,9 @@ dev-stack/.env.dev
 # verità; il reso è quello con le redirect URI per il nome che chi lancia lo
 # script ha scelto, e quel nome è di quella macchina — non di questo repository.
 dev-stack/keycloak/realm-em-dev.*.json
+
+# Il dev server di EMStudio acceso da `./fcn-up.sh`: il suo pid (lo legge
+# `./fcn-down.sh` per spegnerlo) e il suo log. Sono di un processo di questa
+# macchina, non del repository.
+dev-stack/emstudio-dev.pid
+dev-stack/emstudio-dev.log

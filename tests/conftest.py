@@ -180,3 +180,21 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     if motivo:
         terminalreporter.write_line("")
         terminalreporter.write_line(f"  {COME_FARLE_GIRARE}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# IL VITE DI CHI LANCIA LE PROVE — non si accende e non si spegne
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Diverse prove eseguono `fcn-up.sh` e `fcn-down.sh` sul `dev-stack/` VERO (con
+# docker finto). Dal 20 ottobre 2026 `fcn-up.sh` accende il dev server di
+# EMStudio se `../../EMStudio/frontend/node_modules` c'è — e su questo Mac c'è —
+# e `fcn-down.sh` spegne quello che nomina `dev-stack/emstudio-dev.pid`. Senza
+# questa fixture una prova accenderebbe un Vite vero, o spegnerebbe quello su
+# cui E.D. sta lavorando. Le due variabili sono la cucitura dichiarata negli
+# script, come `SG_ANNOUNCE_PIDFILE`; una prova che vuole EMStudio le riscrive.
+
+@_pytest.fixture(autouse=True)
+def _nessun_emstudio_vero(tmp_path, monkeypatch):
+    monkeypatch.setenv("SG_STUDIO_DIR", str(tmp_path / "nessun-EMStudio"))
+    monkeypatch.setenv("SG_STUDIO_PIDFILE", str(tmp_path / "emstudio-dev.pid"))

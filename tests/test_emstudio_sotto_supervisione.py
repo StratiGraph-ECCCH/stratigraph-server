@@ -162,3 +162,40 @@ def test_SENZA_NPM_lo_dice_e_non_lo_installa(tmp_path):
     chiamati = _chiamati(tmp_path)
     for vietato in ("brew", "apt", "npm "):
         assert vietato not in chiamati, chiamati
+
+
+# ═══ 2 · fcn-up / fcn-down ══════════════════════════════════════════════════
+
+@needs_bash
+def test_STUDIO_PRETESO_SENZA_CHECKOUT_si_ferma_prima_di_up(tmp_path):
+    bin_ = _finti(tmp_path, docker_ok=True, plugin=True, autonomo=False)
+    _uname(bin_, "linux")
+    done = _run("fcn-up.sh", bin_, tmp_path, args=("--studio",))
+    assert done.returncode != 0, done.stdout
+    assert "--studio" in done.stderr and "./fcn-install.sh" in done.stderr
+    assert "up -d" not in _chiamati(tmp_path)
+
+
+@needs_bash
+def test_SENZA_CHECKOUT_tace(tmp_path):
+    """Il default: un nodo di campo non ha EMStudio, e non è rotto."""
+    bin_ = _finti(tmp_path, docker_ok=True, plugin=True, autonomo=False)
+    _uname(bin_, "linux")
+    done = _run("fcn-up.sh", bin_, tmp_path)
+    assert done.returncode == 0, done.stderr
+    assert "EMStudio" not in done.stdout + done.stderr
+    assert "npm" not in _chiamati(tmp_path)
+
+
+@needs_bash
+def test_NO_STUDIO_non_lo_accende(tmp_path):
+    ems = _emstudio_finto(tmp_path)
+    bin_ = _finti(tmp_path, docker_ok=True, plugin=True, autonomo=False)
+    _uname(bin_, "linux")
+    _npm_finto(bin_, tmp_path)
+    _curl_finto(bin_, tmp_path)
+    done = _run("fcn-up.sh", bin_, tmp_path, args=("--no-studio",),
+                extra_env={"SG_STUDIO_DIR": str(ems)})
+    assert done.returncode == 0, done.stderr
+    assert "npm run dev" not in _chiamati(tmp_path)
+    assert "/em/studio/" not in done.stdout
