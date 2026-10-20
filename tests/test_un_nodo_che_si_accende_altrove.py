@@ -692,6 +692,13 @@ def _clone_finto(tmp_path, *, fratelli=()) -> pathlib.Path:
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     for f in fratelli:
         (radice / f).mkdir(parents=True, exist_ok=True)
+        if f == "EMStudio":
+            #: un checkout PRONTO: quello che l'installer guarda per decidere
+            #: se servono `npm install` e `build:reader`
+            fe = radice / f / "frontend"
+            for d in ("node_modules", "dist"):
+                (fe / d).mkdir(parents=True, exist_ok=True)
+            (fe / "package.json").write_text("{}\n")
     return srv / "dev-stack"
 
 
@@ -895,8 +902,11 @@ def test_UN_FRATELLO_ASSENTE_CON_L_URL_lo_clona(tmp_path):
 
 @needs_bash
 def test_RILANCIATO_SU_UNA_MACCHINA_A_POSTO_non_cambia_niente(tmp_path):
+    #: EMStudio fra i fratelli dal 20 ottobre 2026: è il quarto, e «a posto»
+    #: vuol dire anche lui (con node_modules e dist)
     dev = _clone_finto(tmp_path,
-                       fratelli=("stratigraph-chatbot", "stratigraph-catalog"))
+                       fratelli=("stratigraph-chatbot", "stratigraph-catalog",
+                                 "EMStudio"))
     shutil.copy(DEV / ".env.dev.example", dev / ".env.dev")
     bin_ = _finti(tmp_path, docker_ok=True, plugin=False, autonomo=True,
                   nomi=("git",))

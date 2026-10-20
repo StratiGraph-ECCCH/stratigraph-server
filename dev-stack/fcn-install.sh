@@ -9,7 +9,8 @@
 # COSA GARANTISCE, e sono le cose che hanno fatto fallire il primo avvio sul
 # Raspberry Pi il 7 settembre 2026:
 #
-#   1  i tre repository affiancati        — se ne manca uno, lo clona
+#   1  i quattro repository affiancati    — se ne manca uno, lo clona
+#      …e di EMStudio anche `node_modules` e la `dist` del reader (con npm)
 #   2  .env.dev esiste                    — non lo crea: dice la riga
 #   3  Docker risponde e un compose c'è   — non li installa: dice cosa manca
 #   4  em.localhost si risolve            — non tocca /etc/hosts: dice la riga
@@ -27,8 +28,8 @@
 # COSA NON FA, MAI:
 #   · `sudo` — la riga di /etc/hosts si stampa, non si scrive. È la dottrina di
 #     `fcn-trust-ca.sh`, che stampa il comando di sistema invece di eseguirlo.
-#   · installare Docker o aggiungere un repository apt: aggiungere una sorgente
-#     di pacchetti alla macchina di qualcuno è un atto di quella persona.
+#   · installare Docker, npm, o aggiungere un repository apt: aggiungere una
+#     sorgente di pacchetti alla macchina di qualcuno è un atto di quella persona.
 #   · toccare i container: questo script non ne accende e non ne spegne nessuno.
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next} /^[[:space:]]*$/{next} {exit}' "$0"; exit 0
@@ -99,11 +100,21 @@ urls="$(printf '%s\n' "$reso" \
         | awk '/^x-sibling-repos:/{f=1;next} f&&/^[^[:space:]]/{f=0} f' \
         | sed -n 's/^[[:space:]]*\([^:]*\):[[:space:]]*\(.*\)$/\1 \2/p')"
 
+#: EMStudio, SEMPRE — e con un'eccezione dichiarata, come s3Dgraphy qui sotto,
+#: perché non ha un `context:` da cui dedurlo: non si costruisce come immagine.
+#: Ma il catalogo ne monta la `dist` e Caddy ne instrada il dev server, quindi
+#: è una dipendenza della stack quanto gli altri tre. L'URL resta in
+#: `x-sibling-repos`; qui si aggiunge solo la cartella.
+RADICE="$(cd .. && cd .. && pwd)"
+EMSTUDIO="$RADICE/EMStudio"
+contesti="$contesti
+$EMSTUDIO"
+
 #: con --local-s3d serve anche s3Dgraphy, che non ha un `context:` (è un volume
 #: in docker-compose.local-s3d.yml). Un requisito in più, dichiarato dal flag.
 if [ "$LOCAL_S3D" = "yes" ]; then
   contesti="$contesti
-$(cd .. && cd .. && pwd)/s3Dgraphy"
+$RADICE/s3Dgraphy"
 fi
 
 for ctx in $contesti; do
@@ -149,6 +160,70 @@ for ctx in $contesti; do
     nota "A mano:  git clone $url \"$ctx\""
   fi
 done
+
+# ── 1-bis · EMStudio: le dipendenze e la dist del reader ─────────────────────
+#
+# Una cartella non basta. `fcn-up.sh` accende il dev server solo se
+# `frontend/node_modules` c'è, e il catalogo monta `frontend/dist`: senza
+# quella risponde 501 su `/study/{id}/narrative`. Tutti e due si fanno con npm,
+# e npm NON lo installo io — è la stessa dottrina di Docker, qui sotto.
+#
+# Un `npm` che manca è un avviso e non un guaio: la stack sale lo stesso, e
+# quello che si perde (l'editor, il reader, la narrativa) lo si dice per nome.
+# Un nodo di campo non ha EMStudio, e fermargli l'installazione per questo
+# vorrebbe dire non installarlo mai.
+avviso(){ printf '  ⚠ %s\n' "$*" >&2; }
+FRONTEND="$EMSTUDIO/frontend"
+if [ ! -d "$EMSTUDIO" ]; then
+  #: in --dry-run (o se il clone è fallito) non c'è niente da guardare: il clone
+  #: l'ha già detto sopra, e i due passi npm verranno al giro dopo
+  [ "$DRY" = "yes" ] && nota "(dopo il clone: npm install e npm run build:reader in EMStudio/frontend)"
+elif [ ! -f "$FRONTEND/package.json" ]; then
+  avviso "\`$EMSTUDIO\` c'è ma non ha \`frontend/package.json\`: non lo tocco."
+else
+  serve_npm=""
+  [ -d "$FRONTEND/node_modules" ] || serve_npm="install"
+  [ -d "$FRONTEND/dist" ] || serve_npm="$serve_npm build:reader"
+  if [ -z "$serve_npm" ]; then
+    ok "EMStudio: node_modules e dist del reader"
+  elif ! command -v npm >/dev/null 2>&1; then
+    avviso "EMStudio vuole npm ($serve_npm) e su questa macchina npm non c'è."
+    nota "Non lo installo: è una sorgente di pacchetti, e aggiungerla è un atto tuo."
+    nota "Senza, \`fcn-up.sh\` non accende il dev server (/em/studio/ dà 502) e,"
+    nota "senza dist, il catalogo risponde 501 sulla narrativa. Il resto sale."
+  else
+    if [ ! -d "$FRONTEND/node_modules" ]; then
+      if [ "$DRY" = "yes" ]; then
+        fatto "farei npm install in EMStudio/frontend"
+      else
+        say "  ⇣ npm install in EMStudio/frontend…"
+        if (cd "$FRONTEND" && npm install); then
+          fatto "EMStudio: node_modules installati"
+        else
+          male "npm install in EMStudio/frontend è fallito."
+          nota "A mano:  cd \"$FRONTEND\" && npm install"
+        fi
+      fi
+    fi
+    if [ ! -d "$FRONTEND/dist" ]; then
+      #: la ragione in una riga, perché un `build` durante un'installazione
+      #: sembra un di più finché non si sa a chi serve
+      if [ "$DRY" = "yes" ]; then
+        fatto "farei npm run build:reader (senza dist il catalogo dà 501 sulla narrativa)"
+      elif [ ! -d "$FRONTEND/node_modules" ]; then
+        nota "build:reader saltato: senza node_modules non si costruisce."
+      else
+        say "  ⚙ npm run build:reader — senza dist il catalogo risponde 501 sulla narrativa…"
+        if (cd "$FRONTEND" && npm run build:reader); then
+          fatto "EMStudio: dist del reader costruita"
+        else
+          male "npm run build:reader in EMStudio/frontend è fallito."
+          nota "A mano:  cd \"$FRONTEND\" && npm run build:reader"
+        fi
+      fi
+    fi
+  fi
+fi
 
 # ══ 2 · .env.dev ═════════════════════════════════════════════════════════════
 #
