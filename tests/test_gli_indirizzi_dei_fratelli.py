@@ -62,6 +62,9 @@ NELL_ORGANIZZAZIONE = {
 #: progetto che la consuma.
 NELL_ECOSISTEMA = {
     "s3Dgraphy": "ExtendedMatrix/s3Dgraphy",
+    #: misurato con `git ls-remote` il 20 ottobre 2026; il vecchio
+    #: `zalmoxes-laran/EMStudio` redirige qui, come s3Dgraphy
+    "EMStudio": "ExtendedMatrix/EMStudio",
 }
 
 #: Vuoto, e la casella resta perché il giorno in cui qualcosa ci finisce dentro

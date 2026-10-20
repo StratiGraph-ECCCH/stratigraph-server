@@ -216,6 +216,19 @@ x-sibling-repos:
   # PyPI il canonico dev'essere uno: archiviare quello di troppo è una
   # decisione di E.D., non una riga di questo file.
   s3Dgraphy: https://github.com/ExtendedMatrix/s3Dgraphy.git
+  # EMStudio non ha un `context:` nemmeno lui, ma a differenza di s3Dgraphy non
+  # è facoltativo: non si costruisce come immagine, eppure la stack lo usa in
+  # due punti. Il catalogo ne monta la `dist` (`../../EMStudio/frontend/dist`
+  # → `EM_CATALOG_READER`: senza, `/study/{id}/narrative` risponde 501) e
+  # Caddy instrada `/em/studio/*` e `/em/read/*` al suo dev server sull'host
+  # (`host.docker.internal:5173`, che `fcn-up.sh` accende). È una dipendenza
+  # della stack quanto gli altri tre: l'installer lo clona SEMPRE, con
+  # l'eccezione dichiarata là, perché da un `context:` non lo dedurrebbe.
+  #
+  # Anche lui sta in `ExtendedMatrix`, e per la stessa ragione di s3Dgraphy.
+  # Misurato con `git ls-remote` il 20 ottobre 2026: il vecchio
+  # `zalmoxes-laran/EMStudio` redirige qui.
+  EMStudio: https://github.com/ExtendedMatrix/EMStudio.git
 
 
 services:
