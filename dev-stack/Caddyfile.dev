@@ -287,10 +287,16 @@
 			respond "{err.status_code} — EMStudio's dev server is not answering on the host (:5173).
 
 THESE TWO ROUTES ARE DEVELOPER-ONLY, and on a field node they are SUPPOSED to
-say this: EMStudio is a fourth repository with its own dev server, started by
-hand. A node that never runs it is not broken.
+say this: EMStudio is a fourth repository with its own dev server on the host.
+A node that never runs it is not broken.
 
-Start it:   cd EMStudio/frontend && npm run dev
+./fcn-up.sh starts it by itself when ../EMStudio/frontend/node_modules exists,
+so if you are reading this, one of these is true:
+  · you ran ./fcn-up.sh --no-studio      → ./fcn-up.sh again, without it
+  · there is no EMStudio checkout here   → ./fcn-install.sh (clone + npm install)
+  · it was started and died              → read dev-stack/emstudio-dev.log
+By hand, if you prefer a terminal of your own:
+            cd EMStudio/frontend && npm run dev
 It serves /em/studio/ (the editor) and /em/studio/reader.html (the reader),
 and this origin proxies straight through to it.
 

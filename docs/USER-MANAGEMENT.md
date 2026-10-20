@@ -96,7 +96,8 @@ was invited to, not a set of keys.
 ## HOWTO · c · the OWNER's face (EMStudio)
 
 ```bash
-cd EMStudio/frontend && npm run dev        # or open frontend/dist/index.html
+cd stratigraph-server/dev-stack && ./fcn-up.sh   # starts EMStudio's dev server too
+# → https://em.localhost:8443/em/studio/  (or open EMStudio/frontend/dist/index.html)
 ```
 
 1. **Settings ▸ Live sync** → URL `https://em.localhost:8443/em`, room
@@ -113,7 +114,7 @@ cd EMStudio/frontend && npm run dev        # or open frontend/dist/index.html
    admin or owner"* — because a membership list is a list of the people working on
    an unpublished study. Nothing to click, and it says why.
 5. **Follow a link.** Open EMStudio with the seed's token:
-   `http://localhost:5173/?join=<token>&room=cantiere-demo`. It asks who you are
+   `https://em.localhost:8443/em/studio/?join=<token>&room=cantiere-demo`. It asks who you are
    (the link opened the door; it does not answer for you), calls `/v1/join`, and
    walks into the room with the role the link offered. Then it **removes the token
    from the address bar** — a credential in a URL gets pasted into bug reports.

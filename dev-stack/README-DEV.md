@@ -188,9 +188,24 @@ with the stack up:
 ```
 
 Those two 502s are **correct**: `Caddyfile.dev` sends them to
-`host.docker.internal:5173`, EMStudio's Vite dev server, which is a *fourth*
-repository started by hand. A node that never runs it is not broken — and the
-502 page now says exactly that.
+`host.docker.internal:5173`, EMStudio's Vite dev server, which runs on the
+*host* out of a *fourth* repository — and the Pi has no EMStudio checkout. A
+node that never runs it is not broken, and the 502 page says exactly that.
+
+**Since 20 October 2026 `fcn-up.sh` starts that dev server itself.**
+`fcn-install.sh` treats EMStudio as the fourth sibling (declared in
+`x-sibling-repos`, since it has no `context:` to deduce it from): it clones it,
+runs `npm install` in `EMStudio/frontend`, and `npm run build:reader` — the
+catalog mounts that `dist`, and without it `/study/{id}/narrative` answers 501.
+It never installs npm: if npm is missing it says so and the rest goes on.
+`fcn-up.sh` then runs `npm run dev` in the background when the checkout and its
+`node_modules` are there, silently skips it when they are not (a field node),
+and never starts a second one if `:5173` already answers. Pid and log are
+`dev-stack/emstudio-dev.{pid,log}`; `fcn-down.sh` stops it before the
+containers. `--no-studio` leaves it off, `--studio` insists and stops before
+any pull if it cannot. The dev server stays on the host on purpose:
+`vite.config.ts` is written for Caddy (`allowedHosts`), and a file watcher
+inside a Colima bind mount would lose hot reload for nothing.
 
 Underneath there was a second cause that a Mac never shows:
 

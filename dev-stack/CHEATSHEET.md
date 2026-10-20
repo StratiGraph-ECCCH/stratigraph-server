@@ -43,6 +43,7 @@ cp .env.dev.example .env.dev                    # once
 | **StratiGraph Catalog** | `:8010` | the register (published studies) |
 | **NodeODM** | `:3010` (its own dashboard) | **not started by `fcn-up.sh`** — opt-in, see §1-bis |
 | **Field assistant** | via Caddy `/chat` | the PWA — https on the shared origin, which is what gives a **phone** its camera, microphone and GPS |
+| **EMStudio (dev)** | via Caddy `/em/studio/` and `/em/read/` | Vite on the **host** (`:5173`), not a container: `fcn-up.sh` runs `npm run dev` in `../EMStudio/frontend` when the checkout and its `node_modules` are there (`fcn-install.sh` prepares both), skips it silently otherwise, and never starts a second one. `--no-studio` leaves it off; `fcn-down.sh` stops it. Log: `dev-stack/emstudio-dev.log` |
 
 Health: `https://em.localhost:8443/em/v1/health`. First run takes a few minutes
 (image build); after that a full `up` is **~15 s**.
