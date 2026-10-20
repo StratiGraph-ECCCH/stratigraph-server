@@ -8,6 +8,10 @@
 #   ./fcn-down.sh --colima   # dopo lo spegnimento, ferma anche la VM Colima (libera RAM)
 #
 # I flag si combinano: es.  ./fcn-down.sh --wipe --colima
+#
+# In ogni modo spegne PRIMA il dev server di EMStudio acceso da ./fcn-up.sh (il
+# suo pid file in dev-stack/), poi i container. `--wipe` non cambia niente su
+# questo: è un processo, non un volume. Un Vite lanciato a mano non lo tocca.
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next} /^[[:space:]]*$/{next} {exit}' "$0"; exit 0
 fi
@@ -38,6 +42,33 @@ done
 #: (o in pausa) non deve restare trovabile sulla rete. PRIMA di `wipe`, che chiede
 #: conferma: anche se la conferma non arriva, un annuncio fermato non fa danni.
 sg_announce_stop
+
+#: Il dev server di EMStudio, PRIMA dei container: è un processo dell'host e non
+#: dipende da loro, e spegnerlo per primo vuol dire che non c'è un istante in
+#: cui Caddy è giù e Vite resta acceso a servire nessuno. Si spegne il GRUPPO
+#: (`fcn-up.sh` lo lancia con `set -m`): npm → sh → node, e uccidere solo npm
+#: lascerebbe vite orfano con la 5173 occupata.
+#: `SG_STUDIO_PIDFILE` è per le prove, come in `fcn-up.sh`.
+STUDIO_PIDFILE="${SG_STUDIO_PIDFILE:-./emstudio-dev.pid}"
+pid_studio="$(cat "$STUDIO_PIDFILE" 2>/dev/null || true)"
+if [ -n "$pid_studio" ] && kill -0 -- "-$pid_studio" 2>/dev/null; then
+  kill -TERM -- "-$pid_studio" 2>/dev/null || true
+  for _ in $(seq 1 50); do
+    kill -0 -- "-$pid_studio" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 -- "-$pid_studio" 2>/dev/null; then
+    kill -KILL -- "-$pid_studio" 2>/dev/null || true
+    echo "· EMStudio: il dev server non è uscito con TERM in 5s: KILL (gruppo $pid_studio)."
+  else
+    echo "· EMStudio: dev server spento (pid $pid_studio), prima dei container."
+  fi
+  rm -f "$STUDIO_PIDFILE"
+elif [ -n "$pid_studio" ]; then
+  #: un pid file rimasto da un processo già morto (un riavvio, un kill a mano)
+  rm -f "$STUDIO_PIDFILE"
+  echo "· EMStudio: il pid file nominava un processo già uscito ($pid_studio): tolto."
+fi
 
 case "$MODE" in
   stop)

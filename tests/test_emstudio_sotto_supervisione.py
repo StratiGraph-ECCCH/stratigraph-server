@@ -188,6 +188,71 @@ def test_SENZA_CHECKOUT_tace(tmp_path):
 
 
 @needs_bash
+def test_ACCESO_POI_IDEMPOTENTE_POI_SPENTO(tmp_path):
+    ems = _emstudio_finto(tmp_path)
+    pf = tmp_path / "emstudio-dev.pid"
+    bin_ = _finti(tmp_path, docker_ok=True, plugin=True, autonomo=False)
+    _uname(bin_, "linux")
+    _npm_finto(bin_, tmp_path)
+    _curl_finto(bin_, tmp_path)
+    env = {"SG_STUDIO_DIR": str(ems)}
+
+    uno = _run("fcn-up.sh", bin_, tmp_path, extra_env=env)
+    assert uno.returncode == 0, uno.stderr
+    assert "dev server acceso su :5173" in uno.stdout, uno.stdout + uno.stderr
+    assert "EMStudio (dev):       https://em.localhost:8443/em/studio/" in uno.stdout
+    pid = int(pf.read_text())
+    os.kill(pid, 0)                                    # vivo, dopo che lo script è uscito
+    #: il pid è un GRUPPO: è quello che fcn-down spegnerà intero
+    assert os.getpgid(pid) == pid
+    try:
+        assert _chiamati(tmp_path).count("npm run dev") == 1
+        #: e `up` è venuto PRIMA del lancio
+        c = _chiamati(tmp_path)
+        assert c.index("up -d --build") < c.index("npm run dev")
+
+        due = _run("fcn-up.sh", bin_, tmp_path, extra_env=env)
+        assert due.returncode == 0, due.stderr
+        assert f"già attivo su :5173 (pid {pid})" in due.stdout, due.stdout
+        assert _chiamati(tmp_path).count("npm run dev") == 1, "un secondo processo"
+
+        giu = _run("fcn-down.sh", bin_, tmp_path, args=("--stop",))
+        assert giu.returncode == 0, giu.stderr
+        assert f"dev server spento (pid {pid}), prima dei container" in giu.stdout
+        assert not pf.exists()
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError(f"il dev server (pid {pid}) è ancora vivo")
+    finally:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+@needs_bash
+def test_UN_VITE_LANCIATO_A_MANO_non_si_raddoppia_e_non_si_spegne(tmp_path):
+    ems = _emstudio_finto(tmp_path)
+    (tmp_path / "vite-su").touch()                    # la 5173 risponde già
+    bin_ = _finti(tmp_path, docker_ok=True, plugin=True, autonomo=False)
+    _uname(bin_, "linux")
+    _npm_finto(bin_, tmp_path)
+    _curl_finto(bin_, tmp_path)
+    done = _run("fcn-up.sh", bin_, tmp_path, extra_env={"SG_STUDIO_DIR": str(ems)})
+    assert done.returncode == 0, done.stderr
+    assert "non ho acceso io: non ne avvio un secondo" in done.stdout, done.stdout
+    assert "npm run dev" not in _chiamati(tmp_path)
+    assert "/em/studio/" in done.stdout          # risponde: la riga dell'URL c'è
+    giu = _run("fcn-down.sh", bin_, tmp_path, args=("--stop",))
+    assert "EMStudio" not in giu.stdout, "ha toccato un processo non suo"
+
+
+@needs_bash
 def test_NO_STUDIO_non_lo_accende(tmp_path):
     ems = _emstudio_finto(tmp_path)
     bin_ = _finti(tmp_path, docker_ok=True, plugin=True, autonomo=False)
