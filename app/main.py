@@ -880,6 +880,9 @@ def health() -> Health:
             # inoltra e tiene i frame `layout` (Matrix e interno dei gruppi);
             # ogni stanza lo dice anche in `host_info.layout`
             "room_layout": True,
+            # …e i gruppi chiusi con loro (`folded`, 23 ott 2026: aprire un
+            # gruppo lo apre a tutti), detto in `host_info.layout_folded`
+            "room_layout_folded": True,
         },
         # read at call time: the constant is defined with the ops door below
         limits={"ops_batch_max": OPS_BATCH_MAX,

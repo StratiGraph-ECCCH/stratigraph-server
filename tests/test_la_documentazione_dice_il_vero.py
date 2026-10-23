@@ -106,7 +106,8 @@ def test_le_capacita_annunciate_corrispondono_a_rotte_che_esistono(spec):
              "room_ops_feed": ("GET", "/v1/rooms/{room_id}/ops")}
     #: …e quelle del SOCKET, che OpenAPI non descrive (23 ott 2026: i frame
     #: `layout`): legate alla rotta websocket, che deve esserci
-    del_socket = {"room_layout": "/v1/rooms/{room_id}/ws"}
+    del_socket = {"room_layout": "/v1/rooms/{room_id}/ws",
+                  "room_layout_folded": "/v1/rooms/{room_id}/ws"}
     capacita = TestClient(main.app).get("/v1/health").json()["capabilities"]
     assert set(capacita) == set(porta) | set(del_socket), \
         "una capacità nuova va legata a una rotta"

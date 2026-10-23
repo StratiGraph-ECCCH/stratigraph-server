@@ -54,6 +54,10 @@ _APPLY_TAKES_STUDY = "study" in inspect.signature(em.apply_op).parameters
 #: silently on the active graph, and a routing mistake became a write into the
 #: wrong graph.
 UNKNOWN_GRAPH = "unknown_graph"
+#: the group a VIEW makes for a unit's loose paradata (EMStudio's implicit
+#: paradata group): `implicit-pd:<unit id>`. Not a node of the document; a
+#: room keeps which of them are OPEN (`layout.open_implicit`), the rest closed
+IMPLICIT_VIEW_GROUP = "implicit-pd:"
 
 
 def unknown_graph_sentence(graph_id: str) -> str:
@@ -581,7 +585,8 @@ class Room:
 
     def apply_layout(self, graph_id: Optional[str], space: str,
                      positions: Dict[str, Any], *, whole: bool = False,
-                     swimlanes: Any = None, canvas: Any = None) -> Dict[str, Any]:
+                     swimlanes: Any = None, canvas: Any = None,
+                     folded: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Scrivere le posizioni di UNO spazio nel layout di un grafo.
 
         `space` vuoto (`MATRIX_SPACE`) è la Matrix, `layout.positions`; un id di
@@ -594,6 +599,16 @@ class Room:
         che non esistono è un layout che nessuno sa più leggere. Dentro un
         gruppo un'istanza ha l'id `<maestro>##<gruppo>` (EMStudio,
         `paradata-view.instanceId`): conta il maestro.
+
+        **I gruppi chiusi** (23 ott 2026, E.D.: tutto condiviso): `folded` è
+        `{id: true | false}`, chiuso o aperto, accanto alle posizioni. Un
+        gruppo del grafo va in `layout.folded_groups` (la lista che un em.json
+        già tiene, ordinata); il gruppo che una vista fa per i paradati sciolti
+        di un'unità (EMStudio, `implicit-pd:<id dell'unità>`: non è un nodo del
+        documento, ed è CHIUSO se nessuno lo apre) va in
+        `layout.open_implicit`, la lista degli aperti. Un id che il grafo non
+        ha è scartato e detto, come per le posizioni. Aprire un gruppo lo apre
+        a tutti: la stanza tiene l'ultimo che arriva.
         """
         target = self._section_id(graph_id)
         if graph_id and target is None:
@@ -610,6 +625,14 @@ class Room:
                     "graph_id": str(section.get("graph_id") or target)}
         accepted: Dict[str, Any] = {}
         dropped: List[str] = []
+        folds: Dict[str, bool] = {}
+        for key, closed in (folded or {}).items():
+            key = str(key)
+            node = key[len(IMPLICIT_VIEW_GROUP):] if key.startswith(IMPLICIT_VIEW_GROUP) else key
+            if node not in nodes or not isinstance(closed, bool):
+                dropped.append(key)
+                continue
+            folds[key] = closed
         for key, rect in (positions or {}).items():
             key = str(key)
             if key.split("##", 1)[0] not in nodes:
@@ -626,6 +649,33 @@ class Room:
         layout = section.setdefault("layout", {})
         if not isinstance(layout, dict):
             layout = section["layout"] = {}
+        if folds:
+            # DA DOVE SONO PARTITI i gruppi (`folded_from`), come `moved_from`
+            # per le posizioni: ogni schermo calcola la vista della Matrix alla
+            # porta su ciò che disegna, e un gruppo chiuso non si disegna. Chi
+            # entra dopo la calcola su QUESTA base, come l'avevano gli altri, e
+            # poi chiude e apre come loro. Misurato da EMStudio sul GT16: con la
+            # vista calcolata sui gruppi già chiusi, 182 nodi su 1188 finivano
+            # altrove. Un layout intero ricomincia da capo.
+            if "folded_from" not in layout:
+                layout["folded_from"] = {
+                    "folded_groups": sorted(layout.get("folded_groups") or []),
+                    "open_implicit": sorted(layout.get("open_implicit") or [])}
+            closed_now = set(layout.get("folded_groups") or [])
+            open_now = set(layout.get("open_implicit") or [])
+            for key, closed in folds.items():
+                if key.startswith(IMPLICIT_VIEW_GROUP):
+                    (open_now.discard if closed else open_now.add)(key)
+                else:
+                    (closed_now.add if closed else closed_now.discard)(key)
+            layout["folded_groups"] = sorted(closed_now)
+            if open_now:
+                layout["open_implicit"] = sorted(open_now)
+            else:
+                layout.pop("open_implicit", None)
+        if not accepted and not whole and not folds:
+            return {"applied": False, "positions": {}, "folded": {}, "dropped": dropped,
+                    "graph_id": str(section.get("graph_id") or target)}
         if space:
             spaces = layout.setdefault("group_spaces", {})
             own = {} if whole else dict(spaces.get(space) or {})
@@ -651,6 +701,7 @@ class Room:
             # finivano altrove. Un layout intero ricomincia da capo.
             if whole:
                 layout.pop("moved_from", None)
+                layout.pop("folded_from", None)
             else:
                 moved = layout.setdefault("moved_from", {})
                 before = layout.get("positions") or {}
@@ -662,14 +713,14 @@ class Room:
                 layout["swimlanes"] = swimlanes
             if whole and isinstance(canvas, dict):
                 layout["canvas"] = canvas
-        if accepted or whole:
+        if accepted or whole or folds:
             # LAVORO NON TENUTO, come un'operazione: la rete dei salvataggi
             # (`keeping.py`) guarda questo numero, e una posizione che nessuno
             # salva sparisce al riavvio come una scheda.
             self.unsaved += 1
             self.touch()
-        return {"applied": bool(accepted or whole), "positions": accepted,
-                "dropped": dropped,
+        return {"applied": bool(accepted or whole or folds), "positions": accepted,
+                "folded": folds, "dropped": dropped,
                 "graph_id": str(section.get("graph_id") or target)}
 
     def _section_id(self, graph_id: Optional[str]) -> Optional[str]:

@@ -88,10 +88,12 @@ _WRITING_VERBS = frozenset({"op", "request_save", "command", "layout"})
 
 # ── LE POSIZIONI (23 ott 2026) ───────────────────────────────────────────────
 #
-# Un frame `layout` è `{space, positions, whole?, swimlanes?, canvas?}`, con il
-# grafo nella busta come per un'op. `space` vuoto è la Matrix
+# Un frame `layout` è `{space, positions, whole?, swimlanes?, canvas?, folded?}`,
+# con il grafo nella busta come per un'op. `space` vuoto è la Matrix
 # (`layout.positions`), un id di gruppo è l'interno di quel gruppo
-# (`layout.group_spaces`). Non passa da s3Dgraphy: vedi `Room.apply_layout`.
+# (`layout.group_spaces`). `folded` (23 ott 2026, E.D.: tutto condiviso) è
+# `{id del gruppo: chiuso?}`: aprire un gruppo lo apre a tutti; un frame può
+# portare solo quello. Non passa da s3Dgraphy: vedi `Room.apply_layout`.
 
 #: lo spazio che vuol dire «la Matrix»: un gruppo con id vuoto non esiste
 MATRIX_SPACE = ""
@@ -560,6 +562,9 @@ async def room_socket(websocket: WebSocket, room_id: str,
                             # mai indovinato: un client senza questa parola
                             # tiene le posizioni sul suo schermo.
                             "layout": True,
+                            # …e con le posizioni lo stato aperto/chiuso dei
+                            # gruppi (`folded` nel frame `layout`)
+                            "layout_folded": True,
                             "layout_limits": _layout_limits(),
                             "accepts_commands": False}, source="em-server"))
     await _send(websocket, envelope("snapshot", {
@@ -828,6 +833,7 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
             "tool": HOST_TOOL, "file": room.room_id, "room": room.room_id,
             "connection_id": member.connection_id,
             "layout": True,
+            "layout_folded": True,
             "keeping": _keeping_info(room)}, source="em-server"))
         if not member.saves_itself:
             # Un client che si è appena tolto la responsabilità può avere
@@ -888,17 +894,23 @@ async def _layout(room, member, websocket: WebSocket, message: Dict[str, Any],
     member.layout_times.append(now)
     space = payload.get("space")
     positions = payload.get("positions")
-    if not isinstance(space, str) or not isinstance(positions, dict):
+    folded = payload.get("folded")
+    # a frame that only opens or closes groups may come without positions
+    if positions is None and isinstance(folded, dict):
+        positions = {}
+    if not isinstance(space, str) or not isinstance(positions, dict) \
+            or (folded is not None and not isinstance(folded, dict)):
         await _layout_refused(websocket, "layout_malformed",
                               "a layout frame is {space: string, positions: "
-                              "{id: {x, y, w, h} | null}}")
+                              "{id: {x, y, w, h} | null}, folded?: {id: bool}}")
         return
     whole = bool(payload.get("whole"))
     graph_id = message.get("graph_id")
     async with room.lock:
         result = room.apply_layout(graph_id, space, positions, whole=whole,
                                    swimlanes=payload.get("swimlanes"),
-                                   canvas=payload.get("canvas"))
+                                   canvas=payload.get("canvas"),
+                                   folded=folded)
     if result.get("code"):
         await _layout_refused(websocket, result["code"], result.get("reason", ""),
                               **{k: result[k] for k in ("graph_id", "space")
@@ -908,6 +920,8 @@ async def _layout(room, member, websocket: WebSocket, message: Dict[str, Any],
         body: Dict[str, Any] = {"space": space, "positions": result["positions"],
                                 "connection_id": member.connection_id,
                                 "author": author}
+        if result.get("folded"):
+            body["folded"] = result["folded"]
         if whole:
             body["whole"] = True
             for key in ("swimlanes", "canvas"):

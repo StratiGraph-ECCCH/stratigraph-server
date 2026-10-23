@@ -26,6 +26,20 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
 
 ### Aggiunto
 
+- **I gruppi chiusi viaggiano nelle stanze** (MICRO «globo, interazione» p.5,
+  decisione di E.D., 23 ott 2026: tutto condiviso). Il frame `layout` porta
+  anche `folded: {id: chiuso?}` (può portare solo quello): un gruppo del grafo
+  va in `graphs.<id>.layout.folded_groups`, il gruppo che la vista di EMStudio
+  fa per i paradati sciolti di un'unità (`implicit-pd:<unità>`, chiuso se
+  nessuno lo apre) in `layout.open_implicit`. Si conserva come le posizioni
+  (istantanea, REST, disco), passa agli altri, un id che il grafo non ha è
+  scartato e detto, un lettore riceve `denied`. **Aprire un gruppo lo apre a
+  tutti.** Come `moved_from` per le posizioni, la stanza ricorda in
+  `layout.folded_from` i gruppi com'erano prima del primo cambiamento: chi entra
+  dopo calcola la vista della Matrix su quella base, poi chiude e apre come gli
+  altri (un layout intero la azzera). Detto in `host_info.layout_folded` e in
+  `capabilities.room_layout_folded`. 10 test (`test_i_gruppi_chiusi_della_stanza.py`).
+
 - **Le posizioni viaggiano nelle stanze** (MICRO «stanza, posizioni condivise»,
   decisioni di E.D., 23 ott 2026: anche quelle della Matrix sono della stanza).
   Prima il relay applicava le cinque operazioni del grafo e lasciava cadere un
