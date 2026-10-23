@@ -876,9 +876,16 @@ def health() -> Health:
             "room_document_read": True,
             "room_ops_feed": oplog_module.journal_for(
                 snapshot_store(), "esempio") is not None,
+            # LE POSIZIONI VIAGGIANO NELLE STANZE (23 ott 2026): il socket
+            # inoltra e tiene i frame `layout` (Matrix e interno dei gruppi);
+            # ogni stanza lo dice anche in `host_info.layout`
+            "room_layout": True,
         },
         # read at call time: the constant is defined with the ops door below
-        limits={"ops_batch_max": OPS_BATCH_MAX},
+        limits={"ops_batch_max": OPS_BATCH_MAX,
+                "layout_frame_max_bytes": _ws._layout_limits()["frame_max_bytes"],
+                "layout_frames_per_window": _ws._layout_limits()["frames_per_window"],
+                "layout_window_seconds": int(_ws._layout_limits()["window_seconds"])},
         auth=authenticator.settings.describe(),
         profile=_profile(),
         custody=(_PERSONAL_CUSTODY if _profile() == "personal" else ""),

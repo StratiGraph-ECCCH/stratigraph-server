@@ -104,10 +104,17 @@ def test_le_capacita_annunciate_corrispondono_a_rotte_che_esistono(spec):
              "resolve_authority": ("GET", "/v1/resolve-authority"),
              "room_document_read": ("GET", "/v1/rooms/{room_id}/document"),
              "room_ops_feed": ("GET", "/v1/rooms/{room_id}/ops")}
+    #: …e quelle del SOCKET, che OpenAPI non descrive (23 ott 2026: i frame
+    #: `layout`): legate alla rotta websocket, che deve esserci
+    del_socket = {"room_layout": "/v1/rooms/{room_id}/ws"}
     capacita = TestClient(main.app).get("/v1/health").json()["capabilities"]
-    assert set(capacita) == set(porta), "una capacità nuova va legata a una rotta"
+    assert set(capacita) == set(porta) | set(del_socket), \
+        "una capacità nuova va legata a una rotta"
     in_openapi = {(m, p) for m, p, _op in _operations(spec)}
-    assert {porta[c] for c in capacita} <= in_openapi
+    assert {porta[c] for c in capacita if c in porta} <= in_openapi
+    socket = {r.path for r in main.ws_router.routes
+              if isinstance(r, APIWebSocketRoute)}
+    assert set(del_socket.values()) <= socket
 
 
 def test_il_socket_che_OpenAPI_non_descrive_e_nominato_nella_descrizione(spec):

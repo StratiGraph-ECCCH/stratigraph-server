@@ -26,6 +26,31 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
 
 ### Aggiunto
 
+- **Le posizioni viaggiano nelle stanze** (MICRO «stanza, posizioni condivise»,
+  decisioni di E.D., 23 ott 2026: anche quelle della Matrix sono della stanza).
+  Prima il relay applicava le cinque operazioni del grafo e lasciava cadere un
+  frame che non conosceva.
+  - Frame `layout` sul socket, `{space, positions, whole?, swimlanes?, canvas?}`
+    con il grafo nella busta: `space` vuoto è la Matrix (`layout.positions`), un
+    id di gruppo è il suo interno (`layout.group_spaces`); `null` toglie una
+    voce; `whole` sostituisce lo spazio («Ricalcola layout»).
+  - Autorizzato come i verbi che scrivono (un lettore riceve `denied`),
+    inoltrato agli altri con `author` e `connection_id`, **senza** passare da
+    `em.apply_op`: vince l'ultimo arrivato. Tenuto in `graphs.<id>.layout` del
+    documento della stanza, conta come lavoro da salvare (`unsaved`), quindi
+    arriva nell'istantanea del JOIN (anche prima di un replay), nella lettura
+    REST e sul disco. Non va nel registro delle operazioni.
+  - `layout.moved_from`: da dove sono partiti i nodi della Matrix mossi dopo
+    l'ultimo layout intero (`null` = non avevano posto). Chi entra dopo ci
+    ricostruisce la base su cui gli altri hanno calcolato la loro vista, e poi
+    sposta quei nodi; un layout intero lo azzera.
+  - Limiti: 640 KB per frame (`layout_too_large`), 240 frame in 10 s per
+    connessione (`layout_too_fast`), solo nodi del grafo (le voci sconosciute
+    scartate e dette in `layout_result.dropped`; un gruppo che non c'è è
+    `unknown_space`).
+  - Dichiarato: `host_info.layout` (con `layout_limits`) e `/v1/health`
+    `capabilities.room_layout`, `limits.layout_*`.
+
 - **Cancellare una stanza, e tenere i suoi asset** (MICRO «spazio 3D 2»,
   Parte 6, decisioni di E.D., 16 ott 2026). L'API del nodo non aveva nessuna
   operazione per cancellare una stanza.

@@ -421,7 +421,8 @@ def test_the_health_says_the_cap_before_the_413(client, monkeypatch):
         assert answer.status_code == 200, answer.text
         assert answer.json()["limits"]["ops_batch_max"] == main_module.OPS_BATCH_MAX
     monkeypatch.setattr(main_module, "OPS_BATCH_MAX", 2)
-    assert client.get("/v1/health").json()["limits"] == {"ops_batch_max": 2}
+    # (23 ott 2026: `limits` porta anche quelli del frame `layout`)
+    assert client.get("/v1/health").json()["limits"]["ops_batch_max"] == 2
 
 
 def test_an_empty_delivery_is_fine(client, store, whoever):

@@ -136,6 +136,9 @@ class Member:
     #: sarebbe traffico per un fatto già noto.
     last_seen: str = field(default_factory=now_iso)
     last_seen_mono: float = field(default_factory=presence.monotonic)
+    #: gli istanti (monotòni) degli ultimi frame `layout` di questa
+    #: connessione: il limite di frequenza (`ws.LAYOUT_FRAMES_PER_WINDOW`)
+    layout_times: List[float] = field(default_factory=list)
 
     def heard(self) -> None:
         """Un segno di vita. Una riga sola, chiamata da un posto solo."""
@@ -560,6 +563,114 @@ class Room:
         if result.get("applied"):
             self.touch()
         return result
+
+    # ── le posizioni (23 ott 2026) ───────────────────────────────────────────
+    #
+    # NON passano da `em.apply_op`, e non è una scorciatoia: una posizione non è
+    # un'asserzione sul grafo. Nessun orologio di campo, nessun tombstone,
+    # nessuna fusione — vince l'ultimo arrivato, che per un posto sulla tela è
+    # la regola giusta (E.D., 23 ott: le posizioni della Matrix sono della
+    # stanza, non di chi guarda). Stanno dove le tiene un em.json,
+    # `graphs.<id>.layout` (`s3dgraphy.container.LAYOUT_KEY`): `positions` per la
+    # Matrix, `group_spaces[<gruppo>]` per l'interno di un gruppo.
+    #
+    # E NON VANNO NEL REGISTRO. Il registro è ciò che si rigioca con
+    # `em.apply_op`, e una riga di posizioni lì sarebbe un'operazione che
+    # nessuna libreria sa applicare. Chi entra dopo le trova nell'istantanea,
+    # che parte sempre prima del replay: il documento le porta già.
+
+    def apply_layout(self, graph_id: Optional[str], space: str,
+                     positions: Dict[str, Any], *, whole: bool = False,
+                     swimlanes: Any = None, canvas: Any = None) -> Dict[str, Any]:
+        """Scrivere le posizioni di UNO spazio nel layout di un grafo.
+
+        `space` vuoto (`MATRIX_SPACE`) è la Matrix, `layout.positions`; un id di
+        gruppo è il suo `layout.group_spaces[space]`. Una voce `None` toglie la
+        posizione (torna la regola). `whole` sostituisce lo spazio intero: è
+        «Ricalcola layout», e con la Matrix può portare `swimlanes` e `canvas`.
+
+        **Solo nodi che il grafo ha.** Una voce per un id sconosciuto è
+        scartata e detta (`dropped`), non scritta: un layout che nomina nodi
+        che non esistono è un layout che nessuno sa più leggere. Dentro un
+        gruppo un'istanza ha l'id `<maestro>##<gruppo>` (EMStudio,
+        `paradata-view.instanceId`): conta il maestro.
+        """
+        target = self._section_id(graph_id)
+        if graph_id and target is None:
+            return {"applied": False, "reason": unknown_graph_sentence(graph_id),
+                    "code": UNKNOWN_GRAPH, "graph_id": graph_id}
+        section = (self.document.get("graphs") or {}).get(target) if target else None
+        if section is None:
+            return {"applied": False, "reason": "no such graph in this room"}
+        nodes = {str(n.get("id")) for n in section.get("nodes") or []
+                 if isinstance(n, dict)}
+        if space and space not in nodes:
+            return {"applied": False, "code": "unknown_space", "space": space,
+                    "reason": f"the group {space!r} is not in this graph",
+                    "graph_id": str(section.get("graph_id") or target)}
+        accepted: Dict[str, Any] = {}
+        dropped: List[str] = []
+        for key, rect in (positions or {}).items():
+            key = str(key)
+            if key.split("##", 1)[0] not in nodes:
+                dropped.append(key)
+                continue
+            if rect is None:
+                accepted[key] = None
+                continue
+            clean = _rect(rect)
+            if clean is None:
+                dropped.append(key)
+                continue
+            accepted[key] = clean
+        layout = section.setdefault("layout", {})
+        if not isinstance(layout, dict):
+            layout = section["layout"] = {}
+        if space:
+            spaces = layout.setdefault("group_spaces", {})
+            own = {} if whole else dict(spaces.get(space) or {})
+        else:
+            own = {} if whole else dict(layout.get("positions") or {})
+        for key, rect in accepted.items():
+            if rect is None:
+                own.pop(key, None)
+            else:
+                own[key] = rect
+        if space:
+            if own:
+                spaces[space] = own
+            else:
+                spaces.pop(space, None)
+        else:
+            # DA DOVE SONO PARTITI i nodi della Matrix mossi dopo l'ultimo
+            # layout intero (`moved_from`, `None` = non aveva posto). Ogni
+            # schermo disegna la Matrix con una vista calcolata sull'archivio:
+            # chi entra dopo la calcola su QUESTA base, come l'avevano gli
+            # altri, e poi sposta quei nodi. Misurato da EMStudio sul GT16: con
+            # la vista calcolata sull'archivio già spostato, 7 nodi su 1188
+            # finivano altrove. Un layout intero ricomincia da capo.
+            if whole:
+                layout.pop("moved_from", None)
+            else:
+                moved = layout.setdefault("moved_from", {})
+                before = layout.get("positions") or {}
+                for key in accepted:
+                    if key not in moved:
+                        moved[key] = before.get(key)
+            layout["positions"] = own
+            if whole and isinstance(swimlanes, list):
+                layout["swimlanes"] = swimlanes
+            if whole and isinstance(canvas, dict):
+                layout["canvas"] = canvas
+        if accepted or whole:
+            # LAVORO NON TENUTO, come un'operazione: la rete dei salvataggi
+            # (`keeping.py`) guarda questo numero, e una posizione che nessuno
+            # salva sparisce al riavvio come una scheda.
+            self.unsaved += 1
+            self.touch()
+        return {"applied": bool(accepted or whole), "positions": accepted,
+                "dropped": dropped,
+                "graph_id": str(section.get("graph_id") or target)}
 
     def _section_id(self, graph_id: Optional[str]) -> Optional[str]:
         """The key of the section an operation goes to, or None.
@@ -1106,6 +1217,21 @@ class RoomRegistry:
 
     def rooms(self) -> List[str]:
         return sorted(self._rooms)
+
+
+def _rect(raw: Any) -> Optional[Dict[str, float]]:
+    """`{x, y, w, h}` numeri finiti, o None. Nient'altro entra nel layout."""
+    if not isinstance(raw, dict):
+        return None
+    out: Dict[str, float] = {}
+    for key in ("x", "y", "w", "h"):
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+        out[key] = value
+    return out
 
 
 def _empty_container(room_id: str, title: str = "") -> Dict[str, Any]:

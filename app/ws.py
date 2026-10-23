@@ -82,7 +82,28 @@ HOST_TOOL = "StratiGraph Server (relay)"
 #: and a viewer whose cursor nobody could see would be a ghost in the room.
 #: `request_snapshot` is a read — asking for the document again is what a
 #: viewer does when it loses its place.
-_WRITING_VERBS = frozenset({"op", "request_save", "command"})
+#: `layout` too (23 Oct 2026): moving a node changes what everybody in the
+#: room sees, so a viewer does not move things.
+_WRITING_VERBS = frozenset({"op", "request_save", "command", "layout"})
+
+# ── LE POSIZIONI (23 ott 2026) ───────────────────────────────────────────────
+#
+# Un frame `layout` è `{space, positions, whole?, swimlanes?, canvas?}`, con il
+# grafo nella busta come per un'op. `space` vuoto è la Matrix
+# (`layout.positions`), un id di gruppo è l'interno di quel gruppo
+# (`layout.group_spaces`). Non passa da s3Dgraphy: vedi `Room.apply_layout`.
+
+#: lo spazio che vuol dire «la Matrix»: un gruppo con id vuoto non esiste
+MATRIX_SPACE = ""
+#: il frame più grande che il relay accetta, in byte del corpo. Una Matrix
+#: intera di 1845 nodi («Ricalcola layout») è circa 150 KB: il quadruplo basta.
+LAYOUT_FRAME_MAX_BYTES = 640 * 1024
+#: quanti frame `layout` una connessione può mandare in una finestra. EMStudio
+#: ne manda uno al rilascio di un trascinamento (non a ogni movimento) e uno per
+#: spazio cambiato; un «Layout» che ridispone tutti i gruppi ne manda uno per
+#: gruppo, quindi la soglia è larga: ferma un client impazzito, non un gesto.
+LAYOUT_FRAMES_PER_WINDOW = 240
+LAYOUT_WINDOW_SECONDS = 10.0
 
 #: I verbi per cui un token SCADUTO chiude la sessione. Le scritture, e la
 #: lettura del documento intero: una stanza sotto embargo non si rilegge con
@@ -534,6 +555,12 @@ async def room_socket(websocket: WebSocket, room_id: str,
                             # ritmo giusto invece di inventarselo, e una soglia
                             # che nessuno può leggere è una politica segreta.
                             "presence": _beat_info(),
+                            # LE POSIZIONI VIAGGIANO (23 ott 2026): questa
+                            # stanza inoltra e tiene i frame `layout`. Detto,
+                            # mai indovinato: un client senza questa parola
+                            # tiene le posizioni sul suo schermo.
+                            "layout": True,
+                            "layout_limits": _layout_limits(),
                             "accepts_commands": False}, source="em-server"))
     await _send(websocket, envelope("snapshot", {
                             "doc": room.document,
@@ -745,6 +772,10 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
         await KEEPER.kept(room)
         return
 
+    if kind == "layout":
+        await _layout(room, member, websocket, message, payload, author)
+        return
+
     if kind == "select":
         # awareness, soft and never a lock (design P4 §6)
         ids = payload.get("node_ids") or ([payload["node_id"]]
@@ -796,6 +827,7 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
         await _send(websocket, envelope("host_info", {
             "tool": HOST_TOOL, "file": room.room_id, "room": room.room_id,
             "connection_id": member.connection_id,
+            "layout": True,
             "keeping": _keeping_info(room)}, source="em-server"))
         if not member.saves_itself:
             # Un client che si è appena tolto la responsabilità può avere
@@ -809,6 +841,87 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
         # which is the failure direction we want.
         member.watermark = str(payload.get("ts") or member.watermark or now_iso())
         return
+
+
+def _layout_limits() -> Dict[str, Any]:
+    """I limiti del frame `layout`, detti alla porta e in `/v1/health`."""
+    return {"frame_max_bytes": LAYOUT_FRAME_MAX_BYTES,
+            "frames_per_window": LAYOUT_FRAMES_PER_WINDOW,
+            "window_seconds": LAYOUT_WINDOW_SECONDS}
+
+
+async def _layout_refused(websocket: WebSocket, code: str, reason: str,
+                          **extra: Any) -> None:
+    await _send(websocket, envelope("layout_result", {
+        "applied": False, "code": code, "reason": reason, **extra},
+        source="em-server"))
+
+
+async def _layout(room, member, websocket: WebSocket, message: Dict[str, Any],
+                  payload: Dict[str, Any], author: Optional[str]) -> None:
+    """Un frame `layout`: tenuto nel documento della stanza e mandato agli altri.
+
+    Il cancello dei ruoli è già passato (`_WRITING_VERBS`). Qui i limiti: la
+    misura del frame, la frequenza, la forma. **Nessuna risposta quando va
+    tutto bene** — è un trascinamento, non una scheda, e un `ack` per ogni
+    rilascio sarebbe traffico per niente; un `layout_result` quando c'è
+    qualcosa da dire (un rifiuto, voci scartate).
+    """
+    size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    if size > LAYOUT_FRAME_MAX_BYTES:
+        await _layout_refused(websocket, "layout_too_large",
+                              f"a layout frame of {size} bytes is over this "
+                              f"room's {LAYOUT_FRAME_MAX_BYTES}",
+                              bytes=size, limit=LAYOUT_FRAME_MAX_BYTES)
+        return
+    now = time.monotonic()
+    member.layout_times = [t for t in member.layout_times
+                           if now - t < LAYOUT_WINDOW_SECONDS]
+    if len(member.layout_times) >= LAYOUT_FRAMES_PER_WINDOW:
+        await _layout_refused(websocket, "layout_too_fast",
+                              f"more than {LAYOUT_FRAMES_PER_WINDOW} layout "
+                              f"frames in {LAYOUT_WINDOW_SECONDS:g} s: send one "
+                              f"when a drag is released, not on every move",
+                              limit=LAYOUT_FRAMES_PER_WINDOW,
+                              window_seconds=LAYOUT_WINDOW_SECONDS)
+        return
+    member.layout_times.append(now)
+    space = payload.get("space")
+    positions = payload.get("positions")
+    if not isinstance(space, str) or not isinstance(positions, dict):
+        await _layout_refused(websocket, "layout_malformed",
+                              "a layout frame is {space: string, positions: "
+                              "{id: {x, y, w, h} | null}}")
+        return
+    whole = bool(payload.get("whole"))
+    graph_id = message.get("graph_id")
+    async with room.lock:
+        result = room.apply_layout(graph_id, space, positions, whole=whole,
+                                   swimlanes=payload.get("swimlanes"),
+                                   canvas=payload.get("canvas"))
+    if result.get("code"):
+        await _layout_refused(websocket, result["code"], result.get("reason", ""),
+                              **{k: result[k] for k in ("graph_id", "space")
+                                 if result.get(k)})
+        return
+    if result.get("applied"):
+        body: Dict[str, Any] = {"space": space, "positions": result["positions"],
+                                "connection_id": member.connection_id,
+                                "author": author}
+        if whole:
+            body["whole"] = True
+            for key in ("swimlanes", "canvas"):
+                if payload.get(key) is not None and not space:
+                    body[key] = payload[key]
+        await _fanout(room, envelope("layout", body, source="em-server",
+                                     graph_id=result.get("graph_id")),
+                      skip=member.connection_id)
+    if result.get("dropped"):
+        await _send(websocket, envelope("layout_result", {
+            "applied": bool(result.get("applied")), "space": space,
+            "dropped": result["dropped"], "graph_id": result.get("graph_id"),
+            "reason": "not nodes of this graph"}, source="em-server"))
+    await KEEPER.kept(room)
 
 
 # ── THE OTHER TRANSPORT · apply, KEEP, and ANNOUNCE, in one place ────────────
