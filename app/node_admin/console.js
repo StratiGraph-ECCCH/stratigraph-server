@@ -84,8 +84,8 @@ export const api = {
     // token, and the token is the one thing modules must not hold.
     return request("PUT", path, body);
   },
-  async del(path) {
-    return request("DELETE", path);
+  async del(path, body) {
+    return request("DELETE", path, body);
   },
 };
 

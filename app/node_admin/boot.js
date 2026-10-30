@@ -12,7 +12,11 @@
  */
 import { boot } from "./console.js";
 
-import "./modules/users-rooms.js";
+// the order of the nav, as the desk of 30 October 2026 drew it
+import "./modules/rooms.js";
+import "./modules/people.js";
+import "./modules/groups.js";
+import "./modules/permissions.js";
 import "./modules/storage.js";
 import "./modules/health.js";
 

@@ -201,14 +201,16 @@ def test_whoami_con_ORCID(campo, client):  # noqa: F811
     campo({"orcid": A, "name": "Persona A", "em_idp": "orcid", "em_auth_reported": True})
     assert client.get("/v1/whoami").json() == {
         "orcid": A, "name": "Persona A", "enforcing": True,
-        "auth_mode": "orcid", "attested_by": None, "accredited": True}
+        "auth_mode": "orcid", "attested_by": None, "accredited": True,
+        "profile": "user", "may_create": True}
 
 
 def test_whoami_con_la_password_del_nodo(campo, client):  # noqa: F811
     campo({"orcid": A, "name": "Persona A", "em_auth_reported": True})
     assert client.get("/v1/whoami").json() == {
         "orcid": A, "name": "Persona A", "enforcing": True,
-        "auth_mode": "node_password", "attested_by": "fcn-prova", "accredited": True}
+        "auth_mode": "node_password", "attested_by": "fcn-prova", "accredited": True,
+        "profile": "user", "may_create": True}
 
 
 def test_il_garante_senza_nome_e_l_autorita_dell_indirizzo_pubblico(

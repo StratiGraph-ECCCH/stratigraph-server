@@ -79,6 +79,7 @@ const STRINGS = {
     "rooms.create": "Create room",
     "rooms.needsName": "A room needs a name.",
     "rooms.created": "Created — you are its owner.",
+    "rooms.needsEditor": "Creating a room needs the node editor profile: ask whoever looks after this node. You can still work in the rooms where you have a role.",
     "rooms.missingRefs": "container not in the store: {refs}",
     "rooms.verb": "enter",
     // ── WHERE TO GO · the vestibule's four verbs ─────────────────────────────
@@ -297,6 +298,7 @@ const STRINGS = {
     "rooms.create": "Crea stanza",
     "rooms.needsName": "Una stanza ha bisogno di un nome.",
     "rooms.created": "Creata — ne sei il proprietario.",
+    "rooms.needsEditor": "Per creare una stanza serve il profilo di editor di nodo: chiedilo a chi amministra questo nodo. Intanto lavori nelle stanze dove hai un ruolo.",
     "rooms.missingRefs": "container non nello store: {refs}",
     "rooms.verb": "entra",
     "face.door": "Questo nodo",

@@ -17,6 +17,7 @@
  * console that grows actions before somebody asks grows the wrong ones.
  */
 import { api, escapeHtml, register, say } from "../console.js";
+import { L } from "../kit.js";
 
 /** The four states, and what each one means to somebody looking at it. Colour is
  *  carried by a class so the palette stays in `console.css` (one theme, one
@@ -127,4 +128,4 @@ function versions(versions) {
   return box;
 }
 
-register({ id: "health", title: "Node Health", render });
+register({ id: "health", title: L("Salute del nodo", "Node health"), render });

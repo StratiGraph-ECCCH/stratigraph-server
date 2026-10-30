@@ -1740,7 +1740,13 @@ async function enter(rooms) {
   // (the listing answered) is the same condition. If a gate is ever added, the
   // right shape is a field on `/v1/whoami`, not a guess here: a page that
   // decided for itself would be a page you can talk out of it.
-  if ($("create-row")) $("create-row").hidden = false;
+  // …AND THE GATE CAME (30 Oct 2026): creating needs the node editor profile,
+  // and `/v1/whoami` says `may_create` — the field this comment asked for.
+  if ($("create-row")) $("create-row").hidden = !(me && me.may_create !== false);
+  if ($("create-not") && me && me.may_create === false) {
+    $("create-not").hidden = false;
+    $("create-not").textContent = t("rooms.needsEditor");
+  }
   // A STANZA NELL'INDIRIZZO → il pannello di QUELLA stanza.
   //
   // `/em/work/?room=<id>` is the stable per-room address the design note's

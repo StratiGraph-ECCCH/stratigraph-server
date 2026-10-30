@@ -3686,6 +3686,8 @@ class RoomOut(BaseModel):
     #: PROJECTED from the ACL. Not stored here — see the note above.
     owner: Optional[str] = None
     members: List[MemberOut] = Field(default_factory=list)
+    #: group → role in this room (a team's grant), projected like the members
+    groups: Dict[str, str] = Field(default_factory=dict)
     #: what the CALLER may do here, so a UI draws the right buttons without a
     #: second request
     your_role: Optional[str] = None
@@ -3713,6 +3715,8 @@ def _describe_room(descriptor: RoomDescriptor, *, role: Optional[Role] = None,
         created_by=descriptor.created_by, created_at=descriptor.created_at,
         archived_at=descriptor.archived_at, implicit=descriptor.implicit,
         owner=acl.owner, members=members,
+        groups={k: v.value for k, v in sorted(getattr(acl, "groups", {}).items())}
+        if with_members else {},
         your_role=getattr(role, "value", None),
         missing_refs=rooms().missing_refs(descriptor))
 
@@ -5504,6 +5508,14 @@ def node_rescue_room(room_id: str, body: OwnerIn, request: Request) -> Members:
     return _members_view(room_id, acl, Role.OWNER)
 
 
+@v1.get("/admin/log", summary="What the console did, and who did it (operators)", tags=["node"])
+def node_log(request: Request, limit: int = 100) -> List[Dict[str, Any]]:
+    """The node's log, newest last: people added, changed and taken off,
+    passwords set (never the password), rooms rescued."""
+    _require_operator(request)
+    return people_module.read_log(max(1, min(limit, 1000)))
+
+
 @v1.get("/admin/rooms", summary="Every room on this node (operators)", response_model=List[RoomOut], tags=["node"])
 async def node_rooms(request: Request) -> List[RoomOut]:
     """EVERY room on this node — declared or not, empty or not, archived or not.
@@ -6352,6 +6364,11 @@ class WhoAmI(BaseModel):
     #: before it could get an offline password, so an attested identity for it
     #: may publish. False when the node keeps no list
     accredited: bool = False
+    #: the profile on the NODE (`app/people.py`, 30 Oct 2026): `super` ·
+    #: `creator` · `user` — and whether this caller may create rooms and groups,
+    #: so a page shows the create box exactly when the server would accept it
+    profile: str = "user"
+    may_create: bool = False
 
 
 @v1.get("/whoami", summary="Who this token says you are", response_model=WhoAmI, tags=["meta"])
@@ -6384,7 +6401,9 @@ def member_whoami(request: Request) -> WhoAmI:
         enforcing=bool(authenticator.settings.enforcing),
         auth_mode=mode,
         attested_by=(node_name() or None) if mode == "node_password" else None,
-        accredited=accredited)
+        accredited=accredited,
+        profile=people_module.profile_of(principal),
+        may_create=people_module.may_create(principal) is None)
 
 
 @v1.get("/rooms/{room_id}/open", summary="How to open this room in a tool, without typing anything", response_model=HandoffOut, tags=["rooms"])

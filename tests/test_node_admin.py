@@ -273,7 +273,7 @@ def test_the_console_is_served_and_is_a_shell_with_modules(client):
     # in a browser: the page said "Loading…" for ever and logged nothing)
     shell = client.get("/admin/console.js").text
     assert "./modules/" not in shell
-    for module in ("users-rooms.js", "storage.js"):
+    for module in ("rooms.js", "people.js", "groups.js", "permissions.js", "storage.js"):
         answer = client.get(f"/admin/modules/{module}")
         assert answer.status_code == 200, module
         assert 'from "../console.js"' in answer.text
