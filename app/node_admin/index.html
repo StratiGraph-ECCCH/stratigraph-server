@@ -24,11 +24,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StratiGraph Server · node console</title>
   <link rel="icon" href="../brand/logo/favicon-deep-charcoal.svg" type="image/svg+xml">
-  <meta name="theme-color" content="#F1EBE3" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#2E2D2C" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#F5F1E9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1E1C18" media="(prefers-color-scheme: dark)">
   <!-- The brand arrives THROUGH console.css (`@import "../brand/…"`), relative
        so it resolves the same at `/admin/` and behind a proxy at `/em/admin/`.
        Vendored and same-origin: see `sync-brand.sh`. -->
+  <script src="../brand/skin.js"></script>
   <link rel="stylesheet" href="./console.css">
 </head>
 <body>
@@ -41,6 +42,7 @@
     <!-- The language picker: one touch, each option in its own language. The
          console's CHROME follows the reader; its modules' diagnostics stay in
          the source language, because those are the node talking. -->
+    <select id="skin" class="lang"></select>
     <select id="lang" class="lang"></select>
     <span id="who" class="who">…</span>
     <button id="reload" class="ghost">↻</button>

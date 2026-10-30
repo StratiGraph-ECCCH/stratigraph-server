@@ -44,7 +44,9 @@ PURE_ACCENTS = ("--sg-info", "--sg-ok", "--sg-accent")
 def test_the_brand_is_vendored_here():
     assert (BRAND / "stratigraph-theme.css").is_file(), "run ./sync-brand.sh"
     fonts = sorted(p.name for p in (BRAND / "fonts").glob("*.woff2"))
-    assert len(fonts) == 8, fonts
+    # 8 guidebook faces + Sora and Comfortaa for the EM skins (30 Oct 2026)
+    assert len(fonts) == 10, fonts
+    assert (BRAND / "skins.css").is_file() and (BRAND / "skin.js").is_file(), "run ./sync-brand.sh"
     assert (BRAND / "logo" / "favicon-deep-charcoal.svg").is_file()
 
 
@@ -110,14 +112,18 @@ def test_neither_stylesheet_names_a_colour():
         assert not found, f"{name}: {found}"
 
 
+# The default skin's grounds (brand/skins.css, «em»): since 30 October 2026 the
+# node wears Extended Matrix by default, and the browser chrome follows it.
+EM_DEFAULT = {"#F5F1E9", "#1E1C18"}
+
+
 def test_the_only_hexes_in_a_page_are_the_two_theme_colors():
     """`<meta name=theme-color>` cannot take a CSS variable. Both values are the
-    guidebook's."""
+    default skin's grounds (light, dark)."""
     for name, (page, _sheet) in FACES.items():
         source = page.read_text(encoding="utf-8")
         found = {h.upper() for h in re.findall(r"#[0-9A-Fa-f]{3,8}\b", source)}
-        assert found <= {"#F1EBE3", "#2E2D2C"}, f"{name}: {found}"
-        assert found <= GUIDEBOOK
+        assert found <= EM_DEFAULT, f"{name}: {found}"
         for hexed in found:
             assert f'content="{hexed}"' in source, f"{name}: {hexed} is not a theme-color"
 

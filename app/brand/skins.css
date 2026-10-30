@@ -1,0 +1,81 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   THE SKINS — the same roles, three looks. Loaded right AFTER
+   `stratigraph-theme.css`, which stays the guidebook's own and untouched.
+
+   Decided by E.D. on 30 October 2026: the node and StratiField wear EXTENDED
+   MATRIX by default — the tools a person moves between (EMStudio, EM Tools,
+   the site) and these faces should feel like one place — and the StratiGraph
+   look stays one choice away, in the bar, for whoever prefers it.
+
+     em           EM ink and ochre on a paper ground; a warm earth dark.
+                  THE DEFAULT: no attribute set means this one.
+     em-cool      EM exactly as on extendedmatrix.org and in EMStudio.
+     stratigraph  the guidebook theme (WP1), i.e. nothing below applies.
+
+   `skin.js` sets `data-sg-skin` on <html> from the reader's choice. Only the
+   ROLES move, never a page: a skin is values, and every face reads roles.
+
+   Contrast, measured (WCAG ratio, ≥ 4.5 for text):
+     em light   text 14.0 · muted 6.9 · ochre ink 5.9 · white on accent 12.1
+     em dark    text 14.4 · muted 10.1 · ochre 8.8 · info 8.1 · ok 9.2
+     em-cool    text 16.6 · muted 7.3 · white on accent 12.1
+   Fonts: Sora and Comfortaa, SIL OFL 1.1 (fonts/OFL-*.txt), self-hosted for
+   the same offline reason as the guidebook's faces.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@font-face { font-family:"Sora"; font-style:normal; font-weight:100 800;
+  font-display:swap; src:url("./fonts/sora-latin.woff2") format("woff2"); }
+@font-face { font-family:"Comfortaa"; font-style:normal; font-weight:300 700;
+  font-display:swap; src:url("./fonts/comfortaa-latin.woff2") format("woff2"); }
+
+/* ── shared by both EM skins ─────────────────────────────────────────────── */
+:root:is(:not([data-sg-skin]), [data-sg-skin="em"], [data-sg-skin="em-cool"]) {
+  --sg-font-display: "Comfortaa", "Sora", Arial, system-ui, sans-serif;
+  --sg-font-sans:    "Sora", Arial, system-ui, sans-serif;
+  --sg-accent:       #073763;   /* EM ultramarine: the primary action */
+  --sg-info:         #4a87c4;
+  --sg-quiet:        #bf9000;   /* EM ochre */
+  --sg-thermal-gradient: linear-gradient(90deg, #073763 0%, #4a87c4 50%, #bf9000 100%);
+}
+
+/* ── em · paper and earth (default) ──────────────────────────────────────── */
+:root:is(:not([data-sg-skin]), [data-sg-skin="em"]) {
+  --sg-bg:#f5f1e9; --sg-surface:#fffdf8; --sg-surface-sunk:#ebe4d6; --sg-line:#ddd4c4;
+  --sg-text:#1a2330; --sg-muted:#57524a;
+  --sg-accent-quiet:#765800; --sg-ok:#7a9a3c; --sg-warn:#a64724;
+  --sg-info-ink:#1d4f80; --sg-ok-ink:#4f6420;
+  --sg-shadow:0 2px 10px rgba(60,45,20,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:is(:not([data-sg-skin]), [data-sg-skin="em"]):not([data-sg-theme="light"]) {
+    --sg-bg:#1e1c18; --sg-surface:#2a2722; --sg-surface-sunk:#171511; --sg-line:#3d3932;
+    --sg-text:#f1ebe3; --sg-muted:#cfc6b8; --sg-accent:#2a64a0; --sg-accent-quiet:#e3b43a;
+    --sg-info-ink:#9cc3ea; --sg-ok-ink:#c3d47a; --sg-shadow:0 2px 10px rgba(0,0,0,.35);
+  }
+}
+:root:is(:not([data-sg-skin]), [data-sg-skin="em"])[data-sg-theme="dark"] {
+  --sg-bg:#1e1c18; --sg-surface:#2a2722; --sg-surface-sunk:#171511; --sg-line:#3d3932;
+  --sg-text:#f1ebe3; --sg-muted:#cfc6b8; --sg-accent:#2a64a0; --sg-accent-quiet:#e3b43a;
+  --sg-info-ink:#9cc3ea; --sg-ok-ink:#c3d47a; --sg-shadow:0 2px 10px rgba(0,0,0,.35);
+}
+
+/* ── em-cool · as on the site and in EMStudio ────────────────────────────── */
+:root[data-sg-skin="em-cool"] {
+  --sg-bg:#fcfcfc; --sg-surface:#ffffff; --sg-surface-sunk:#eef3f9; --sg-line:#dde4ec;
+  --sg-text:#0e1d2e; --sg-muted:#485666;
+  --sg-accent-quiet:#8a6800; --sg-ok:#5aa36f; --sg-warn:#b4532a;
+  --sg-info-ink:#1d4f80; --sg-ok-ink:#2f6b40;
+  --sg-shadow:0 2px 10px rgba(7,55,99,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-sg-skin="em-cool"]:not([data-sg-theme="light"]) {
+    --sg-bg:#0b1420; --sg-surface:#142030; --sg-surface-sunk:#0f1a28; --sg-line:#24344a;
+    --sg-text:#e8eef5; --sg-muted:#aebbcb; --sg-accent:#15508a; --sg-accent-quiet:#e3b43a;
+    --sg-info-ink:#9cc3ea; --sg-ok-ink:#8fd4a3; --sg-shadow:0 2px 10px rgba(0,0,0,.35);
+  }
+}
+:root[data-sg-skin="em-cool"][data-sg-theme="dark"] {
+  --sg-bg:#0b1420; --sg-surface:#142030; --sg-surface-sunk:#0f1a28; --sg-line:#24344a;
+  --sg-text:#e8eef5; --sg-muted:#aebbcb; --sg-accent:#15508a; --sg-accent-quiet:#e3b43a;
+  --sg-info-ink:#9cc3ea; --sg-ok-ink:#8fd4a3; --sg-shadow:0 2px 10px rgba(0,0,0,.35);
+}

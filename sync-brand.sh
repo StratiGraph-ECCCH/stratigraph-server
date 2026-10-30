@@ -39,6 +39,9 @@ if [ -z "$SRC" ] && has_theme "$SIBLING"; then SRC="$SIBLING"; fi
 
 mkdir -p "$DST/fonts" "$DST/logo"
 cp "$SRC/stratigraph-theme.css" "$DST/"
+# the skins (30 Oct 2026): EM by default, the guidebook one choice away
+cp "$SRC/skins.css" "$SRC/skin.js" "$DST/"
+cp "$SRC"/fonts/OFL-*.txt "$DST/fonts/" 2>/dev/null || true
 cp "$SRC"/fonts/*.woff2 "$DST/fonts/"
 
 # Only the logos these pages REACH. An unused colourway is weight nobody asked

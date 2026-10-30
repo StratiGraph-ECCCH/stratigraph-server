@@ -14,11 +14,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>This node · StratiGraph</title>
   <link rel="icon" href="../brand/logo/favicon-deep-charcoal.svg" type="image/svg+xml">
-  <meta name="theme-color" content="#F1EBE3" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#2E2D2C" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#F5F1E9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1E1C18" media="(prefers-color-scheme: dark)">
   <!-- The console's stylesheet FIRST, because it is the one that imports the
        StratiGraph theme (`../brand/…`, vendored and same-origin). One import
        chain, so the faces of this server cannot drift apart. -->
+  <script src="../brand/skin.js"></script>
   <link rel="stylesheet" href="../admin/console.css">
   <link rel="stylesheet" href="../rooms/rooms.css">
 </head>
@@ -32,6 +33,7 @@
     <!-- The language picker, in the bar and not behind a settings screen: it is
          one touch, and each option is written IN its own language so somebody
          who cannot read the current one still finds theirs. -->
+    <select id="skin" class="lang"></select>
     <select id="lang" class="lang"></select>
     <span id="who" class="who"></span>
     <button id="btn-signout" class="ghost" hidden>Sign out</button>

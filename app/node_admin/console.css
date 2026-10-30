@@ -24,6 +24,7 @@
 */
 
 @import url("../brand/stratigraph-theme.css");
+@import url("../brand/skins.css");   /* EM by default; see brand/skins.css */
 
 :root {
   /* the console's words → the brand's roles. RELATIVE import above, so this
