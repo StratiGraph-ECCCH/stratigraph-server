@@ -833,6 +833,20 @@ services:
       # In a real deployment prefer the realm role: EM_OPERATOR_ROLE (default
       # `em-operator`), granted in Keycloak by whoever administers the realm.
       EM_OPERATORS: "${DEV_OPERATOR_ORCID:-0000-0002-1825-0097}"
+      # --- the people of the node (30 Oct 2026, app/people.py) --------------
+      # Who may CREATE rooms and groups: `editors` (a person starts as a user and
+      # is given the node editor profile in the console) or `anyone`.
+      EM_CREATE_POLICY: "${EM_CREATE_POLICY:-editors}"
+      # Test people (iDs 0000-0000-…, password without ORCID): ON in the dev
+      # stack, which is where fictitious people are useful. NEVER on a real node.
+      EM_ALLOW_TEST_PEOPLE: "${EM_ALLOW_TEST_PEOPLE:-1}"
+      # The console reaches Keycloak as an administrator to add people and set
+      # their field passwords. The dev stack uses the master admin; a real node
+      # gives a service account `manage-users` (EM_KC_ADMIN_CLIENT_ID/SECRET).
+      EM_KC_ADMIN_URL: "http://keycloak:8080/auth"
+      EM_KC_REALM: "${DEV_REALM:-em-dev}"
+      EM_KC_ADMIN_USER: "${KEYCLOAK_ADMIN:-admin}"
+      EM_KC_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD:-admin}"
       # --- images · the URL topology (docs/URL-TOPOLOGY.md) --------------------
       # PUBLIC: what goes into a manifest. Other people's viewers fetch it, so it
       # must name a host they can reach — `localhost` here, the proxy's name in

@@ -165,6 +165,12 @@ Two operations depend on optional libraries: `POST /v1/export-ttl` needs
 | `DELETE /v1/admin/assets/{ref}` | Remove an asset from the node (operators) *(node)* | yes |
 | `GET, HEAD /v1/admin/assets/{ref}` | Download any asset, through no room (operators) *(node)* | yes |
 | `GET /v1/admin/assets/orphans` | Assets a room's deletion left with no room (operators) *(node)* | yes |
+| `GET /v1/admin/assets` | The files the node holds, one by one (operators) *(node)* | yes |
+| `GET /v1/admin/people` | Everybody this node knows, with their profile (operators) *(node)* | yes |
+| `PUT /v1/admin/people/{orcid}` | Add a person by ORCID, or change their name or profile (operators) *(node)* | yes |
+| `DELETE /v1/admin/people/{orcid}` | Take a person off the node (operators) *(node)* | yes |
+| `POST /v1/admin/people/{orcid}/password` | Set or reset a person's local password (operators) *(node)* | yes |
+| `PUT /v1/admin/rooms/{room_id}/owner` | Give a room nobody can manage a new owner (operators) *(node)* | yes |
 | `GET /v1/admin/health` | The node's services, and how they are doing (operators) *(node)* | yes |
 | `POST /v1/admin/rooms/{room_id}/archive` | Archive any room of the node (operators) *(node)* | yes |
 

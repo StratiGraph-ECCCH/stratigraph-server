@@ -198,3 +198,19 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 def _nessun_emstudio_vero(tmp_path, monkeypatch):
     monkeypatch.setenv("SG_STUDIO_DIR", str(tmp_path / "nessun-EMStudio"))
     monkeypatch.setenv("SG_STUDIO_PIDFILE", str(tmp_path / "emstudio-dev.pid"))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# CHI CREA STANZE E GRUPPI — nelle prove scritte prima del 30 ottobre 2026
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Dal 30 ottobre una persona nasce «utente» e per creare una stanza o un gruppo
+# serve il profilo di editor di nodo (`app/people.py`). Le prove scritte prima
+# creano stanze con identità qualunque perché misurano altro: la regola che
+# provano è quella della stanza, non quella di chi la crea. Qui girano con la
+# politica di prima (`EM_CREATE_POLICY=anyone`); le prove della regola nuova
+# (`tests/test_people.py`) la rimettono a `editors` da sé, esplicitamente.
+@_pytest.fixture(autouse=True)
+def _politica_di_creazione_di_prima(monkeypatch):
+    monkeypatch.setenv("EM_CREATE_POLICY", "anyone")
+    yield

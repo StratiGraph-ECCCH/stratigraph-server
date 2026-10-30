@@ -57,6 +57,8 @@ from .assets import describe as asset_describe
 from .auth import AuthDependency, authenticator
 from .identity import auth_mode_of, identity_of, node_name, orcid_idp_alias, signature_auth
 from . import accredited as accredited_module
+from . import people as people_module
+from . import keycloak_admin
 from .access import Acl, Group, Role, may_assign, parse_role
 from .access import describe as acl_describe
 from .corpus import (CORPUS_STORE, RESIDENT, canonical_digest, may_read_whole,
@@ -3834,6 +3836,13 @@ async def create_room(body: RoomRefIn, request: Request) -> RoomOut:
         raise HTTPException(
             status_code=401,
             detail="creating a room needs an identity: its creator is its owner")
+    # ── WHO MAY CREATE (E.D., 30 Oct 2026) ───────────────────────────────────
+    # A person starts as a user; creating a room needs the node editor profile
+    # (`people.py`). `EM_CREATE_POLICY=anyone` keeps the older behaviour.
+    if not dev_mode:
+        refusal = people_module.may_create(authenticator.require_token(request), "a room")
+        if refusal:
+            raise HTTPException(status_code=403, detail=refusal)
 
     # ── UNA STANZA, UN GRAFO VIVO ─────────────────────────────────────────────
     #
@@ -5109,6 +5118,9 @@ class StorageRoom(BaseModel):
     declared: bool = False
     archived_at: Optional[str] = None
     missing_refs: List[str] = Field(default_factory=list)
+    #: bytes of the files present (30 Oct 2026: the console shows space, not
+    #: only counts). A file shared by two rooms counts in both.
+    bytes: int = 0
 
 
 class BlockedReturn(BaseModel):
@@ -5148,6 +5160,348 @@ async def node_whoami(request: Request) -> NodeWhoAmI:
     who = None if principal.get("em_dev_mode") else identity_of(principal)
     return NodeWhoAmI(operator=is_op, orcid=who, capability=ops.describe(),
                       auth=authenticator.settings.describe())
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# THE PEOPLE OF THE NODE — the console's «Persone» (E.D., 30 October 2026)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Who the node knows, with which profile, and whether they can sign in in the
+# field. Operators only, like the rest of `/v1/admin`. The rules are in
+# `app/people.py` (profiles) and `app/keycloak_admin.py` (accounts, passwords).
+
+class KeycloakFacts(BaseModel):
+    exists: Optional[bool] = None
+    enabled: Optional[bool] = None
+    orcid_linked: Optional[bool] = None
+    password: Optional[bool] = None
+
+
+class PersonOut(BaseModel):
+    orcid: str
+    name: str = ""
+    #: `super` · `creator` · `user`
+    profile: str = "user"
+    #: where the profile comes from: `deployment` (realm role or EM_OPERATORS —
+    #: shown, not changed here), `register` (the console), `default`
+    profile_source: str = "default"
+    test: bool = False
+    #: in the node's register (`people.json`)
+    registered: bool = False
+    #: in the accredited list file (`EM_ACCREDITED_FILE`)
+    listed: bool = False
+    rooms: int = 0
+    rooms_owned: List[str] = Field(default_factory=list)
+    groups: List[str] = Field(default_factory=list)
+    added_by: Optional[str] = None
+    added_at: Optional[str] = None
+    keycloak: Optional[KeycloakFacts] = None
+    notes: List[str] = Field(default_factory=list)
+
+
+class PeopleOut(BaseModel):
+    people: List[PersonOut] = Field(default_factory=list)
+    #: how the server reaches Keycloak, or why it cannot
+    keycloak: str = ""
+    keycloak_ready: bool = False
+    #: `editors` or `anyone`
+    create_policy: str = "editors"
+    test_people: bool = False
+    you: Optional[str] = None
+
+
+class PersonIn(BaseModel):
+    name: Optional[str] = None
+    profile: Optional[str] = Field(default=None, description="super · creator · user")
+
+
+class PasswordIn(BaseModel):
+    password: str
+    temporary: bool = True
+
+
+class PersonRemoved(BaseModel):
+    orcid: str
+    removed: bool
+    rooms_left: List[str] = Field(default_factory=list)
+    #: rooms this person OWNS: not touched — they need a new owner (rescue)
+    rooms_owned: List[str] = Field(default_factory=list)
+    groups_left: List[str] = Field(default_factory=list)
+    keycloak: str = ""
+    #: still in the accredited list file, which the console does not edit
+    still_listed: bool = False
+
+
+def _all_acls() -> Dict[str, Acl]:
+    ids = set(_room_ids())
+    lister = getattr(ACL_STORE, "ids", None)
+    if callable(lister):
+        try:
+            ids |= set(lister())
+        except Exception:  # noqa: BLE001 — a listing that fails lists less
+            pass
+    return {room_id: load_acl(room_id) for room_id in sorted(ids)}
+
+
+def _listed_ids() -> frozenset:
+    try:
+        return accredited_module.accredited_ids() or frozenset()
+    except (OSError, accredited_module.AccreditedListError):
+        return frozenset()
+
+
+def _deployment_profile(orcid: str) -> Optional[str]:
+    if orcid in set(ops.operators()):
+        return "super"
+    return None
+
+
+def _person_view(orcid: str, person: Optional["people_module.Person"], acls: Dict[str, Acl],
+                 group_map: Dict[str, Any], listed: frozenset) -> PersonOut:
+    rooms_in = 0
+    owned: List[str] = []
+    for room_id, acl in acls.items():
+        if acl.owner == orcid:
+            owned.append(room_id)
+            rooms_in += 1
+        elif orcid in acl.members:
+            rooms_in += 1
+    in_groups = sorted(g.id for g in group_map.values() if g.has(orcid))
+    deployment = _deployment_profile(orcid)
+    if deployment:
+        profile, source = deployment, "deployment"
+    elif person is not None:
+        profile, source = person.profile, "register"
+    else:
+        profile, source = "user", "default"
+    return PersonOut(
+        orcid=orcid, name=(person.name if person else ""), profile=profile,
+        profile_source=source, test=bool(person and person.test) or people_module.is_test_orcid(orcid),
+        registered=person is not None, listed=orcid in listed, rooms=rooms_in,
+        rooms_owned=sorted(owned), groups=in_groups,
+        added_by=person.added_by if person else None,
+        added_at=person.added_at if person else None)
+
+
+def _super_count(register: Dict[str, Any]) -> int:
+    supers = {o for o, p in register.items() if p.profile == "super"}
+    supers |= set(ops.operators())
+    return len(supers)
+
+
+@v1.get("/admin/people", summary="Everybody this node knows, with their profile (operators)",
+        response_model=PeopleOut, tags=["node"])
+def node_people(request: Request, keycloak: bool = False) -> PeopleOut:
+    """The people of the node: the register, the accredited list, the operators
+    the deployment names, and everybody who holds a role in a room or a group.
+    `?keycloak=true` adds what Keycloak knows of each (one more call each)."""
+    caller = _require_operator(request)
+    register = people_module.registry().all()
+    acls = _all_acls()
+    group_map = groups().all()
+    listed = _listed_ids()
+    everybody: set = set(register) | set(listed) | set(ops.operators())
+    for acl in acls.values():
+        if acl.owner:
+            everybody.add(acl.owner)
+        everybody |= set(acl.members)
+    for g in group_map.values():
+        everybody |= set(g.members)
+    kc = keycloak_admin.admin()
+    out = [_person_view(o, register.get(o), acls, group_map, listed)
+           for o in sorted(x for x in everybody if x)]
+    if keycloak and kc.configured():
+        for p in out:
+            p.keycloak = KeycloakFacts(**kc.facts(p.orcid))
+    return PeopleOut(people=out, keycloak=kc.describe(), keycloak_ready=kc.configured(),
+                     create_policy=people_module.create_policy(),
+                     test_people=people_module.test_people_allowed(), you=caller)
+
+
+@v1.put("/admin/people/{orcid}", summary="Add a person by ORCID, or change their name or profile (operators)",
+        response_model=PersonOut, tags=["node"])
+def node_put_person(orcid: str, body: PersonIn, request: Request) -> PersonOut:
+    """Add a person to the node, or change them. The profile is chosen
+    explicitly; a person added without one is a `user`.
+
+    Refused: an iD that is not one (check digit); a test iD on a node without
+    test people; a change to the caller's OWN profile (the capability is not
+    self-granted); demoting the last super-administrator; changing a profile
+    the deployment fixes (EM_OPERATORS, realm roles)."""
+    caller = _require_operator(request)
+    key = people_module.valid_orcid(orcid)
+    if not key:
+        detail = ("test iDs (0000-0000-…) are accepted only on a node with test people "
+                  "(EM_ALLOW_TEST_PEOPLE)") if people_module.is_test_orcid(
+                      accredited_module.normalize(orcid)) else f"{orcid!r} is not an ORCID iD (check digit)"
+        raise HTTPException(status_code=400, detail=detail)
+    if body.profile is not None and body.profile not in people_module.PROFILES:
+        raise HTTPException(status_code=400, detail="profile is one of: super, creator, user")
+    reg = people_module.registry()
+    register = reg.all()
+    existing = register.get(key)
+    current = _deployment_profile(key) or (existing.profile if existing else "user")
+    wanted = body.profile or current
+    if body.profile is not None and wanted != current:
+        if caller and key == caller:
+            raise HTTPException(status_code=403, detail=(
+                "your own profile is changed by another super-administrator: the "
+                "capability to look after a node is never self-granted"))
+        if _deployment_profile(key):
+            raise HTTPException(status_code=409, detail=(
+                "this person's profile is set by the deployment (EM_OPERATORS or a "
+                "realm role) and is changed there, not in the console"))
+        if current == "super" and wanted != "super" and _super_count(register) <= 1:
+            raise HTTPException(status_code=409, detail=(
+                "this is the last super-administrator of the node: give the profile "
+                "to somebody else first, or the node is left with nobody to look after it"))
+    person = existing or people_module.Person(key, added_by=caller)
+    if body.name is not None:
+        person.name = body.name.strip()
+    person.profile = wanted
+    person.test = people_module.is_test_orcid(key)
+    reg.put(person)
+    view = _person_view(key, person, _all_acls(), groups().all(), _listed_ids())
+    kc = keycloak_admin.admin()
+    if kc.configured():
+        try:
+            made = kc.ensure_user(key, person.name, test=person.test)
+            view.notes.append("account created in Keycloak" if made["created"]
+                              else "Keycloak account up to date")
+            view.keycloak = KeycloakFacts(**kc.facts(key))
+        except keycloak_admin.KeycloakError as exc:
+            view.notes.append(f"Keycloak: {exc}")
+    else:
+        view.notes.append("Keycloak is not reachable from the server: the account is "
+                          "created by dev-stack/accredit.sh")
+    people_module.log_event("person.put", by=caller, orcid=key, profile=wanted)
+    return view
+
+
+@v1.delete("/admin/people/{orcid}", summary="Take a person off the node (operators)",
+           response_model=PersonRemoved, tags=["node"])
+def node_remove_person(orcid: str, request: Request) -> PersonRemoved:
+    """Take somebody off the node: out of the register, out of every room where
+    they hold a role of their own, out of every group, and their Keycloak account
+    disabled (not deleted — what they signed stays signed by their iD).
+
+    Rooms they OWN are not touched and are listed: such a room needs a new owner,
+    which is what `PUT /v1/admin/rooms/{id}/owner` is for."""
+    caller = _require_operator(request)
+    key = accredited_module.normalize(orcid) or ""
+    if caller and key == caller:
+        raise HTTPException(status_code=403, detail="you cannot take yourself off the node")
+    reg = people_module.registry()
+    register = reg.all()
+    if _deployment_profile(key):
+        raise HTTPException(status_code=409, detail=(
+            "this person is an operator named by the deployment (EM_OPERATORS): "
+            "they leave the node there, not in the console"))
+    existing = register.get(key)
+    if existing and existing.profile == "super" and _super_count(register) <= 1:
+        raise HTTPException(status_code=409, detail="this is the last super-administrator of the node")
+    removed = reg.remove(key)
+    left, owned = [], []
+    for room_id, acl in _all_acls().items():
+        if acl.owner == key:
+            owned.append(room_id)
+        if key in acl.members:
+            del acl.members[key]
+            save_acl(room_id, acl)
+            left.append(room_id)
+    gone_from = []
+    registry_g = groups()
+    for g in registry_g.all().values():
+        if g.remove(key):
+            registry_g.put(g)
+            gone_from.append(g.id)
+    kc = keycloak_admin.admin()
+    kc_note = "Keycloak not reachable from the server: disable the account there"
+    if kc.configured():
+        try:
+            kc_note = "account disabled" if kc.set_enabled(key, False) else "no Keycloak account"
+        except keycloak_admin.KeycloakError as exc:
+            kc_note = f"Keycloak: {exc}"
+    people_module.log_event("person.remove", by=caller, orcid=key, rooms=left, groups=gone_from)
+    return PersonRemoved(orcid=key, removed=removed or bool(left or gone_from),
+                         rooms_left=left, rooms_owned=owned, groups_left=gone_from,
+                         keycloak=kc_note, still_listed=key in _listed_ids())
+
+
+@v1.post("/admin/people/{orcid}/password", summary="Set or reset a person's local password (operators)",
+         tags=["node"])
+def node_set_password(orcid: str, body: PasswordIn, request: Request) -> Dict[str, Any]:
+    """The password for the field: the person signs in with their iD and this
+    password when there is no network, and the node attests who they are.
+
+    Only for an iD ORCID verified once on this node (the account is linked to
+    the ORCID provider) — or a test person on a node that allows them. The
+    password is temporary unless told otherwise: Keycloak asks for a new one at
+    the first sign-in. It is never logged and never returned."""
+    caller = _require_operator(request)
+    key = accredited_module.normalize(orcid) or ""
+    problem = keycloak_admin.password_problem(body.password)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+    kc = keycloak_admin.admin()
+    if not kc.configured():
+        raise HTTPException(status_code=503, detail=(
+            "Keycloak is not reachable from the server (EM_KC_ADMIN_URL and credentials): "
+            "use dev-stack/offline-password.sh on the node"))
+    try:
+        user = kc.user(key)
+        if user is None:
+            raise HTTPException(status_code=404, detail=(
+                f"{key} has no account on this node: add the person first (People)"))
+        test_ok = people_module.is_test_orcid(key) and people_module.test_people_allowed()
+        if not test_ok and not kc.linked_to_orcid(user["id"]):
+            raise HTTPException(status_code=409, detail=(
+                f"{key} never signed in with ORCID on this node. The node attests only an "
+                "iD ORCID verified once: the person signs in online with ORCID first, then "
+                "the password can be given."))
+        kc.set_password(user["id"], body.password, temporary=body.temporary)
+    except keycloak_admin.KeycloakError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    people_module.log_event("person.password", by=caller, orcid=key, temporary=body.temporary)
+    return {"orcid": key, "password": "set", "temporary": body.temporary}
+
+
+# ── the one exception: a room nobody can manage any more ─────────────────────
+
+class OwnerIn(BaseModel):
+    orcid: str
+
+
+def _on_node(orcid: Optional[str], register: Dict[str, Any], listed: frozenset) -> bool:
+    return bool(orcid) and (orcid in register or orcid in listed or orcid in set(ops.operators()))
+
+
+@v1.put("/admin/rooms/{room_id}/owner", summary="Give a room nobody can manage a new owner (operators)",
+        response_model=Members, tags=["node"])
+def node_rescue_room(room_id: str, body: OwnerIn, request: Request) -> Members:
+    """Inside a room the super-administrator counts for the role they hold there
+    (E.D., 30 October 2026). One exception: a room left with nobody who can
+    manage it — no owner on the node any more, and no administrator who is —
+    can be handed to a new owner here. The act is written to the node's log."""
+    caller = _require_operator(request)
+    new_owner = people_module.valid_orcid(body.orcid)
+    if not new_owner:
+        raise HTTPException(status_code=400, detail=f"{body.orcid!r} is not an ORCID iD")
+    acl = load_acl(room_id)
+    register = people_module.registry().all()
+    listed = _listed_ids()
+    managers = [o for o, r in acl.members.items() if r == Role.ADMIN and _on_node(o, register, listed)]
+    if _on_node(acl.owner, register, listed) or managers:
+        who = acl.owner if _on_node(acl.owner, register, listed) else managers[0]
+        raise HTTPException(status_code=409, detail=(
+            f"this room still has somebody who can manage it ({who}): they hand it over "
+            "from the room. The node steps in only when nobody can."))
+    previous = acl.owner
+    acl.owner = new_owner
+    acl.members.pop(new_owner, None)
+    save_acl(room_id, acl)
+    people_module.log_event("room.rescue", by=caller, room=room_id, previous=previous, owner=new_owner)
+    return _members_view(room_id, acl, Role.OWNER)
 
 
 @v1.get("/admin/rooms", summary="Every room on this node (operators)", response_model=List[RoomOut], tags=["node"])
@@ -5205,9 +5559,11 @@ async def node_storage(request: Request) -> StorageOut:
         document = snapshot_store().get(descriptor.primary_ref)
         digests = _digests_in(document)
         seen |= digests
-        missing = [d for d in sorted(digests) if ASSET_STORE.head(d) is None]
+        heads = {d: ASSET_STORE.head(d) for d in sorted(digests)}
+        missing = [d for d, h in heads.items() if h is None]
         out_rooms.append(StorageRoom(
             room_id=room_id, assets=len(digests),
+            bytes=sum(int((h or {}).get("size") or 0) for h in heads.values()),
             present=len(digests) - len(missing), missing=missing,
             declared=not descriptor.implicit,
             archived_at=descriptor.archived_at,
@@ -5243,6 +5599,118 @@ async def node_storage(request: Request) -> StorageOut:
         orphan_assets=sorted(_stored_digests() - seen),
         blocked_returns=blocked,
         rooms=out_rooms)
+
+
+# ── THE BUCKET, FILE BY FILE (E.D., 30 October 2026) ─────────────────────────
+#
+# The console's «Memoria e bucket» shows the files, not only the rooms: how big,
+# which rooms cite them, where they came in and by whom, and whether nobody
+# cites them any more. Asked on demand, never on a page load: on S3 it is one
+# bucket LISTING (sizes included, no HEAD per object), capped.
+
+class AssetRow(BaseModel):
+    ref: str
+    size: Optional[int] = None
+    #: rooms whose graph cites the file
+    rooms: List[str] = Field(default_factory=list)
+    #: the room the bytes came in through (`asset_homes`)
+    home: Optional[str] = None
+    uploaded_by: List[str] = Field(default_factory=list)
+    #: `in_use` · `orphan` (stored, cited by no room) · `missing` (cited, not stored)
+    state: str = "in_use"
+
+
+class AssetsOut(BaseModel):
+    assets: List[AssetRow] = Field(default_factory=list)
+    #: how many matched before `limit`
+    matched: int = 0
+    bytes: int = 0
+    #: the listing stopped at the cap: some stored files are not in this answer
+    truncated: bool = False
+    listed_from: str = ""
+
+
+def _asset_sizes() -> tuple:
+    """`({ref: size}, truncated, how)` for what the store holds, or `(None, False,
+    why)` when it cannot enumerate."""
+    cap = int(os.environ.get("EM_ASSET_LIST_CAP") or 50000)
+    client = getattr(ASSET_STORE, "_client", None)
+    bucket = getattr(ASSET_STORE, "bucket", None)
+    if client is not None and bucket:
+        from . import s3client
+        out: Dict[str, int] = {}
+        truncated = False
+        for item in s3client.iter_objects(client, bucket):
+            key = str(item.get("key") or "")
+            if len(key) == 64:
+                out[f"sha256:{key}"] = int(item.get("size") or 0)
+            if len(out) >= cap:
+                truncated = True
+                break
+        return out, truncated, f"bucket listing ({bucket})"
+    lister = getattr(ASSET_STORE, "refs", None)
+    if callable(lister):
+        out = {}
+        for ref in lister():
+            head = ASSET_STORE.head(str(ref)) or {}
+            out[str(ref)] = int(head.get("size") or 0)
+        return out, False, "store listing"
+    return None, False, "this store cannot list its files"
+
+
+@v1.get("/admin/assets", summary="The files the node holds, one by one (operators)",
+        response_model=AssetsOut, tags=["node"])
+def node_assets(request: Request, state: Optional[str] = None, room: Optional[str] = None,
+                by: Optional[str] = None, limit: int = 500) -> AssetsOut:
+    """Every file: size, the rooms that cite it, its home and who brought it in.
+    Filters: `state` (in_use · orphan · missing), `room`, `by` (an uploader's iD).
+    Sorted by size, largest first."""
+    from . import asset_homes
+    _require_operator(request)
+    registry = rooms()
+    cited: Dict[str, List[str]] = {}
+    for room_id in sorted(_room_ids()):
+        descriptor = registry.descriptor(room_id)
+        for ref in _digests_in(snapshot_store().get(descriptor.primary_ref)):
+            cited.setdefault(ref, []).append(room_id)
+    sizes, truncated, how = _asset_sizes()
+    homes_store = asset_homes.ASSET_HOMES
+    try:
+        recorded = {f"sha256:{d}" if ":" not in d else d for d in homes_store.digests()}
+    except Exception:  # noqa: BLE001 — a record that will not read adds nothing
+        recorded = set()
+    every = set(cited) | set(sizes or {}) | recorded
+    rows: List[AssetRow] = []
+    for ref in every:
+        size = (sizes or {}).get(ref)
+        if sizes is None and ref in cited:
+            head = ASSET_STORE.head(ref)
+            size = int(head["size"]) if head else None
+        stored = (ref in sizes) if sizes is not None else (size is not None)
+        if ref in cited and not stored and not truncated:
+            row_state = "missing"
+        elif ref not in cited:
+            row_state = "orphan" if stored or sizes is None else "missing"
+        else:
+            row_state = "in_use"
+        try:
+            homes = homes_store.homes(ref)
+            home = homes_store.home(ref)
+        except Exception:  # noqa: BLE001
+            homes, home = {}, None
+        uploaders = sorted({w for who in homes.values() for w in who})
+        rows.append(AssetRow(ref=ref, size=size, rooms=sorted(cited.get(ref, [])),
+                             home=home, uploaded_by=uploaders, state=row_state))
+    if state:
+        rows = [r for r in rows if r.state == state]
+    if room:
+        rows = [r for r in rows if room in r.rooms or r.home == room]
+    if by:
+        who = accredited_module.normalize(by)
+        rows = [r for r in rows if who in r.uploaded_by]
+    rows.sort(key=lambda r: (-(r.size or 0), r.ref))
+    return AssetsOut(assets=rows[:max(1, min(limit, 5000))], matched=len(rows),
+                     bytes=sum(r.size or 0 for r in rows), truncated=truncated, listed_from=how)
 
 
 class AssetForgotten(BaseModel):
@@ -5787,6 +6255,10 @@ def put_group(group_id: str, body: GroupIn, request: Request) -> GroupOut:
     existing = registry.get(group_id)
     if existing is not None:
         _may_manage(existing, who, request)
+    elif authenticator.settings.enforcing:
+        refusal = people_module.may_create(authenticator.require_token(request), "a group")
+        if refusal:
+            raise HTTPException(status_code=403, detail=refusal)
     group = Group(group_id, body.name or (existing.name if existing else group_id),
                   body.members, owner=(existing.owner if existing else who))
     registry.put(group)
@@ -5898,7 +6370,8 @@ def member_whoami(request: Request) -> WhoAmI:
     mode = None if dev_mode else auth_mode_of(
         principal, orcid_aliases=(orcid_idp_alias(),))
     try:
-        accredited = bool(orcid) and accredited_module.is_accredited(orcid)
+        accredited = bool(orcid) and (accredited_module.is_accredited(orcid)
+                                      or people_module.registry_profile(orcid) is not None)
     except (OSError, accredited_module.AccreditedListError) as exc:
         #: a list that is named and unreadable is a fault of the node, said as
         #: one — not a quiet «not accredited» for somebody who is

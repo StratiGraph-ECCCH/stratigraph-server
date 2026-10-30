@@ -100,7 +100,15 @@ def is_operator(claims: Optional[Dict[str, Any]], *,
     if any(role == wanted for role in _roles_in(claims)):
         return True
     who = _norm(identity_of(claims))
-    return bool(who) and who in operators(environ)
+    if not who:
+        return False
+    if who in operators(environ):
+        return True
+    # …and the node's own register of people (`people.py`, 30 Oct 2026), which
+    # only an operator can write and which refuses a change to its writer's own
+    # profile: the capability still cannot be self-granted.
+    from .people import registry_profile
+    return registry_profile(who) == "super"
 
 
 def refusal(environ: Optional[Dict[str, str]] = None) -> str:

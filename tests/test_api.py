@@ -320,6 +320,9 @@ def test_the_openapi_schema_is_served():
                       #    no timer, and `test_il_verbo_che_manca` asserts that
                       #    no route removes more than one.
                       ("DELETE", "/v1/admin/assets/{ref}"),
+                      ("PUT", "/v1/admin/people/{orcid}"),
+                      ("DELETE", "/v1/admin/people/{orcid}"),
+                      ("PUT", "/v1/admin/rooms/{room_id}/owner"),
                       # ── AND A RESUMABLE UPLOAD (U1, 2026-10-03) ───────────
                       #
                       # The one PATCH, and it is not the PATCH this list forbids.
