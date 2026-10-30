@@ -59,6 +59,7 @@ from .identity import auth_mode_of, identity_of, node_name, orcid_idp_alias, sig
 from . import accredited as accredited_module
 from . import people as people_module
 from . import keycloak_admin
+from . import transfer as transfer_module
 from .access import Acl, Group, Role, may_assign, parse_role
 from .access import describe as acl_describe
 from .corpus import (CORPUS_STORE, RESIDENT, canonical_digest, may_read_whole,
@@ -5458,7 +5459,9 @@ def node_set_password(orcid: str, body: PasswordIn, request: Request) -> Dict[st
             raise HTTPException(status_code=404, detail=(
                 f"{key} has no account on this node: add the person first (People)"))
         test_ok = people_module.is_test_orcid(key) and people_module.test_people_allowed()
-        if not test_ok and not kc.linked_to_orcid(user["id"]):
+        here = people_module.registry().get(key)
+        attested = bool(here and here.verified_by and transfer_module.is_trusted_node(here.verified_by))
+        if not test_ok and not attested and not kc.linked_to_orcid(user["id"]):
             raise HTTPException(status_code=409, detail=(
                 f"{key} never signed in with ORCID on this node. The node attests only an "
                 "iD ORCID verified once: the person signs in online with ORCID first, then "
@@ -5468,6 +5471,255 @@ def node_set_password(orcid: str, body: PasswordIn, request: Request) -> Dict[st
         raise HTTPException(status_code=502, detail=str(exc)) from None
     people_module.log_event("person.password", by=caller, orcid=key, temporary=body.temporary)
     return {"orcid": key, "password": "set", "temporary": body.temporary}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PEOPLE BETWEEN NODES — field ↔ central (E.D., 30 October 2026)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# The rules are in `app/transfer.py`: passwords never travel, packages are
+# signed and accepted only from nodes on the trust list, profiles travel as
+# proposals, and only the people of the chosen rooms (plus whoever is named).
+
+class NodeKeyOut(BaseModel):
+    node: str
+    public_key: str
+    fingerprint: str
+
+
+class TrustIn(BaseModel):
+    public_key: str
+
+
+class ExportIn(BaseModel):
+    rooms: List[str] = Field(default_factory=list)
+    people: List[str] = Field(default_factory=list)
+
+
+class TransferPersonView(BaseModel):
+    orcid: str
+    name: str = ""
+    proposed: str = "user"
+    #: this node's profile for them today, or None when they are new here
+    current: Optional[str] = None
+    verified: bool = False
+    test: bool = False
+    groups: List[str] = Field(default_factory=list)
+    #: why this iD cannot come in here, when it cannot (a test iD where test people are off…)
+    refused: Optional[str] = None
+
+
+class PreviewOut(BaseModel):
+    trusted: bool
+    why: str = ""
+    sender: str = ""
+    fingerprint: str = ""
+    made_at: Optional[str] = None
+    made_by: Optional[str] = None
+    rooms: List[str] = Field(default_factory=list)
+    people: List[TransferPersonView] = Field(default_factory=list)
+    groups: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ImportIn(BaseModel):
+    package: Dict[str, Any]
+    #: iDs whose PROPOSED profile is accepted; everybody else keeps theirs
+    #: (a new person arrives as a user)
+    accept_profiles: List[str] = Field(default_factory=list)
+    #: iDs to bring in; absent = everybody in the package
+    include: Optional[List[str]] = None
+
+
+class ImportOut(BaseModel):
+    added: List[str] = Field(default_factory=list)
+    updated: List[str] = Field(default_factory=list)
+    profiles_applied: List[str] = Field(default_factory=list)
+    to_verify: List[str] = Field(default_factory=list)
+    groups_created: List[str] = Field(default_factory=list)
+    groups_already_here: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+
+
+@v1.get("/admin/node-key", summary="This node's public key, for another node's trust list (operators)",
+        response_model=NodeKeyOut, tags=["node"])
+def node_public_key(request: Request) -> NodeKeyOut:
+    _require_operator(request)
+    key = transfer_module.public_b64()
+    return NodeKeyOut(node=node_name() or "this-node", public_key=key,
+                      fingerprint=transfer_module.fingerprint(key))
+
+
+@v1.get("/admin/trusted-nodes", summary="The nodes whose people packages this node accepts (operators)",
+        tags=["node"])
+def node_trusted(request: Request) -> Dict[str, Any]:
+    _require_operator(request)
+    return transfer_module.trusted()
+
+
+@v1.put("/admin/trusted-nodes/{name}", summary="Trust another node's packages (operators)", tags=["node"])
+def node_trust(name: str, body: TrustIn, request: Request) -> Dict[str, Any]:
+    caller = _require_operator(request)
+    try:
+        entry = transfer_module.trust(name, body.public_key, caller)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    people_module.log_event("node.trust", by=caller, node=name, fingerprint=entry["fingerprint"])
+    return entry
+
+
+@v1.delete("/admin/trusted-nodes/{name}", summary="Stop trusting another node (operators)", tags=["node"])
+def node_distrust(name: str, request: Request) -> Dict[str, Any]:
+    caller = _require_operator(request)
+    removed = transfer_module.distrust(name)
+    if removed:
+        people_module.log_event("node.distrust", by=caller, node=name)
+    return {"node": name, "removed": removed}
+
+
+@v1.post("/admin/people-transfer/export", summary="A signed package of people for another node (operators)",
+         tags=["node"])
+def node_export_people(body: ExportIn, request: Request) -> Dict[str, Any]:
+    """The people of the chosen rooms — owners, members, members of the teams
+    with a role there — plus whoever is named. Per person: iD, name, the
+    PROPOSED profile, whether this node attests ORCID verified the iD, groups.
+    No password, no token. Signed with this node's key."""
+    caller = _require_operator(request)
+    acls = _all_acls()
+    group_map = groups().all()
+    wanted: set = set()
+    team_ids: set = set()
+    for room_id in body.rooms:
+        acl = acls.get(room_id) or load_acl(room_id)
+        if acl.owner:
+            wanted.add(acl.owner)
+        wanted |= set(acl.members)
+        for gid in acl.groups:
+            team_ids.add(gid)
+            if gid in group_map:
+                wanted |= set(group_map[gid].members)
+    for orcid in body.people:
+        key = accredited_module.normalize(orcid)
+        if key:
+            wanted.add(key)
+    register = people_module.registry().all()
+    kc = keycloak_admin.admin()
+    rows = []
+    for orcid in sorted(wanted):
+        person = register.get(orcid)
+        verified = bool(person and person.verified_by)
+        if not verified and kc.configured():
+            verified = bool(kc.facts(orcid).get("orcid_linked"))
+        rows.append({"orcid": orcid, "name": person.name if person else "",
+                     "profile": _deployment_profile(orcid) or (person.profile if person else "user"),
+                     "verified": verified, "test": people_module.is_test_orcid(orcid),
+                     "groups": sorted(g.id for g in group_map.values() if g.has(orcid))})
+    teams = [group_map[g].as_dict() for g in sorted(team_ids) if g in group_map]
+    package = transfer_module.build(sender=node_name() or "this-node", by=caller,
+                                    rooms=list(body.rooms), people=rows, groups=teams)
+    people_module.log_event("transfer.export", by=caller, rooms=list(body.rooms), people=len(rows))
+    return package
+
+
+def _transfer_view(package: Dict[str, Any]) -> PreviewOut:
+    ok, why, payload = transfer_module.check(package)
+    register = people_module.registry().all()
+    rows = []
+    for p in payload.get("people") or []:
+        orcid = accredited_module.normalize(p.get("orcid")) or ""
+        here = register.get(orcid)
+        refused = None
+        if not people_module.valid_orcid(orcid):
+            refused = ("a test iD, and test people are off on this node"
+                       if people_module.is_test_orcid(orcid) else "not an ORCID iD")
+        rows.append(TransferPersonView(
+            orcid=orcid, name=str(p.get("name") or ""), proposed=str(p.get("profile") or "user"),
+            current=(_deployment_profile(orcid) or (here.profile if here else None)),
+            verified=bool(p.get("verified")), test=bool(p.get("test")),
+            groups=list(p.get("groups") or []), refused=refused))
+    here_groups = groups().all()
+    teams = [{"id": g.get("id"), "name": g.get("name"), "members": len(g.get("members") or []),
+              "here": g.get("id") in here_groups} for g in payload.get("groups") or []]
+    raw_key = str(package.get("public_key") or "")
+    return PreviewOut(trusted=ok, why=why, sender=str(payload.get("from") or ""),
+                      fingerprint=transfer_module.fingerprint(raw_key) if transfer_module.valid_public_key(raw_key) else "",
+                      made_at=payload.get("made_at"), made_by=payload.get("made_by"),
+                      rooms=list(payload.get("rooms") or []), people=rows, groups=teams)
+
+
+@v1.post("/admin/people-transfer/preview", summary="What a people package would do here — nothing changes (operators)",
+         response_model=PreviewOut, tags=["node"])
+def node_preview_people(package: Dict[str, Any], request: Request) -> PreviewOut:
+    _require_operator(request)
+    return _transfer_view(package)
+
+
+@v1.post("/admin/people-transfer/import", summary="Bring a signed package of people in (operators)",
+         response_model=ImportOut, tags=["node"])
+def node_import_people(body: ImportIn, request: Request) -> ImportOut:
+    """Only from a node on the trust list. New people arrive as users unless
+    their proposed profile is accepted here; a known person keeps their profile
+    unless it is. A person the sender attests ORCID verified can receive a field
+    password here without signing in with ORCID first. Passwords never travel:
+    each person gets a new temporary one on this node."""
+    caller = _require_operator(request)
+    view = _transfer_view(body.package)
+    if not view.trusted:
+        raise HTTPException(status_code=409, detail=view.why)
+    include = set(accredited_module.normalize(o) for o in body.include) if body.include is not None else None
+    accept = set(accredited_module.normalize(o) for o in body.accept_profiles)
+    reg = people_module.registry()
+    register = reg.all()
+    out = ImportOut()
+    kc = keycloak_admin.admin()
+    for row in view.people:
+        if row.refused or (include is not None and row.orcid not in include):
+            if row.refused:
+                out.notes.append(f"{row.orcid}: {row.refused}")
+            continue
+        existing = register.get(row.orcid)
+        person = existing or people_module.Person(row.orcid, row.name, "user", added_by=caller)
+        if not person.name and row.name:
+            person.name = row.name
+        person.test = people_module.is_test_orcid(row.orcid)
+        if row.orcid in accept and row.proposed in people_module.PROFILES:
+            if caller and row.orcid == caller:
+                out.notes.append(f"{row.orcid}: your own profile is not changed by a package")
+            elif _deployment_profile(row.orcid):
+                out.notes.append(f"{row.orcid}: profile set by the deployment, left as it is")
+            elif person.profile == "super" and row.proposed != "super" and _super_count(register) <= 1:
+                out.notes.append(f"{row.orcid}: the last super-administrator here, left as it is")
+            elif person.profile != row.proposed:
+                person.profile = row.proposed
+                out.profiles_applied.append(row.orcid)
+        if row.verified and not person.verified_by:
+            person.verified_by = view.sender
+        if not row.verified and not (existing and existing.verified_by):
+            out.to_verify.append(row.orcid)
+        reg.put(person)
+        register[row.orcid] = person
+        (out.updated if existing else out.added).append(row.orcid)
+        if kc.configured():
+            try:
+                kc.ensure_user(row.orcid, person.name, test=person.test)
+            except keycloak_admin.KeycloakError as exc:
+                out.notes.append(f"{row.orcid}: Keycloak: {exc}")
+    here_groups = groups().all()
+    registry_g = groups()
+    payload_groups = {g.get("id"): g for g in (body.package.get("groups") or [])}
+    for gid, g in payload_groups.items():
+        if not gid:
+            continue
+        if gid in here_groups:
+            out.groups_already_here.append(gid)
+            continue
+        registry_g.put(Group(gid, g.get("name") or gid, g.get("members") or [], owner=g.get("owner")))
+        out.groups_created.append(gid)
+    if not kc.configured():
+        out.notes.append("Keycloak is not reachable from the server: accounts are created by dev-stack/accredit.sh")
+    people_module.log_event("transfer.import", by=caller, sender=view.sender,
+                            added=len(out.added), updated=len(out.updated),
+                            profiles=len(out.profiles_applied))
+    return out
 
 
 # ── the one exception: a room nobody can manage any more ─────────────────────

@@ -105,7 +105,8 @@ class Person:
 
     def __init__(self, orcid: str, name: str = "", profile: str = "user",
                  added_by: Optional[str] = None, added_at: Optional[str] = None,
-                 updated_at: Optional[str] = None, test: bool = False) -> None:
+                 updated_at: Optional[str] = None, test: bool = False,
+                 verified_by: Optional[str] = None) -> None:
         self.orcid = normalize(orcid) or ""
         self.name = str(name or "").strip()
         self.profile = profile if profile in PROFILES else "user"
@@ -113,17 +114,22 @@ class Person:
         self.added_at = added_at or _now()
         self.updated_at = updated_at or self.added_at
         self.test = bool(test)
+        #: the TRUSTED node that attests ORCID verified this iD (a person who
+        #: arrived in a signed transfer package, `transfer.py`). None when this
+        #: node verified them itself, or nobody did.
+        self.verified_by = verified_by or None
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "Person":
         return cls(raw.get("orcid") or "", raw.get("name") or "", raw.get("profile") or "user",
                    raw.get("added_by"), raw.get("added_at"), raw.get("updated_at"),
-                   bool(raw.get("test")))
+                   bool(raw.get("test")), raw.get("verified_by"))
 
     def as_dict(self) -> Dict[str, Any]:
         return {"orcid": self.orcid, "name": self.name, "profile": self.profile,
                 "added_by": self.added_by, "added_at": self.added_at,
-                "updated_at": self.updated_at, "test": self.test}
+                "updated_at": self.updated_at, "test": self.test,
+                "verified_by": self.verified_by}
 
 
 # ── the store: one document, like the group registry ─────────────────────────

@@ -323,6 +323,8 @@ def test_the_openapi_schema_is_served():
                       ("PUT", "/v1/admin/people/{orcid}"),
                       ("DELETE", "/v1/admin/people/{orcid}"),
                       ("PUT", "/v1/admin/rooms/{room_id}/owner"),
+                      ("PUT", "/v1/admin/trusted-nodes/{name}"),
+                      ("DELETE", "/v1/admin/trusted-nodes/{name}"),
                       # ── AND A RESUMABLE UPLOAD (U1, 2026-10-03) ───────────
                       #
                       # The one PATCH, and it is not the PATCH this list forbids.

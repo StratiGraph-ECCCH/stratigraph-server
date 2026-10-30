@@ -17,6 +17,7 @@ import "./modules/rooms.js";
 import "./modules/people.js";
 import "./modules/groups.js";
 import "./modules/permissions.js";
+import "./modules/transfers.js";
 import "./modules/storage.js";
 import "./modules/health.js";
 

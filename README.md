@@ -167,6 +167,13 @@ Two operations depend on optional libraries: `POST /v1/export-ttl` needs
 | `GET /v1/admin/assets/orphans` | Assets a room's deletion left with no room (operators) *(node)* | yes |
 | `GET /v1/admin/assets` | The files the node holds, one by one (operators) *(node)* | yes |
 | `GET /v1/admin/log` | What the console did, and who did it (operators) *(node)* | yes |
+| `GET /v1/admin/node-key` | This node's public key, for another node's trust list (operators) *(node)* | yes |
+| `GET /v1/admin/trusted-nodes` | The nodes whose people packages this node accepts (operators) *(node)* | yes |
+| `PUT /v1/admin/trusted-nodes/{name}` | Trust another node's packages (operators) *(node)* | yes |
+| `DELETE /v1/admin/trusted-nodes/{name}` | Stop trusting another node (operators) *(node)* | yes |
+| `POST /v1/admin/people-transfer/export` | A signed package of people for another node (operators) *(node)* | yes |
+| `POST /v1/admin/people-transfer/preview` | What a people package would do here — nothing changes (operators) *(node)* | yes |
+| `POST /v1/admin/people-transfer/import` | Bring a signed package of people in (operators) *(node)* | yes |
 | `GET /v1/admin/people` | Everybody this node knows, with their profile (operators) *(node)* | yes |
 | `PUT /v1/admin/people/{orcid}` | Add a person by ORCID, or change their name or profile (operators) *(node)* | yes |
 | `DELETE /v1/admin/people/{orcid}` | Take a person off the node (operators) *(node)* | yes |
