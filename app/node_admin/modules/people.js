@@ -18,9 +18,11 @@ async function render(root) {
   const people = data.people || [];
   root.innerHTML = "";
   const add = button(L("Aggiungi una persona", "Add a person"), () => addDialog(data, root), "pri");
+  const actions = [add];
+  if (data.test_people) actions.unshift(button(L("Persone di prova…", "Test people…"), () => void addTestPeople(people, root)));
   head(root, L("Persone del nodo", "People of the node"),
     escapeHtml(L("Una persona è un ORCID. Il profilo dice cosa può fare sul nodo; nelle stanze contano i ruoli. Chi viene aggiunto senza profilo è un utente.",
-      "A person is an ORCID. The profile says what they may do on the node; in rooms, roles count. Somebody added without a profile is a user.")), [add]);
+      "A person is an ORCID. The profile says what they may do on the node; in rooms, roles count. Somebody added without a profile is a user.")), actions);
 
   const facts = [];
   facts.push(L(`Creare stanze e gruppi: ${data.create_policy === "anyone" ? "chiunque abbia fatto l'accesso" : "editor di nodo e super-amministratori"}`,
@@ -71,6 +73,43 @@ async function render(root) {
       root.appendChild(box);
     }
   } catch { /* the log is a courtesy */ }
+}
+
+/** The n-th test iD (range 0000-0000-…, which ORCID never issues), with its
+ *  ISO 7064 11,2 check digit — the same rule as `people.test_orcid`. */
+function testOrcid(n) {
+  const base = ("00000000" + String(n).padStart(7, "0")).slice(-15);
+  let total = 0;
+  for (const ch of base) total = (total + Number(ch)) * 2;
+  const r = (12 - (total % 11)) % 11;
+  const d = base + (r === 10 ? "X" : String(r));
+  return `${d.slice(0, 4)}-${d.slice(4, 8)}-${d.slice(8, 12)}-${d.slice(12, 16)}`;
+}
+
+const NUMBERS = ["Uno", "Due", "Tre", "Quattro", "Cinque", "Sei", "Sette", "Otto", "Nove", "Dieci",
+  "Undici", "Dodici", "Tredici", "Quattordici", "Quindici", "Sedici", "Diciassette", "Diciotto", "Diciannove", "Venti"];
+
+/** Test people in one gesture, only where the node allows them: iDs in the
+ *  range ORCID never issues, names «Prova …», profile user. Their password is
+ *  given one by one, from each person's panel. */
+async function addTestPeople(people, root) {
+  const how = Number(window.prompt(L("Quante persone di prova?", "How many test people?"), "5"));
+  if (!how || how < 1) return;
+  const taken = new Set(people.map((p) => p.orcid));
+  let n = 1, made = 0;
+  while (made < Math.min(how, 20) && n < 999) {
+    const id = testOrcid(n);
+    if (!taken.has(id)) {
+      try {
+        await api.put(`/admin/people/${id}`, { name: `Prova ${NUMBERS[n - 1] || n}`, profile: "user" });
+        made++;
+      } catch (error) { toast(error.message, "bad"); break; }
+    }
+    n++;
+  }
+  toast(L(`${made} persone di prova aggiunte. La password si dà dal pannello di ognuna.`,
+    `${made} test people added. Each one's password is given from their panel.`));
+  await render(root);
 }
 
 function describe(e) {
