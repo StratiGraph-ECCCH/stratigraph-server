@@ -30,8 +30,11 @@ const STATE = {
 };
 
 async function render(root) {
-  const report = await api.get("/admin/health");
+  const [report, kind] = await Promise.all([
+    api.get("/admin/health"), api.get("/admin/node-kind").catch(() => null),
+  ]);
   root.innerHTML = "";
+  if (kind) root.appendChild(kindCard(kind));
 
   const verdict = STATE[report.verdict] ?? STATE.degraded;
   const head = document.createElement("div");
@@ -71,6 +74,31 @@ async function render(root) {
   root.appendChild(table);
   root.appendChild(versions(report.versions));
 }
+
+/** WHAT KIND OF NODE THIS IS (30 Oct 2026, `app/node_kind.py`): the kind the
+ *  node declares, and what it lacks for that kind, in sentences. Advice, except
+ *  the one rule the server enforces (no test people on an institutional node). */
+function kindCard(kind) {
+  const box = document.createElement("section");
+  box.className = "k-card";
+  box.style.marginBottom = "18px";
+  const word = L(kind.word_it, kind.word_en);
+  const lines = (kind.checks || []).map((c) =>
+    `<p class="k-note ${c.level === "info" ? "" : "bad"}">${escapeHtml(L(c.it, c.en))}</p>`).join("");
+  box.innerHTML = `<span class="k-k">${escapeHtml(L("Che nodo è", "What kind of node"))}</span>
+    <b style="font-size:1.1rem">${escapeHtml(word)}</b>
+    ${lines || `<p class="k-note">${escapeHtml(L("Configurato come serve a questo tipo di nodo.", "Configured as this kind of node needs."))}</p>`}`;
+  return box;
+}
+
+/** The kind, beside the console's name in the bar: one glance says which node
+ *  this is. `/v1/node` is public, so this needs nobody signed in. */
+api.get("/node").then((node) => {
+  const sub = document.getElementById("app-sub");
+  const words = { personal: L("nodo personale", "personal node"), field: L("nodo da campo", "field node"),
+    institutional: L("nodo istituzionale", "institutional node") };
+  if (sub && words[node.kind]) sub.textContent = `${L("console", "console")} · ${words[node.kind]}`;
+}).catch(() => {});
 
 /** What a probe learned, when it learned anything worth a line: a bucket's size,
  *  the number of signing keys a realm published. Never a secret — the endpoint

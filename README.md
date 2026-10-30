@@ -168,6 +168,7 @@ Two operations depend on optional libraries: `POST /v1/export-ttl` needs
 | `GET /v1/admin/assets` | The files the node holds, one by one (operators) *(node)* | yes |
 | `GET /v1/admin/log` | What the console did, and who did it (operators) *(node)* | yes |
 | `GET /v1/admin/node-key` | This node's public key, for another node's trust list (operators) *(node)* | yes |
+| `GET /v1/admin/node-kind` | What kind of node this is, and what it lacks for that kind (operators) *(node)* | yes |
 | `GET /v1/admin/trusted-nodes` | The nodes whose people packages this node accepts (operators) *(node)* | yes |
 | `PUT /v1/admin/trusted-nodes/{name}` | Trust another node's packages (operators) *(node)* | yes |
 | `DELETE /v1/admin/trusted-nodes/{name}` | Stop trusting another node (operators) *(node)* | yes |

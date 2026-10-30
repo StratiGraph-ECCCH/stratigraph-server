@@ -64,6 +64,22 @@ in front of us and only one of them looks like that. The difference is not the
 services — those are the same — it is how the origin gets a certificate, and that
 decides what has to be true about the network.
 
+### The node says which kind it is — `EM_NODE_KIND`
+
+Same server everywhere; the node **declares** its kind and is held to that
+kind's safe defaults (`app/node_kind.py`):
+
+| `EM_NODE_KIND` | what it is | what the server does with it |
+|---|---|---|
+| `institutional` | an institution's node, public name, ORCID sign-in | **refuses test people** even if `EM_ALLOW_TEST_PEOPLE` is on; warns when the public name is local or not https, or Keycloak cannot be managed from the server |
+| `field` | the Field Computing Node, often offline | warns while the trust list is empty (the team cannot arrive) and while test people are on |
+| `personal` | one person's computer (also `EM_NODE_PROFILE=personal`) | nothing to manage |
+| *(unset)* | `node` | works as before; the console asks to declare the kind |
+
+The kind shows in `/v1/node`, `/v1/health`, the console's bar and its *Node
+health* panel (`GET /v1/admin/node-kind` lists what is missing, in sentences).
+The dev stack declares itself `field`.
+
 ### The institutional node — a public name
 
 The templates already assume this shape: `Caddyfile.j2` opens with

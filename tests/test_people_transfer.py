@@ -206,3 +206,18 @@ def test_the_key_is_stable_and_kept_on_disk(tmp_path, monkeypatch):
     a = transfer_module.public_b64(transfer_module.node_key())
     b = transfer_module.public_b64(transfer_module.node_key())
     assert a == b and (tmp_path / "k.pem").stat().st_mode & 0o077 == 0
+
+
+def test_the_field_node_is_told_it_trusts_nobody_until_it_does(nodes, client, monkeypatch):
+    central, field, be = nodes
+    be(field)
+    monkeypatch.setenv("EM_NODE_KIND", "field")
+    report = client.get("/v1/admin/node-kind", headers=AUTH).json()
+    assert report["kind"] == "field" and report["declared"]
+    assert "trusts-nobody" in {c["code"] for c in report["checks"]}
+    key = client.get("/v1/admin/node-key", headers=AUTH).json()
+    client.put("/v1/admin/trusted-nodes/central.example", json={"public_key": key["public_key"]}, headers=AUTH)
+    report = client.get("/v1/admin/node-kind", headers=AUTH).json()
+    assert "trusts-nobody" not in {c["code"] for c in report["checks"]}
+    monkeypatch.setattr(main_module.authenticator, "verify", lambda token: {"orcid": "0000-0000-0000-0028"})
+    assert client.get("/v1/admin/node-kind", headers=AUTH).status_code == 403

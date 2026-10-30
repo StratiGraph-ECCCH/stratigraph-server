@@ -79,8 +79,17 @@ def create_policy(environ: Optional[Dict[str, str]] = None) -> str:
     return "anyone" if value == "anyone" else "editors"
 
 
-def test_people_allowed(environ: Optional[Dict[str, str]] = None) -> bool:
+def test_people_switch(environ: Optional[Dict[str, str]] = None) -> bool:
+    """What the configuration asks for, before the node's kind has its say."""
     return (_env(environ).get("EM_ALLOW_TEST_PEOPLE") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def test_people_allowed(environ: Optional[Dict[str, str]] = None) -> bool:
+    """On only where the configuration asks for it AND the node is not
+    institutional: an institutional node refuses fictitious people whatever the
+    switch says (`app/node_kind.py`)."""
+    from . import node_kind
+    return test_people_switch(environ) and node_kind.kind(environ) != "institutional"
 
 
 def is_test_orcid(orcid: Optional[str]) -> bool:

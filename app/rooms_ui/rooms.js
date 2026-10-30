@@ -929,11 +929,15 @@ async function loadShare(roomId) {
   catch (error) {
     if (error.status === 403) {
       note($("share-note"), t("share.notAllowed"), true);
-      for (const id of ("share-who share-invites share-live share-archive "
+      for (const id of ("share-who share-invites share-live share-archive share-delete "
                         + "share-add share-add-group share-invite-row").split(" ")) {
         const box = $(id);
         if (box) { box.replaceChildren(); box.hidden = true; }
       }
+      // …but WHO SEES THE STUDY stays, read: everybody in the room may know
+      // whether their work is public (E.D., 30 Oct 2026 — «vede il settaggio
+      // ma non può cambiarlo»)
+      await renderAccess(roomId, false);
       return;
     }
     note($("share-note"), t("share.unreachable",
@@ -944,7 +948,80 @@ async function loadShare(roomId) {
   await renderTeams(roomId, roster);
   renderLive(roomId, roster, room);
   renderArchive(roomId, room);
+  renderDelete(roomId);
   await renderInvites(roomId);
+  await renderAccess(roomId, true);
+}
+
+/** WHO SEES THE STUDY (30 Oct 2026). Editable here only when the member list
+ *  answered — the node's own answer to «may you manage this room», never a rule
+ *  of this page; read-only otherwise. The node refuses a write from anybody
+ *  else with its sentence, which is shown as it comes. */
+async function renderAccess(roomId, manage) {
+  const host = $("share-access");
+  if (!host) return;
+  host.hidden = false;
+  let access = null;
+  try { access = await request("GET", `/rooms/${encodeURIComponent(roomId)}/study-access`); }
+  catch (error) { host.replaceChildren(el("p", "note", error.message)); return; }
+  const now = access.visibility === "public" ? t("share.accessPublic") : t("share.accessRestricted");
+  const notes = [now];
+  if (access.embargo) notes.push(t("share.accessEmbargo", { date: access.embargo }));
+  const rows = [el("p", "note", t("share.accessWhy")), shareRow(t("share.access"), notes, [])];
+  if (!manage) {
+    rows.push(el("p", "note", t("share.accessReadOnly")));
+    host.replaceChildren(...rows);
+    return;
+  }
+  const bar = el("div", "toolbar");
+  const pick = el("select", "");
+  for (const value of ["restricted", "public"]) {
+    const option = el("option", "", value === "public" ? t("share.accessPublic") : t("share.accessRestricted"));
+    option.value = value;
+    if (value === (access.visibility || "restricted")) option.selected = true;
+    pick.append(option);
+  }
+  const date = el("input", "");
+  date.type = "date";
+  date.value = access.embargo ? String(access.embargo).slice(0, 10) : "";
+  const save = el("button", "primary", t("share.accessSave"));
+  const said = el("span", "note", "");
+  save.addEventListener("click", async () => {
+    try {
+      await request("PUT", `/rooms/${encodeURIComponent(roomId)}/study-access`,
+                    { visibility: pick.value, embargo: date.value || null });
+      said.textContent = t("share.accessSaved");
+    } catch (error) { said.textContent = error.message; return; }
+    await renderAccess(roomId, true);
+  });
+  bar.append(pick, date, save, said);
+  rows.push(bar);
+  host.replaceChildren(...rows);
+}
+
+/** DELETE — offered to whoever reaches this panel, like the transfer: the node
+ *  refuses an admin with the rule's own sentence (owner or operator only). The
+ *  id is typed back, and the node checks it again (`{"confirm": id}`). */
+function renderDelete(roomId) {
+  const host = $("share-delete");
+  if (!host) return;
+  host.hidden = false;
+  host.replaceChildren(
+    el("p", "note", t("share.deleteWhy")),
+    shareRow(roomId, [], [[t("share.deleteDo"), "", () => void deleteRoom(roomId)]]));
+}
+
+async function deleteRoom(roomId) {
+  const typed = window.prompt(t("share.deleteAsk", { room: roomId }));
+  if (typed === null) return;
+  if (typed.trim() !== roomId) { note($("share-note"), t("share.deleteMismatch"), true); return; }
+  try {
+    await request("DELETE", `/rooms/${encodeURIComponent(roomId)}`, { confirm: roomId });
+  } catch (error) { note($("share-note"), error.message, true); return; }
+  note($("share-note"), t("share.deleted", { room: roomId }));
+  const url = new URL(window.location.href);
+  url.search = "";
+  window.setTimeout(() => { window.location.href = url.toString(); }, 1200);
 }
 
 function renderWho(roomId, roster) {
@@ -1414,6 +1491,8 @@ function paintStrings() {
   set("share-invite-head", t("share.invite"));
   set("share-live-head", t("share.live"));
   set("share-archive-head", t("share.archive"));
+  set("share-access-head", t("share.access"));
+  set("share-delete-head", t("share.delete"));
   set("btn-share-add", t("share.add"));
   set("btn-share-group", t("share.addTeam"));
   set("btn-share-invite", t("share.makeLink"));

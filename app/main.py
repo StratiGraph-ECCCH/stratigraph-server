@@ -59,6 +59,7 @@ from .identity import auth_mode_of, identity_of, node_name, orcid_idp_alias, sig
 from . import accredited as accredited_module
 from . import people as people_module
 from . import keycloak_admin
+from . import node_kind as node_kind_module
 from . import transfer as transfer_module
 from .access import Acl, Group, Role, may_assign, parse_role
 from .access import describe as acl_describe
@@ -444,6 +445,8 @@ class Health(BaseModel):
     #: N2 (4 Oct 2026) · `personal` (a node on one's own computer: the files
     #: stay in the project's folders, registered by reference) or `node`
     profile: str = "node"
+    #: the declared kind of node — personal | field | institutional | node
+    kind: str = "node"
     #: …and the sentence a desk shows about it
     custody: str = ""
     #: WHAT WAS ACTUALLY REACHED, and when. Every other field on this model is a
@@ -760,6 +763,10 @@ class NodeOffers(BaseModel):
     #: what the node calls itself publicly — `EM_PUBLIC_BASE`, which is also
     #: what the handoff links are built from. Empty on a node that never said.
     public_base: str = ""
+    #: what kind of node this is, as it DECLARES it (`EM_NODE_KIND`):
+    #: personal | field | institutional, or `node` when undeclared.
+    #: See `app/node_kind.py`.
+    kind: str = "node"
     #: whether tokens are actually being checked here. `dev-no-auth` is not a
     #: detail to bury: it changes what every list on the page means.
     auth: str = "dev-no-auth"
@@ -820,6 +827,7 @@ def node_offers() -> NodeOffers:
         # that case rather than guessing `localhost`, and the page then says the
         # node has no public name instead of printing one that only works here.
         public_base=ho.public_base(),
+        kind=node_kind_module.kind(),
         auth=authenticator.settings.describe(),
         offers=[NodeOffer(**offer) for offer in node_services()],
         tools=[NodeTool(name=name, label=label,
@@ -894,6 +902,7 @@ def health() -> Health:
                 "layout_window_seconds": int(_ws._layout_limits()["window_seconds"])},
         auth=authenticator.settings.describe(),
         profile=_profile(),
+        kind=node_kind_module.kind(),
         custody=(_PERSONAL_CUSTODY if _profile() == "personal" else ""),
         snapshot_store=snapshot_describe(snapshot_store()),
         asset_store=asset_describe(ASSET_STORE),
@@ -5547,6 +5556,20 @@ def node_public_key(request: Request) -> NodeKeyOut:
     key = transfer_module.public_b64()
     return NodeKeyOut(node=node_name() or "this-node", public_key=key,
                       fingerprint=transfer_module.fingerprint(key))
+
+
+@v1.get("/admin/node-kind", summary="What kind of node this is, and what it lacks for that kind (operators)",
+        tags=["node"])
+def node_kind_report(request: Request) -> Dict[str, Any]:
+    """The declared kind (`EM_NODE_KIND`) and the checks that fit it: sentences
+    in Italian and English, levels bad / warn / info. Advice, except one rule:
+    an institutional node refuses test people (`app/node_kind.py`)."""
+    _require_operator(request)
+    from . import handoff as ho
+    return node_kind_module.describe(
+        public_base=ho.public_base(), kc_configured=keycloak_admin.admin().configured(),
+        trusted_nodes=len(transfer_module.trusted()),
+        test_people_on=people_module.test_people_switch(), node_name=node_name())
 
 
 @v1.get("/admin/trusted-nodes", summary="The nodes whose people packages this node accepts (operators)",

@@ -911,6 +911,8 @@ services:
       # (`attested_by`; empty → the authority of EM_PUBLIC_BASE).
       EM_ACCREDITED_FILE: "/srv/em-node/accredited.yaml"
       EM_NODE_NAME: "${EM_NODE_NAME:-}"
+      # che nodo è (app/node_kind.py): personal | field | institutional
+      EM_NODE_KIND: "${EM_NODE_KIND:-field}"
       # --- where the tools' WEB builds live ------------------------------------
       # Set one and the room browser offers "browser" beside "desktop" for that
       # tool: a plain tab at `<web>?server=&room=`, no token, the app signs
