@@ -591,6 +591,16 @@ def test_FCN_DOWN_SENZA_COMPOSE_non_prova_a_spegnere(tmp_path):
     assert "FCN spento" not in done.stdout, done.stdout
 
 
+#: queste due avviano `fcn-up.sh` nella cartella VERA, e fcn-up vuole i
+#: repository affiancati (chatbot, catalog, s3Dgraphy) — che ci sono sul Mac,
+#: non sulla macchina pulita della CI. Lì si saltano, dicendo perché.
+_AFFIANCATI = all((DEV.parent.parent / r).is_dir() for r in
+                  ("stratigraph-chatbot", "stratigraph-catalog", "s3Dgraphy"))
+needs_siblings = pytest.mark.skipif(
+    not _AFFIANCATI, reason="mancano i repository affiancati (CI pulita)")
+
+
+@needs_siblings
 @needs_bash
 def test_IL_CONSIGLIO_STAMPATO_nomina_il_comando_che_esiste(tmp_path):
     """Le righe che una persona COPIA E INCOLLA.
@@ -656,6 +666,7 @@ def test_SENZA_ENV_DEV_dice_la_riga_da_incollare(tmp_path, monkeypatch):
     assert "up -d" not in _chiamati(tmp_path), _chiamati(tmp_path)
 
 
+@needs_siblings
 @needs_bash
 def test_E_CON_ENV_DEV_non_dice_niente(tmp_path):
     """L'altra metà: il controllo non parla quando non c'è nulla da dire."""
