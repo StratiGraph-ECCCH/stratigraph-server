@@ -71,6 +71,12 @@ sg_ensure_docker || exit 1
 #: ogni giorno, e quello automatico all'accensione, è `./fcn-up.sh` e basta.
 FCN_HOST_SAVED="$( [ -f .env.dev ] && grep -E '^FCN_HOST=' .env.dev | tail -1 | cut -d= -f2- || true)"
 PRIMARY="${ARG_HOST:-${FCN_HOST_SAVED:-em.localhost}}"   # dove punta il browser (URL pubblici)
+#: IN MINUSCOLO (31 ottobre 2026): il browser scrive l'host in minuscolo
+#: («macbook-pro-di-emanuel.local») e Keycloak confronta le redirect URI come
+#: stringhe, quindi un realm reso per «MacBook-Pro-di-Emanuel.local» — il nome
+#: che `scutil` restituisce — rispondeva «Invalid parameter: redirect_uri» al
+#: primo telefono. Un nome host non distingue maiuscole: lo si scrive una volta.
+PRIMARY="$(printf '%s' "$PRIMARY" | tr '[:upper:]' '[:lower:]')"
 # Il nome con cui l'altro computer può raggiungere questo (mai un IP: la CA
 # interna di Caddy non fa certificati per un IP nudo). `scutil` su macOS,
 # `hostname -s` altrove — la differenza sta in `platform.sh`, non qui.

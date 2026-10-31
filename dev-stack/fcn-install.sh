@@ -59,6 +59,12 @@ if [ -z "$ARG_HOST" ] && [ -z "$FCN_HOST_SAVED" ] && [ "$FIELD" = "yes" ]; then
   _h="$(sg_local_hostname)"; [ -n "$_h" ] && ARG_HOST="${_h}.local"
 fi
 PRIMARY="${ARG_HOST:-${FCN_HOST_SAVED:-em.localhost}}"
+#: IN MINUSCOLO (31 ottobre 2026): il browser scrive l'host in minuscolo
+#: («macbook-pro-di-emanuel.local») e Keycloak confronta le redirect URI come
+#: stringhe, quindi un realm reso per «MacBook-Pro-di-Emanuel.local» — il nome
+#: che `scutil` restituisce — rispondeva «Invalid parameter: redirect_uri» al
+#: primo telefono. Un nome host non distingue maiuscole: lo si scrive una volta.
+PRIMARY="$(printf '%s' "$PRIMARY" | tr '[:upper:]' '[:lower:]')"
 
 #: Il conto di cosa è cambiato: serve per la frase finale, perché
 #: «idempotente» vuol dire anche DIRE che non si è fatto niente.

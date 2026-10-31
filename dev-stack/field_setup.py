@@ -150,7 +150,7 @@ def _interactive_ask(prompt: str, *, secret: bool = False) -> str:
 def _default_host() -> str:
     import socket
     short = socket.gethostname().split(".")[0]
-    return f"{short}.local" if short else ""
+    return f"{short}.local".lower() if short else ""
 
 
 def _run_autostart(here: pathlib.Path) -> bool:
@@ -207,7 +207,7 @@ def main(argv: Optional[List[str]] = None, *, here: pathlib.Path = HERE,
         return 2
     node_name = a.node_name.strip() or before.get("EM_NODE_NAME", "") \
         or ask("Un nome per il nodo, come lo leggeranno gli altri nodi (es. scavo-2027): ")
-    host = a.host.strip() or before.get("FCN_HOST", "")
+    host = (a.host.strip() or before.get("FCN_HOST", "")).lower()
     if not host:
         suggested = _default_host()
         host = ask(f"Il nome di rete del nodo [{suggested}]: ") or suggested
