@@ -211,5 +211,8 @@ jobs:
           # l'immagine la legge dal registry, senza tirarla e senza credenziali
           ETICHETTE_EXTRA: org.stratigraph.s3dgraphy.version
         run: |
+          # IN MINUSCOLO: il nome dell'organizzazione ha le maiuscole, e Docker
+          # rifiuta un riferimento che le contiene (18 ottobre 2026: il push
+          # era riuscito, questa verifica no, per questo solo motivo)
           ./scripts/verifica-tirata-anonima.sh \
-            "ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}"
+            "$(echo 'ghcr.io/${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):${{ steps.meta.outputs.version }}"
