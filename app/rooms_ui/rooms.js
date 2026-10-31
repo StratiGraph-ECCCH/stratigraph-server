@@ -299,6 +299,12 @@ async function addDoors(room, box, said) {
                   // carries and the same absence of a token: the web build signs
                   // itself in.
                   () => window.open(target.browser, "_blank", "noopener")]);
+      // …E LO STESSO POSTO SUL TELEFONO (31 ottobre): il QR della stessa
+      // porta, da inquadrare con la fotocamera. Si atterra nella stanza senza
+      // scrivere niente; il QR non porta firme né sessioni, come il link.
+      doors.push([t("door.phone"),
+                  t("door.phone.title", { tool: target.label }),
+                  () => void showQr(box, target, said)]);
     }
     if (!doors.length) continue;            // no door: no group, no lie
     const group = toolGroup(target.label, doors);
@@ -368,6 +374,47 @@ async function copyLink(room, said) {
     await navigator.clipboard.writeText(targets.web);
     note(said, t("door.copied"));
   } catch { note(said, targets.web); }
+}
+
+/** Il QR di una porta del browser, sotto la scheda della stanza.
+ *
+ *  La libreria (qrcode-generator, MIT, Kazuhiko Arase) è VENDUTA qui e
+ *  caricata solo al primo tocco: un nodo da campo non ha rete, e una pagina
+ *  che la chiedesse a un CDN mostrerebbe un QR solo a casa. */
+let qrLoading = null;
+function loadQr() {
+  if (window.qrcode) return Promise.resolve(window.qrcode);
+  qrLoading = qrLoading || new Promise((ok, no) => {
+    const s = document.createElement("script");
+    s.src = new URL("./vendor/qrcode-generator-1.4.4.js", import.meta.url).href;
+    s.onload = () => ok(window.qrcode);
+    s.onerror = () => { qrLoading = null; no(new Error("qr")); };
+    document.head.append(s);
+  });
+  return qrLoading;
+}
+
+async function showQr(box, target, said) {
+  // ASSOLUTO: il telefono non sa da dove viene un «/chat/…»
+  const url = new URL(target.browser, window.location.href).href;
+  let old = box.querySelector(".qr-box");
+  if (old) { old.remove(); return; }           // secondo tocco: si richiude
+  let make;
+  try { make = await loadQr(); } catch {
+    note(said, t("door.phone.failed"), true); showLink(box, url); return;
+  }
+  const qr = make(0, "M");
+  qr.addData(url, "Byte");
+  qr.make();
+  const holder = el("div", "qr-box");
+  const img = el("div", "qr");
+  img.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
+  const svg = img.querySelector("svg");
+  if (svg) { svg.setAttribute("role", "img");
+             svg.setAttribute("aria-label", t("door.phone.alt", { tool: target.label })); }
+  holder.append(img, el("p", "hint", t("door.phone.say", { tool: target.label })),
+                el("code", "", url));
+  box.append(holder);
 }
 
 function showLink(box, text) {

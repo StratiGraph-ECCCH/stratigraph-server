@@ -339,3 +339,10 @@
   #board-since-row { flex-direction: column; align-items: stretch; }
   #board-since { width: 100%; }
 }
+
+/* il QR di una porta: per il telefono, sotto la scheda della stanza */
+.qr-box { margin-top: 10px; display: grid; justify-items: start; gap: 6px; }
+.qr-box .qr { width: 200px; max-width: 100%; background: white; padding: 6px;
+              border-radius: 6px; }
+.qr-box .qr svg { display: block; width: 100%; height: auto; }
+.qr-box code { word-break: break-all; font-size: .8em; }

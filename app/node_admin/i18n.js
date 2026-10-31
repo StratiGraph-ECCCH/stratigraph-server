@@ -239,6 +239,11 @@ const STRINGS = {
     "door.emjson": "em.json",
     "door.desktop.title": "Open {tool} on this machine (stratigraph:// handler)",
     "door.browser.title": "Open {tool} in a new tab ({url})",
+    "door.phone": "phone",
+    "door.phone.title": "Show a QR code: frame it with the phone and {tool} opens in this room",
+    "door.phone.say": "Frame it with the phone's camera: {tool} opens in this room, and asks you to sign in if it does not know you yet.",
+    "door.phone.alt": "QR code that opens {tool} in this room",
+    "door.phone.failed": "The QR code could not be drawn: here is the link to type in.",
     "door.emjson.title": "The container, to import by hand",
     // «paste» IS NOT «open», and the words have to say so: EMtools reads the
     // link out of its own «Open room from link…», so the useful act is putting
@@ -459,6 +464,11 @@ const STRINGS = {
     "door.emjson": "em.json",
     "door.desktop.title": "Apri {tool} su questa macchina (handler stratigraph://)",
     "door.browser.title": "Apri {tool} in una scheda ({url})",
+    "door.phone": "telefono",
+    "door.phone.title": "Mostra un QR: lo inquadri col telefono e {tool} si apre in questa stanza",
+    "door.phone.say": "Inquadralo con la fotocamera del telefono: {tool} si apre in questa stanza, e ti chiede di firmare se non ti conosce ancora.",
+    "door.phone.alt": "QR che apre {tool} in questa stanza",
+    "door.phone.failed": "Non riesco a disegnare il QR: ecco il link da scrivere.",
     "door.emjson.title": "Il contenitore, da importare a mano",
     "door.paste": "copia per EMtools",
     "door.paste.title": "{tool} non registra stratigraph:// — copia il link e incollalo in «Open room from link…»",
