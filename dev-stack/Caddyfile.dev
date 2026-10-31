@@ -16,6 +16,10 @@
 	# a local CA, not ACME: there is nothing public to validate here
 	local_certs
 	auto_https disable_redirects
+	# UN INDIRIZZO NUMERICO non manda il nome (SNI): senza questa riga Caddy
+	# non sa quale certificato dare e la stretta di mano fallisce. Lo si usa
+	# quando il router non fa passare i nomi .local (31 ottobre, iPhone).
+	default_sni {$EM_DEFAULT_SNI:em.localhost}
 }
 
 {$EM_SITE:https://em.localhost} {

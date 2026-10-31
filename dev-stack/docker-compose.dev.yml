@@ -569,9 +569,11 @@ services:
       - caddy_config:/config      # restart mints a new root nobody trusts
     environment:
       # EM_SITE = elenco di indirizzi (con schema) che Caddy serve, es.
-      # "https://em.localhost, https://mac.local". Hostname, MAI un IP nudo:
-      # la CA interna non emette certificati per un IP → handshake TLS fallito.
+      # "https://em.localhost, https://mac.local". Anche un IP va bene: la CA
+      # interna lo certifica, ma chi bussa a un IP non manda il nome (SNI), e
+      # il certificato da dargli lo dice EM_DEFAULT_SNI (31 ottobre).
       EM_SITE: "${EM_SITE:-https://em.localhost}"
+      EM_DEFAULT_SNI: "${EM_DEFAULT_SNI:-em.localhost}"
       EM_DEV_DOMAIN: "${EM_DEV_DOMAIN:-em.localhost}"
     restart: unless-stopped
 

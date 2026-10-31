@@ -86,6 +86,8 @@ addrs="https://em.localhost"
 [ "$PRIMARY" != "em.localhost" ] && addrs="$addrs, https://$PRIMARY"
 [ -n "$BONJOUR" ] && [ "$BONJOUR" != "em.localhost" ] && [ "$BONJOUR" != "$PRIMARY" ] && addrs="$addrs, https://$BONJOUR"
 export EM_SITE="$addrs"
+# il certificato da dare a chi bussa senza un nome (un indirizzo numerico)
+export EM_DEFAULT_SNI="$PRIMARY"
 export EM_DEV_DOMAIN="$PRIMARY"
 
 # ── 3 · gli URL PUBBLICI puntano all'host primario ───────────────────────────
