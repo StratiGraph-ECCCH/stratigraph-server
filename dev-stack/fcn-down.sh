@@ -28,6 +28,11 @@ cd "$(dirname "$0")"                     # stratigraph-server/dev-stack
 # esiste.
 sg_compose_array || exit 1
 COMPOSE+=(-f docker-compose.dev.yml --profile https --profile engine)
+#: il nodo da campo (31 ott 2026): il suo file porta il volume di Keycloak, e
+#: `--wipe` deve conoscerlo per cancellarlo; un `down` semplice lo conserva.
+if [ "${EM_NODE_KIND:-$( [ -f .env.dev ] && grep -E '^EM_NODE_KIND=' .env.dev | tail -1 | cut -d= -f2- || true)}" = "field" ]; then
+  COMPOSE+=(-f docker-compose.field.yml)
+fi
 MODE="down"; STOP_COLIMA="no"
 for a in "$@"; do
   case "$a" in

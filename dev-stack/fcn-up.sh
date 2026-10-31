@@ -134,7 +134,38 @@ export EM_PUBLIC_BASE="https://${PRIMARY}:${HTTPS_PORT}/em"
 # Il file reso è ignorato da git e il compose lo monta via `${REALM_FILE}`, il
 # cui default è il file committato: senza argomenti, `up` monta esattamente
 # quello di prima.
-if [ "$PRIMARY" != "em.localhost" ]; then
+# ── 3-bis · IL NODO DA CAMPO (31 ottobre 2026) ───────────────────────────────
+#
+# `.env.dev` lo dice con `EM_NODE_KIND=field` (lo scrive `./fcn-field-setup.sh`).
+# Allora tre cose cambiano, e solo quelle: il realm nasce SENZA account
+# dimostrativi e con il segreto di em-server di questo nodo
+# (`render_realm.py --campo`); Keycloak tiene i suoi dati su un volume e la
+# lista degli accreditati è quella del nodo (`docker-compose.field.yml`);
+# dopo l'avvio il gestore riceve il suo account (`accredit.sh`).
+env_dev_val() { [ -f .env.dev ] && grep -E "^$1=" .env.dev | tail -1 | cut -d= -f2- || true; }
+FIELD="no"
+[ "${EM_NODE_KIND:-$(env_dev_val EM_NODE_KIND)}" = "field" ] && FIELD="yes"
+if [ "$FIELD" = "yes" ]; then
+  if [ ! -f accredited.field.yaml ]; then
+    echo "✖ il nodo è dichiarato «da campo» ma manca accredited.field.yaml." >&2
+    echo "  Lo prepara, insieme ai segreti:" >&2
+    echo "    ./fcn-field-setup.sh --orcid <il tuo iD> --name \"Nome Cognome\"" >&2
+    exit 1
+  fi
+  REALM_RESO="keycloak/realm-em-dev.campo.json"
+  set +e
+  DEV_CLIENT_SECRET="${DEV_CLIENT_SECRET:-$(env_dev_val DEV_CLIENT_SECRET)}" \
+    python3 render_realm.py --campo --host "$PRIMARY" --porta "$HTTPS_PORT" \
+            --out "$REALM_RESO" --zitto
+  rc=$?
+  set -e
+  if [ "$rc" != 0 ]; then
+    echo "✖ non riesco a preparare il realm del nodo da campo (sopra il perché)." >&2
+    exit 1
+  fi
+  export REALM_FILE="./$REALM_RESO"
+  echo "· nodo da campo: realm senza account dimostrativi, Keycloak con i suoi dati su volume"
+elif [ "$PRIMARY" != "em.localhost" ]; then
   REALM_RESO="keycloak/realm-em-dev.${PRIMARY}.json"
   set +e
   python3 render_realm.py --host "$PRIMARY" --porta "$HTTPS_PORT" \
@@ -177,6 +208,7 @@ sg_need_env_dev || exit 1
 # manca invece di proseguire al buio.
 sg_compose_array || exit 1
 COMPOSE+=(--env-file .env.dev -f docker-compose.dev.yml)
+[ "$FIELD" = "yes" ] && COMPOSE+=(-f docker-compose.field.yml)
 if [ "$LOCAL_S3D" = "yes" ]; then
   COMPOSE+=(-f docker-compose.local-s3d.yml)
   #: E QUESTO È UN BIND MOUNT, NON UN `context:` — quindi il controllo dei
@@ -273,6 +305,28 @@ elif [ "$STUDIO" = "yes" ] && [ "$studio_pronto" != "yes" ]; then
 fi
 
 "${COMPOSE[@]}" --profile https up -d --build
+
+# ── 4-bis-campo · IL GESTORE ENTRA ───────────────────────────────────────────
+#
+# Sul nodo da campo il realm non ha account: quello del gestore lo crea qui
+# `accredit.sh` dalla lista del nodo, appena Keycloak risponde. Idempotente
+# (un account che c'è già si aggiorna, nessuno si toglie). Se Keycloak tarda,
+# lo DICE con il comando da rilanciare e il resto prosegue.
+if [ "$FIELD" = "yes" ]; then
+  kc_port="$(env_dev_val KEYCLOAK_PORT)"; kc_port="${kc_port:-8085}"
+  kc_pronto="no"
+  for _ in $(seq 1 90); do
+    curl -s -o /dev/null --max-time 2 -f "http://localhost:${kc_port}/auth/realms/em-dev" \
+      && { kc_pronto="yes"; break; }
+    sleep 2
+  done
+  if [ "$kc_pronto" = "yes" ] && ./accredit.sh accredited.field.yaml >/dev/null 2>&1; then
+    echo "· nodo da campo: gli account della lista del nodo ci sono (accredited.field.yaml)"
+  else
+    echo "⚠ nodo da campo: non ho potuto creare gli account della lista. Fra un minuto:" >&2
+    echo "    ./accredit.sh accredited.field.yaml" >&2
+  fi
+fi
 
 # ── 4-quinquies · EMSTUDIO, ACCESO ───────────────────────────────────────────
 #

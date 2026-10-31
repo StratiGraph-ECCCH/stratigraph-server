@@ -1,0 +1,32 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# IL NODO DA CAMPO — quello che cambia rispetto al dev-stack (E.D., 31 ott 2026)
+#
+# Lo aggiungono da sé `fcn-up.sh` e `fcn-down.sh` quando `.env.dev` dice
+# `EM_NODE_KIND=field` (lo scrive `./fcn-field-setup.sh`). Due cose, e
+# nient'altro:
+#
+#   1 · KEYCLOAK TIENE I SUOI DATI. Nel dev-stack Keycloak (`start-dev`) scrive
+#       il suo database DENTRO il container: un `down` — cioè `./fcn-down.sh`
+#       senza flag — lo cancella, e con lui gli account, i collegamenti a ORCID
+#       e le password di campo. Per lo sviluppo è comodo (il realm si reimporta
+#       pulito); per una campagna di scavo vorrebbe dire ridare le password a
+#       tutta la squadra ogni mattina. Misurato il 31 ottobre 2026:
+#       `docker inspect em-dev-keycloak` monta soltanto il file del realm.
+#       Qui `/opt/keycloak/data` sta su un volume: il realm si importa la prima
+#       volta e poi resta quello, con le persone dentro. Lo cancella soltanto
+#       `./fcn-down.sh --wipe`.
+#
+#   2 · LA LISTA DEGLI ACCREDITATI È DEL NODO, non del repository:
+#       `accredited.field.yaml` (ignorato da git), che porta il gestore.
+# ═══════════════════════════════════════════════════════════════════════════
+services:
+  keycloak:
+    volumes:
+      - keycloak_field_data:/opt/keycloak/data
+  stratigraph-server:
+    volumes:
+      - ./accredited.field.yaml:/srv/em-node/accredited.yaml:ro
+
+volumes:
+  keycloak_field_data:   # account, collegamenti ORCID, password di campo — DATI
+                         # DELLE PERSONE: senza, ogni `down` li perde

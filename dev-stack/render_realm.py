@@ -176,6 +176,38 @@ def rendi(realm: Dict[str, Any], *, host: str, porta: int,
     return fuori, aggiunte
 
 
+#: ── IL REALM DEL NODO DA CAMPO (E.D., 31 ottobre 2026) ─────────────────────
+#:
+#: Il realm committato è del dev-stack: porta cinque account dimostrativi con la
+#: password uguale al nome (`dev`, `viewer`, `editor`, `editor2`, `outsider`) e
+#: il client confidenziale `em-server` con il segreto `em-dev-secret`, scritto
+#: in chiaro nel repository. Su un nodo che va sullo scavo con dati veri sono due
+#: porte aperte, e la guida le faceva chiudere a mano (passo 9). Qui si chiudono
+#: nel file, prima che Keycloak lo importi:
+#:
+#: * **nessun utente**: chi entra è creato da `accredit.sh` (il gestore, dal suo
+#:   ORCID) o dalla console (tutti gli altri);
+#: * **il segreto di `em-server`** è quello generato per QUESTO nodo
+#:   (`DEV_CLIENT_SECRET` in `.env.dev`), mai quello del repository.
+#:
+#: Funzione pura, come `rendi`: un dict entra, un dict esce.
+SEGRETO_DEL_REPOSITORY = "em-dev-secret"
+
+
+def per_il_campo(realm: Dict[str, Any], *, segreto_server: str) -> Dict[str, Any]:
+    if not segreto_server or segreto_server == SEGRETO_DEL_REPOSITORY:
+        raise NomeRifiutato(
+            "il nodo da campo vuole il SUO segreto per il client em-server "
+            "(DEV_CLIENT_SECRET in .env.dev): quello del repository è pubblico. "
+            "Lo genera ./fcn-field-setup.sh")
+    reso = copy.deepcopy(realm)
+    reso["users"] = []
+    for client in reso.get("clients") or []:
+        if client.get("clientId") == "em-server":
+            client["secret"] = segreto_server
+    return reso
+
+
 def _perche_non_si_scrive(destinazione: pathlib.Path) -> List[str]:
     """Le righe da dire quando non si può scrivere là, o [] quando si può.
 
@@ -240,8 +272,11 @@ def _perche_non_si_scrive(destinazione: pathlib.Path) -> List[str]:
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Rende il realm del dev-stack per un host primario.")
-    ap.add_argument("--host", required=True,
+    ap.add_argument("--host", default=CANONICA,
                     help="il nome primario, come passato a fcn-up.sh (es. fcn.local)")
+    ap.add_argument("--campo", action="store_true",
+                    help="il realm del nodo da campo: nessun account dimostrativo, e il "
+                         "segreto di em-server preso da DEV_CLIENT_SECRET (ambiente)")
     ap.add_argument("--porta", type=int, default=8443)
     ap.add_argument("--in", dest="ingresso", default="keycloak/realm-em-dev.json")
     ap.add_argument("--out", dest="uscita", default=None,
@@ -256,12 +291,14 @@ def main(argv: List[str] | None = None) -> int:
     realm = json.loads(sorgente.read_text())
 
     try:
+        if a.campo:
+            realm = per_il_campo(realm, segreto_server=os.environ.get("DEV_CLIENT_SECRET", ""))
         reso, aggiunte = rendi(realm, host=a.host, porta=a.porta)
     except NomeRifiutato as e:
         print(f"✖ {e}", file=sys.stderr)
         return 2
 
-    if not aggiunte:
+    if not aggiunte and not a.campo:
         if not a.zitto:
             print(f"· il realm già copre {a.host}:{a.porta}: niente da rendere.")
         #: 3 e non 0: chi chiama deve poter distinguere «reso» da «non serviva»
@@ -269,7 +306,7 @@ def main(argv: List[str] | None = None) -> int:
         return 3
 
     destinazione = pathlib.Path(
-        a.uscita or sorgente.with_suffix(f".{a.host}.json"))
+        a.uscita or sorgente.with_suffix(".campo.json" if a.campo else f".{a.host}.json"))
 
     #: ── SI PUÒ SCRIVERE LÀ? CHIESTO PRIMA, NON SCOPERTO DAL TRACEBACK ──────
     #:
@@ -297,6 +334,9 @@ def main(argv: List[str] | None = None) -> int:
     if not a.zitto:
         n = sum(len(v) for v in aggiunte.values())
         print(f"✔ {destinazione}")
+        if a.campo:
+            print("  nodo da campo: nessun account dimostrativo, il segreto di em-server è "
+                  "quello di questo nodo")
         for client, uris in aggiunte.items():
             print(f"  client {client}: {len(uris)} redirect URI nuove")
             for u in uris:
