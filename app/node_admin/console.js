@@ -61,6 +61,7 @@ let authConfig = null;
 //: token: a refresh token in web storage is a credential that outlives the tab.
 let refreshToken = "";
 let refreshTimer = 0;
+const SILENT_KEY = "sg.console.silent-tried";
 //: LA VIA D'USCITA. Misurato il 7 ottobre chiedendo al DOCUMENTO e non al
 //: testo: questa pagina aveva ZERO ancore. Era l'isola più isolata delle
 //: cinque — chi amministra un nodo ci arriva scrivendo un indirizzo e ne esce
@@ -153,9 +154,15 @@ const _confirm = makeConfirm(t);
 export const confirmNamed = _confirm.confirmNamed;
 export const confirmTyped = _confirm.confirmTyped;
 
+//: LA CASA È DI TUTTI (31 ott 2026): un modulo con `everyone: true` lo vede
+//: chiunque abbia firmato — le sue stanze, gli strumenti — e gli altri solo
+//: l'operatore. Chi decide chi è operatore resta `/v1/admin/whoami`.
+let isOperator = false;
+const visible = () => MODULES.filter((m) => isOperator || m.everyone);
+
 function drawNav() {
   nav.innerHTML = "";
-  for (const module of MODULES) {
+  for (const module of visible()) {
     const button = document.createElement("button");
     button.className = "nav-item" + (active === module ? " on" : "");
     button.textContent = module.title;
@@ -241,11 +248,21 @@ async function boot() {
   if (authConfig && oidc.returningFromIdp()) {
     const result = await oidc.completeSignIn(authConfig);
     if (result.ok) adoptSession(result);
-    else say(`Sign-in did not complete: ${result.error}`, "bad");
+    // la prova silenziosa che non trova una sessione non è un errore: si
+    // mostra la porta, e basta
+    else if (!result.silent) say(`Sign-in did not complete: ${result.error}`, "bad");
   }
 
   let me = await whoami();
   if (me === undefined) return;                 // the API itself did not answer
+  if (!me && authConfig?.enforcing && authConfig.authorization_endpoint
+      && !oidc.returningFromIdp() && !sessionStorage.getItem(SILENT_KEY)) {
+    // UNA PROVA SILENZIOSA PER SCHEDA: chi ha già firmato altrove su questo
+    // nodo (StratiField, EMStudio web) entra senza vedere la porta
+    sessionStorage.setItem(SILENT_KEY, "1");
+    await oidc.signIn(authConfig, { silent: true });
+    return;
+  }
   if (!me) {
     // ASK THE REALM, not the person. The console has no login of its own — it
     // sends you to the node's own IdP and comes back with the same kind of token
@@ -273,6 +290,13 @@ async function enter(me) {
   whoEl.textContent = me.operator
     ? `operator${me.orcid ? " · " + me.orcid : " · dev mode"}`
     : (me.orcid || "signed in");
+  isOperator = me.operator === true;
+  document.body.classList.remove("porta");
+  if (!me.operator && visible().length) {
+    drawNav();
+    await show(visible()[0]);
+    return;
+  }
   if (!me.operator) {
     panel.innerHTML = "";
     // The refusal a person can act on: the capability is not something they can
@@ -297,27 +321,49 @@ async function enter(me) {
     return;
   }
   drawNav();
-  if (MODULES.length) await show(MODULES[0]);
+  if (visible().length) await show(visible()[0]);
 }
 
 /** The signed-out screen: one button, and the fallback under it. */
 function showSignIn() {
-  whoEl.textContent = t("console.notSignedIn");
+  // LA PORTA DEL NODO (31 ott 2026, scrivania «casa del nodo»): prima
+  // dell'accesso una cosa sola da fare, entrare. Niente barra, niente moduli.
+  document.body.classList.add("porta");
+  whoEl.textContent = "";
+  nav.innerHTML = "";
   panel.innerHTML = "";
   const box = document.createElement("section");
-  box.className = "card";
-  const head = document.createElement("h2");
-  head.textContent = t("action.signin");
-  box.appendChild(head);
+  box.className = "porta-box";
+  const title = document.createElement("h1");
+  title.textContent = t("porta.title");
+  const why = document.createElement("p");
+  why.className = "porta-why";
+  why.textContent = t("porta.why");
+  box.append(title, why);
 
   if (authConfig?.enforcing && authConfig.authorization_endpoint) {
-    const line = document.createElement("p");
-    line.className = "muted";
-    line.textContent = t("console.signin.where", { issuer: authConfig.issuer });
-    const button = document.createElement("button");
-    button.textContent = t("console.signin.realm");
-    button.addEventListener("click", () => void oidc.signIn(authConfig));
-    box.append(line, button);
+    const ways = document.createElement("div");
+    ways.className = "porta-ways";
+    const orcidReady = authConfig.orcid_idp && authConfig.orcid_idp_ready !== false;
+    const main = document.createElement("button");
+    main.className = "porta-main";
+    main.id = "porta-signin";
+    main.innerHTML = orcidReady
+      ? `<span class="porta-orcid" aria-hidden="true">iD</span><span>${escapeHtml(t("porta.orcid"))}</span>`
+      : `<span>${escapeHtml(t("porta.signin"))}</span>`;
+    main.addEventListener("click", () => void oidc.signIn(authConfig,
+      { hint: orcidReady ? authConfig.orcid_idp : "" }));
+    ways.appendChild(main);
+    if (orcidReady) {
+      // la password del nodo: la pagina del realm, che la offre accanto a ORCID
+      const local = document.createElement("button");
+      local.className = "porta-local";
+      local.id = "porta-password";
+      local.textContent = t("porta.password");
+      local.addEventListener("click", () => void oidc.signIn(authConfig));
+      ways.appendChild(local);
+    }
+    box.appendChild(ways);
   } else {
     const line = document.createElement("p");
     line.className = "muted";
@@ -328,8 +374,25 @@ function showSignIn() {
     box.appendChild(line);
   }
 
+  // SENZA ACCESSO: quello che il nodo offre a chiunque, dalle sue facce
+  const quiet = document.createElement("nav");
+  quiet.className = "porta-quiet";
+  quiet.setAttribute("aria-label", t("porta.open"));
+  const link = (href, text) => {
+    const a = document.createElement("a");
+    a.href = href; a.textContent = text;
+    quiet.appendChild(a);
+  };
+  void api.get("/node").then((node) => {
+    const catalogue = (node?.offers || []).find((o) => /catalog/i.test(o.id || o.name || ""));
+    if (catalogue?.url) link(catalogue.url, t("porta.catalog"));
+    link("../tools/", t("porta.tools"));
+    if (DOCS) link(DOCS, t("porta.guide"));
+  }).catch(() => { link("../tools/", t("porta.tools")); });
+  box.appendChild(quiet);
+
   const advanced = document.createElement("details");
-  advanced.className = "small";
+  advanced.className = "small porta-dev";
   const summary = document.createElement("summary");
   summary.textContent = t("console.token.pasteInstead");
   const paste = document.createElement("button");
@@ -340,6 +403,9 @@ function showSignIn() {
   box.appendChild(advanced);
   panel.appendChild(box);
 }
+
+/** Dove sta la guida del nodo: la documentazione pubblicata del server. */
+const DOCS = "https://docs.extendedmatrix.org/projects/stratigraph-server-doc/";
 
 /** The old way, kept: one dialog, memory only, and a re-check of `whoami`. */
 async function askForToken() {

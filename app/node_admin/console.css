@@ -337,3 +337,24 @@ details.small button { margin-top: .4rem; }
 .k-batch { position: sticky; top: 0; z-index: 5; }
 .k-batch-acts { display: flex; gap: 8px; flex-wrap: wrap; }
 .k-progress { font-weight: 600; }
+
+/* ── LA PORTA DEL NODO (31 ott 2026) — prima dell'accesso, una cosa sola ── */
+body.porta #node-bar, body.porta #back-door, body.porta .shell > nav,
+body.porta #reload, body.porta #who { display: none; }
+body.porta .shell { justify-content: center; }
+body.porta #panel { display: flex; justify-content: center; align-items: center; flex: 1; }
+.porta-box { width: 100%; max-width: 560px; padding: 56px 20px; display: flex; flex-direction: column; gap: 22px; }
+.porta-box h1 { margin: 0; font-family: var(--sg-font-display, inherit); font-size: clamp(1.8rem, 4vw, 2.5rem); line-height: 1.15; }
+.porta-why { margin: 0; font-size: 1.06rem; line-height: 1.6; color: var(--sg-muted); }
+.porta-ways { display: flex; flex-direction: column; gap: 10px; }
+.porta-main { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 52px; padding: 0 24px; border-radius: 12px; border: 0; background: var(--sg-accent); color: var(--sg-surface); font: inherit; font-weight: 600; font-size: 1.06rem; cursor: pointer; }
+.porta-orcid { width: 24px; height: 24px; border-radius: 50%; background: var(--sg-surface); color: var(--sg-info-ink); display: inline-grid; place-items: center; font-size: .62rem; font-weight: 700; }
+.porta-local { align-self: center; background: none; border: 0; color: var(--sg-info-ink); text-decoration: underline; font: inherit; font-size: .95rem; padding: 10px 6px; cursor: pointer; }
+.porta-quiet { display: flex; flex-wrap: wrap; gap: 8px 24px; border-top: 1px solid var(--sg-line); padding-top: 18px; }
+.porta-quiet a { padding: 6px 0; color: var(--sg-info-ink); }
+.porta-dev { color: var(--sg-muted); font-size: .8rem; }
+/* sul fondo scuro l'oltremare si schiarisce: il testo passa all'inchiostro chiaro */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-sg-theme="light"]) .porta-main { color: var(--sg-text); }
+}
+:root[data-sg-theme="dark"] .porta-main { color: var(--sg-text); }

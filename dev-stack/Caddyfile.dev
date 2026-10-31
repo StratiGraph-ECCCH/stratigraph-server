@@ -273,7 +273,9 @@
 		# measured, and it looks exactly like a working root until you read the
 		# content-length. Inside `handle /` the path is already decided, so the
 		# matcher is `*`.
-		redir * /em/rooms/ 302
+		# LA PORTA DEL NODO (31 ott 2026): la radice porta alla casa, che prima
+		# dell'accesso è la porta e dopo è «Le tue stanze».
+		redir * /em/admin/ 302
 	}
 
 	# WHAT AN UPSTREAM THAT IS NOT THERE SAYS. One block, because `handle_errors`

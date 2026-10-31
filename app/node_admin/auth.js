@@ -102,7 +102,7 @@ function base64url(bytes) {
  * The caller is responsible for trying it AT MOST ONCE per door: a redirect loop
  * is worse than a refusal. (Same ring, same trap, as EMStudio's `trySilentSignIn`.)
  */
-export async function signIn(config, { silent = false } = {}) {
+export async function signIn(config, { silent = false, hint = "" } = {}) {
   const verifier = randomVerifier();
   const challenge = await challengeFor(verifier);
   const state = randomVerifier();
@@ -133,6 +133,9 @@ export async function signIn(config, { silent = false } = {}) {
   url.searchParams.set("code_challenge_method", "S256");
   url.searchParams.set("state", state);
   if (silent) url.searchParams.set("prompt", "none");
+  // DRITTI A ORCID (31 ott 2026, la porta del nodo): il realm salta la sua
+  // pagina e manda al fornitore che il nodo dichiara in `orcid_idp`
+  if (hint) url.searchParams.set("kc_idp_hint", hint);
   window.location.assign(url.toString());
 }
 

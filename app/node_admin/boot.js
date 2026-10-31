@@ -13,6 +13,8 @@
 import { boot } from "./console.js";
 
 // the order of the nav, as the desk of 30 October 2026 drew it
+import "./modules/home.js";
+import "./modules/tools.js";
 import "./modules/rooms.js";
 import "./modules/people.js";
 import "./modules/groups.js";

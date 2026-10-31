@@ -121,3 +121,32 @@ dialog.k-dialog form { display: grid; gap: 10px; }
 dialog.k-dialog input { border: 1px solid var(--sg-line); background: var(--sg-surface); color: var(--sg-text); border-radius: 6px; padding: 8px 10px; font: inherit; }
 dialog.k-dialog menu { display: flex; gap: 8px; justify-content: flex-end; padding: 0; margin: 4px 0 0; }
 .k-db > .k-btn { justify-self: start; }
+
+/* ── la casa: le tue stanze, gli strumenti (31 ott 2026) ── */
+.h-rooms { display: flex; flex-direction: column; gap: 12px; }
+.h-room { background: var(--sg-surface); border: 1px solid var(--sg-line); border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.h-room-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.h-room-head > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.h-room-title { font-size: 1.12rem; font-weight: 600; color: var(--sg-text); text-decoration: none; }
+.h-room-line { font-size: .9rem; color: var(--sg-muted); }
+.h-role { font-size: .8rem; font-weight: 600; padding: 3px 11px; border-radius: 999px; background: var(--sg-surface-sunk); color: var(--sg-muted); }
+.h-doors { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.h-doors .k-btn { min-height: 40px; }
+.h-doors-lab { font-size: .9rem; color: var(--sg-muted); padding-right: 2px; }
+.h-grow { flex: 1; }
+.h-said { font-size: .9rem; color: var(--sg-muted); }
+.h-said:empty { display: none; }
+.h-archived { margin-top: 16px; background: var(--sg-surface-sunk); border-radius: 12px; padding: 12px 16px; }
+.h-archived summary { cursor: pointer; font-weight: 600; }
+.qr-box { display: grid; justify-items: start; gap: 6px; }
+.qr-box .qr { width: 190px; max-width: 100%; background: white; padding: 6px; border-radius: 6px; }
+.qr-box .qr svg { display: block; width: 100%; height: auto; }
+.qr-box code { word-break: break-all; font-size: .8em; }
+.t-grid { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+.t-card { flex: 1 1 380px; min-width: 0; background: var(--sg-surface); border: 1px solid var(--sg-line); border-radius: 14px; padding: 20px; }
+.t-card h2 { margin: 0 0 12px; }
+.t-card ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.t-step { display: flex; gap: 12px; align-items: flex-start; }
+.t-step p { margin: 4px 0 8px; color: var(--sg-muted); line-height: 1.55; }
+.t-n { width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--sg-surface-sunk); display: grid; place-items: center; font-weight: 600; font-size: .85rem; }
+a.k-btn { display: inline-flex; align-items: center; text-decoration: none; }
