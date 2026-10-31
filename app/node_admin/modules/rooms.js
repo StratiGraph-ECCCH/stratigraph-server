@@ -142,6 +142,33 @@ async function render(root) {
   drawRows();
 }
 
+/** UNA PER VOLTA ERA LENTO E MUTO (31 ottobre: 36 stanze, ~0,4 s l'una, e
+ *  nessun segno di vita — la seconda volta si è premuto di nuovo). Sei alla
+ *  volta, e un contatore che dice a che punto si è. */
+async function inPool(list, work, say) {
+  const POOL = 6;
+  let next = 0, done = 0;
+  const refused = [];
+  const note = document.createElement("div");
+  note.className = "k-banner k-progress";
+  note.setAttribute("role", "status");
+  document.querySelector(".k-batch, .k-banner")?.before(note);
+  const paint = () => { note.textContent = say(done, list.length); };
+  paint();
+  document.querySelectorAll(".k-batch button, .k-banner button").forEach((b) => { b.disabled = true; });
+  async function lane() {
+    while (next < list.length) {
+      const r = list[next++];
+      try { await work(r); } catch (error) { refused.push(`${r.room_id}: ${error.message}`); }
+      done++;
+      paint();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(POOL, list.length) }, lane));
+  note.remove();
+  return { done: list.length - refused.length, refused };
+}
+
 /** Archiviare (o riaprire) più stanze: un segno, mai una cancellazione. Le
  *  implicite non si archiviano — non hanno un registro su cui scrivere il segno —
  *  e per questo la barra non le offre. */
@@ -152,15 +179,11 @@ async function archiveMany(list, archived, root) {
         `archiving ${n} rooms: they stay readable, nobody writes in them`)
     : L(`la riapertura di ${n} stanze`, `restoring ${n} rooms`);
   if (!confirmTyped(what, archived ? L("ARCHIVIA", "ARCHIVE") : L("RIAPRI", "RESTORE"))) return;
-  let done = 0;
-  const refused = [];
-  for (const r of list) {
-    try {
-      await api.post(`/admin/rooms/${encodeURIComponent(r.room_id)}/archive`,
-                     { archived, confirm_room_id: r.room_id });
-      done++;
-    } catch (error) { refused.push(`${r.room_id}: ${error.message}`); }
-  }
+  const { done, refused } = await inPool(list,
+    (r) => api.post(`/admin/rooms/${encodeURIComponent(r.room_id)}/archive`,
+                    { archived, confirm_room_id: r.room_id }),
+    (d, n) => archived ? L(`Archivio… ${d} di ${n}`, `Archiving… ${d} of ${n}`)
+                       : L(`Riapro… ${d} di ${n}`, `Restoring… ${d} of ${n}`));
   for (const r of list) picked.delete(r.room_id);
   toast((archived ? L(`${done} stanze archiviate.`, `${done} rooms archived.`)
                   : L(`${done} stanze riaperte.`, `${done} rooms restored.`))
@@ -180,12 +203,9 @@ async function deleteMany(list, root) {
         `deleting ${n} implicit rooms, with their em.json and every revision`)
     : L(`l'eliminazione DEFINITIVA di ${n} stanze (${names}), con i loro em.json, le revisioni, i membri e gli inviti. Non si può annullare`,
         `the PERMANENT deletion of ${n} rooms (${names}), with their em.json, revisions, members and invitations. It cannot be undone`), word)) return;
-  let done = 0;
-  const refused = [];
-  for (const r of list) {
-    try { await api.del(`/rooms/${encodeURIComponent(r.room_id)}`, { confirm: r.room_id }); done++; }
-    catch (error) { refused.push(`${r.room_id}: ${error.message}`); }
-  }
+  const { done, refused } = await inPool(list,
+    (r) => api.del(`/rooms/${encodeURIComponent(r.room_id)}`, { confirm: r.room_id }),
+    (d, n) => L(`Elimino… ${d} di ${n}`, `Deleting… ${d} of ${n}`));
   for (const r of list) picked.delete(r.room_id);
   toast(L(`${done} stanze eliminate.`, `${done} rooms deleted.`) + (refused.length ? " " + L(`${refused.length} rifiutate.`, `${refused.length} refused.`) : ""),
     refused.length ? "bad" : "");

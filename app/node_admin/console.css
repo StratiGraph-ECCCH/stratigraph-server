@@ -336,3 +336,4 @@ details.small button { margin-top: .4rem; }
 .k-pick input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
 .k-batch { position: sticky; top: 0; z-index: 5; }
 .k-batch-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.k-progress { font-weight: 600; }
