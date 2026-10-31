@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from s3dgraphy import api as em
 
+from . import holds
 from . import presence
 from .oplog import journal_for
 from .store import RoomStore, SnapshotStore, deep_copy, room_store_from_env
@@ -221,6 +222,10 @@ class Room:
         #: secondi per dieci presenti costerebbe cento volte se stesso in roster
         #: rimandati per non dire niente di nuovo.
         self.roster_shape: Optional[tuple] = None
+        #: CHI TIENE QUALE `.blend` (31 ott 2026, `app/holds.py`). In memoria
+        #: come la presenza: un riavvio le libera, i client le riprendono al
+        #: loro prossimo rinnovo.
+        self.holds = holds.Holds()
         self.lock = asyncio.Lock()
         #: dev28 · how many ops arrived declaring an access mode other than the
         #: one the sender's token says, and were corrected by the relay. In

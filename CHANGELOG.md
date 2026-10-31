@@ -26,6 +26,17 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
 
 ### Aggiunto
 
+- **Chi tiene un `.blend`: la prenotazione nella stanza** (MICRO-BLEND-OFFICINA-2,
+  decisioni di E.D. D7/D8, 31 ott 2026). Verbo `hold` (`take` / `renew` /
+  `release`, `force` per owner e admin) su una chiave = il percorso del `.blend`
+  relativo al progetto; frame `holds` a tutti a ogni cambio (e alla porta, come
+  quarto frame, solo se qualcuno tiene qualcosa); `hold_refused` con la frase e
+  chi lo tiene. Scade 15 min dopo l'ultimo `take`/`renew` (non a ogni frame),
+  una disconnessione non libera; un lettore vede ma non prende. In RAM come la
+  presenza: un riavvio libera tutto, il `renew` successivo della stessa persona
+  la riprende. Annunciato in `/v1/health` (`room_holds`) e in `host_info`
+  (`holds`, `holds_ttl_seconds`). `app/holds.py`, `tests/test_holds.py`.
+
 - **I gruppi chiusi viaggiano nelle stanze** (MICRO «globo, interazione» p.5,
   decisione di E.D., 23 ott 2026: tutto condiviso). Il frame `layout` porta
   anche `folded: {id: chiuso?}` (può portare solo quello): un gruppo del grafo

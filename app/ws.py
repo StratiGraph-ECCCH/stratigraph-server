@@ -42,6 +42,7 @@ from .access import (Acl, Groups, Role, acl_store_from_env,
 from .auth import authenticator
 from .identity import identity_of, signature_auth
 from . import keeping
+from . import holds as holds_module
 from . import presence
 from .rooms import RoomRegistry, now_iso
 from .store import store_from_env
@@ -566,6 +567,11 @@ async def room_socket(websocket: WebSocket, room_id: str,
                             # gruppi (`folded` nel frame `layout`)
                             "layout_folded": True,
                             "layout_limits": _layout_limits(),
+                            # CHI TIENE UN `.blend` (31 ott 2026): questa
+                            # stanza conosce il verbo `hold`, e quanto dura
+                            # una prenotazione senza segno
+                            "holds": True,
+                            "holds_ttl_seconds": holds_module.TTL_SECONDS,
                             "accepts_commands": False}, source="em-server"))
     await _send(websocket, envelope("snapshot", {
                             "doc": room.document,
@@ -575,6 +581,12 @@ async def room_socket(websocket: WebSocket, room_id: str,
     # presence closes the JOIN — three frames, always the same three, so a client
     # knows when it has arrived without counting
     await _broadcast_presence(room)
+    # …E LE PRENOTAZIONI, SE CE NE SONO (31 ott 2026). Un quarto frame, ma solo
+    # quando qualcuno tiene un `.blend`: la stretta di mano resta di tre frame
+    # in una stanza senza prenotazioni, e chi entra in una che ne ha sa subito
+    # cosa è in sola lettura invece di scoprirlo al primo `take` rifiutato.
+    if room.holds.alive():
+        await _send(websocket, _holds_frame(room))
     # …and only then the replay: what a late arrival missed comes as the stream
     # it would have received had it been here, not as part of the handshake
     # …E SOLO SE IL SERVER LO CONCEDE. Il piano è stato deciso alla porta e
@@ -781,6 +793,10 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
         await _layout(room, member, websocket, message, payload, author)
         return
 
+    if kind == "hold":
+        await _hold(room, member, websocket, payload, author)
+        return
+
     if kind == "select":
         # awareness, soft and never a lock (design P4 §6)
         ids = payload.get("node_ids") or ([payload["node_id"]]
@@ -834,6 +850,8 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
             "connection_id": member.connection_id,
             "layout": True,
             "layout_folded": True,
+            "holds": True,
+            "holds_ttl_seconds": holds_module.TTL_SECONDS,
             "keeping": _keeping_info(room)}, source="em-server"))
         if not member.saves_itself:
             # Un client che si è appena tolto la responsabilità può avere
@@ -847,6 +865,54 @@ async def _handle(room, member, websocket: WebSocket, message: Dict[str, Any],
         # which is the failure direction we want.
         member.watermark = str(payload.get("ts") or member.watermark or now_iso())
         return
+
+
+def _holds_frame(room) -> Dict[str, Any]:
+    return envelope("holds", {"holds": room.holds.alive(),
+                              "ttl_seconds": holds_module.TTL_SECONDS},
+                    source="em-server")
+
+
+async def _hold(room, member, websocket: WebSocket, payload: Dict[str, Any],
+                author: Optional[str]) -> None:
+    """`hold` — prendere, rinnovare, lasciare un `.blend` (`app/holds.py`).
+
+    Il ruolo si rilegge qui come per le scritture: un lettore vede la lista ma
+    non prende niente, e lo sa da un `hold_refused` con la frase (non da un
+    silenzio). Una prenotazione cambiata va a TUTTI, chi l'ha chiesta compreso:
+    è la sua conferma."""
+    action = str(payload.get("action") or "")
+    key = payload.get("key")
+
+    async def refuse(reason: str, holder: Optional[Dict[str, Any]] = None) -> None:
+        await _send(websocket, envelope("hold_refused", {
+            "key": key, "action": action, "reason": reason, "holder": holder},
+            source="em-server"))
+
+    role = _role_now(room, member)
+    if role != member.role:
+        await _access_changed(websocket, room, member, role)
+    if action in ("take", "renew") and not (role and role.can_write):
+        await refuse("this room is read-only for your role: you may open the .blend "
+                     "read only, not hold it")
+        return
+    try:
+        got = room.holds.apply(
+            action, key, person=str(author or member.author or ""),
+            display=str(getattr(member, "display", "") or author or ""),
+            host=str(payload.get("host") or ""), client=str(payload.get("client") or ""),
+            connection_id=member.connection_id, force=bool(payload.get("force")),
+            may_manage=bool(role and role.can_manage))
+    except holds_module.HoldError as exc:
+        await refuse(str(exc))
+        return
+    if not got["ok"]:
+        await refuse(got["reason"], got.get("holder"))
+        return
+    if got["changed"]:
+        message = _holds_frame(room)
+        for socket in list(room.sockets.values()):
+            await _send(socket, message)
 
 
 def _layout_limits() -> Dict[str, Any]:
