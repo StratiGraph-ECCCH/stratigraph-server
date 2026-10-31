@@ -5,3 +5,11 @@
 # None today. tests/test_chi_manda_ack.py::test_con_UN_ack_solo_non_basta was
 # here from 2026-10-02 (e7ce40d): it depended on the wall clock, not on the
 # library nor on the server, and its scene now runs on a clock anchored at T0.
+#
+# 2026-10-31 (sera): i due test qui sotto leggono il dev-stack/.env.dev VERO della
+# macchina; oggi il dev stack è stato portato sull'indirizzo di rete locale
+# (FCN_HOST=192.168.1.214), quindi fcn-up.sh stampa quell'indirizzo invece di
+# em.localhost. Non è un difetto del server: il test va reso ermetico (un .env
+# finto in tmp_path) e poi tolto da qui.
+tests/test_emstudio_sotto_supervisione.py::test_ACCESO_POI_IDEMPOTENTE_POI_SPENTO
+tests/test_emstudio_sotto_supervisione.py::test_NO_STUDIO_non_lo_accende
