@@ -27,6 +27,12 @@ on:
   push:
     tags:
       - 'v*'
+    # L'INTEGRAZIONE CONTINUA (31 ott 2026, E.D.): ogni spinta su main chiede
+    # «la versione di pyproject.toml ha già la sua immagine?». Se no, la fa, la
+    # pubblica e mette il tag. Cambiare la versione È rilasciare: nessun passo a
+    # mano da ricordare. Una spinta che non cambia la versione non fa niente.
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       s3dgraphy_version:
@@ -40,11 +46,38 @@ on:
 # ostaggio un artefatto del progetto è la forma che qui si sta smontando, non
 # quella che si sta copiando.
 permissions:
-  contents: read
+  contents: write     # il tag della versione, messo da qui dopo l'immagine
   packages: write
 
 jobs:
+  # ── C'È GIÀ? ─────────────────────────────────────────────────────────────
+  # La versione detta in semver (1.6.0.dev45 → 1.6.0-dev.45) e se il suo tag
+  # esiste. Su un tag si costruisce sempre; su main solo se il tag manca.
+  decidi:
+    runs-on: ubuntu-latest
+    outputs:
+      versione: ${{ steps.v.outputs.versione }}
+      costruisci: ${{ steps.v.outputs.costruisci }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        run: |
+          v=$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -1)
+          s=$(echo "$v" | sed -E 's/\.?(dev|a|b|rc)\.?([0-9]+)$/-\1.\2/')
+          echo "versione=$s" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref_type }}" = "tag" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "costruisci=true" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --tags origin "refs/tags/v$s" >/dev/null; then
+            echo "costruisci=false" >> "$GITHUB_OUTPUT"
+            echo "v$s ha già la sua immagine: niente da fare." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "costruisci=true" >> "$GITHUB_OUTPUT"
+            echo "v$s è nuova: costruisco, pubblico, metto il tag." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   immagine:
+    needs: decidi
+    if: needs.decidi.outputs.costruisci == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -128,7 +161,7 @@ jobs:
           # `latest`: con tre ambienti è la via più corta per mettere una dev in
           # produzione. Ogni ambiente nomina una versione, o meglio un digest.
           tags: |
-            type=semver,pattern={{version}}
+            type=raw,value=${{ needs.decidi.outputs.versione }}
             type=sha,format=long
           labels: |
             org.opencontainers.image.licenses=GPL-3.0-or-later
@@ -215,4 +248,14 @@ jobs:
           # rifiuta un riferimento che le contiene (18 ottobre 2026: il push
           # era riuscito, questa verifica no, per questo solo motivo)
           ./scripts/verifica-tirata-anonima.sh \
-            "$(echo 'ghcr.io/${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):${{ steps.meta.outputs.version }}"
+            "$(echo 'ghcr.io/${{ github.repository }}' | tr '[:upper:]' '[:lower:]'):${{ needs.decidi.outputs.versione }}"
+
+      # IL TAG DOPO L'IMMAGINE, e solo da main: un tag messo con il token del
+      # workflow non fa ripartire questo stesso workflow, quindi l'immagine si
+      # costruisce una volta sola. Se l'immagine fallisce, il tag non c'è, e la
+      # prossima spinta ci riprova.
+      - name: Il tag della versione
+        if: github.ref_type != 'tag'
+        run: |
+          git tag "v${{ needs.decidi.outputs.versione }}"
+          git push origin "v${{ needs.decidi.outputs.versione }}"

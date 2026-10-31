@@ -1,0 +1,32 @@
+# LE PROVE A OGNI SPINTA (31 ott 2026, E.D.: «integrazione continua»).
+#
+# Le stesse che si lanciano sul Mac, su ogni spinta a main e su ogni proposta
+# di modifica (pull request). Il workflow `immagine` costruisce e pubblica
+# quando la versione cambia; questo dice, prima, se il codice regge.
+#
+# Esclusa una sola prova, `test_emstudio_sotto_supervisione.py`: accende il
+# dev server di EMStudio, che sta in un altro repository e non c'è qui.
+name: prove
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"     # quella del Dockerfile
+          cache: pip
+      - name: Il server con le sue dipendenze
+        run: pip install -e ".[all,s3,dev]"
+      - name: Le prove
+        run: python -m pytest -q -p no:cacheprovider --deselect tests/test_emstudio_sotto_supervisione.py
