@@ -53,7 +53,7 @@ def test_un_nodo_nuovo_riceve_i_suoi_segreti_e_il_suo_gestore(here, capsys):
     assert env["DEV_OPERATOR_ORCID"] == ME and env["EM_NODE_NAME"] == "scavo-2027"
     assert env["ORCID_ISSUER"] == "https://orcid.org"
     listed = yaml.safe_load((here / "accredited.field.yaml").read_text())
-    assert listed["accredited"] == [{"orcid": ME, "name": "Josiah Carberry"}]
+    assert listed["accredited"] == [{"orcid": ME, "name": "Josiah Carberry", "profile": "super"}]
     printed = capsys.readouterr().out
     for key in fs.DEV_DEFAULTS:
         assert env[key] not in printed, "a secret was printed"

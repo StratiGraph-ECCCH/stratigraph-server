@@ -76,6 +76,14 @@ def check_digit_ok(orcid: str) -> bool:
     return digits[-1] == ("X" if result == 10 else str(result))
 
 
+#: the keys an entry may carry
+KEYS = ("orcid", "name", "profile", "groups")
+#: the words the list accepts for a profile → the node's profile names
+#: (`people.PROFILES`): «editor» is how a person says «node editor»
+PROFILE_WORDS = {"super": "super", "superadmin": "super", "operator": "super",
+                 "editor": "creator", "creator": "creator", "user": "user"}
+
+
 def _value(raw: str) -> str:
     raw = raw.strip()
     if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
@@ -110,10 +118,10 @@ def parse(text: str) -> List[Dict[str, str]]:
                 f"line {number}: expected `- orcid: …` (found {stripped!r})")
         key, sep, raw = stripped.partition(":")
         key = key.strip()
-        if not sep or key not in ("orcid", "name"):
+        if not sep or key not in KEYS:
             raise AccreditedListError(
-                f"line {number}: only `orcid:` and `name:` are read "
-                f"(found {stripped!r})")
+                f"line {number}: only `orcid:`, `name:`, `profile:` and `groups:` "
+                f"are read (found {stripped!r})")
         if key in current:
             raise AccreditedListError(f"line {number}: `{key}` twice in one entry")
         current[key] = _value(raw)
@@ -133,7 +141,38 @@ def parse(text: str) -> List[Dict[str, str]]:
         seen[orcid] = index
         entry["orcid"] = orcid
         entry["name"] = (entry.get("name") or "").strip()
+        # IL PROFILO E LE SQUADRE NELLA LISTA (31 ott 2026, E.D.: «un file che
+        # genera gli utenti al volo, non uno per uno dopo»). Facoltativi tutti e
+        # due: senza `profile` la persona resta com'è nella console.
+        raw_profile = (entry.get("profile") or "").strip().lower()
+        if raw_profile:
+            profile = PROFILE_WORDS.get(raw_profile)
+            if not profile:
+                raise AccreditedListError(
+                    f"entry {index}: profile {raw_profile!r} is not one of "
+                    f"super, editor, user")
+            entry["profile"] = profile
+        else:
+            entry.pop("profile", None)
+        groups = _list(entry.get("groups") or "")
+        if groups:
+            entry["groups"] = groups
+        else:
+            entry.pop("groups", None)
     return entries
+
+
+def _list(raw: str) -> List[str]:
+    """`[Squadra A, Restauro]` or `Squadra A, Restauro` → the names, in order."""
+    text = (raw or "").strip()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    out: List[str] = []
+    for part in text.split(","):
+        name = _value(part)
+        if name and name not in out:
+            out.append(name)
+    return out
 
 
 def load(path: str) -> List[Dict[str, str]]:

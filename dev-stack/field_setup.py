@@ -120,17 +120,23 @@ def write_accredited(path: pathlib.Path, orcid: str, name: str) -> str:
             return "già nella lista"
         if not text.endswith("\n"):
             text += "\n"
-        text += f"  - orcid: {orcid}\n    name: {name}\n"
+        text += f"  - orcid: {orcid}\n    name: {name}\n    profile: super\n"
         path.write_text(text, encoding="utf-8")
         return "aggiunto alla lista"
     path.write_text(
         "# THE FIELD NODE'S LIST OF ACCREDITED ORCID iDs — written by fcn-field-setup.sh.\n"
-        "# Who may sign in with ORCID on this node. The node manager is the first;\n"
-        "# everybody else arrives from the console (People, Transfers).\n"
+        "# Who works on this node. The node manager is the first. Add the others\n"
+        "# here, one entry each, and restart the node (./fcn-up.sh --offline):\n"
+        "#   - orcid: 0000-0000-0000-0000\n"
+        "#     name: First Last\n"
+        "#     profile: editor              # super · editor (creates rooms and teams) · user\n"
+        "#     groups: [Excavation team]    # teams, created if missing\n"
+        "# Nobody is ever removed by this file: that is done in the console.\n"
         "# Same format as accredited.yaml. It holds no secret.\n"
         "accredited:\n"
         f"  - orcid: {orcid}\n"
-        f"    name: {name}\n", encoding="utf-8")
+        f"    name: {name}\n"
+        f"    profile: super\n", encoding="utf-8")
     return "lista creata"
 
 

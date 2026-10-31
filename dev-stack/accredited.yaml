@@ -6,7 +6,9 @@
 # `./offline-password.sh <iD>` gives the password for the field.
 #
 # Read by `app/accredited.py` — a strict subset of YAML: `accredited:` and then
-# entries of `orcid:` and `name:`, nothing else. Every iD is checked with its
+# entries of `orcid:`, `name:` and, optionally (31 Oct 2026), `profile:` (super ·
+# editor · user) and `groups:` ([Team A, Team B]). At every start the server
+# makes the people, profiles and teams the list names, and never removes anybody. Every iD is checked with its
 # check digit. StratiGraph Server reads this file through EM_ACCREDITED_FILE
 # (`/v1/whoami` → `accredited`).
 #
@@ -16,8 +18,12 @@ accredited:
   # the seeded `dev` user's iD (ORCID's own documentation iD, Josiah Carberry)
   - orcid: 0000-0002-1825-0097
     name: Dev User
+    profile: super
   # the two editors of the room-signature proofs (realm users editor, editor2)
   - orcid: 0000-0003-1111-1112
     name: Editor Uno
+    profile: editor
+    groups: [Squadra di prova]
   - orcid: 0000-0003-2222-2221
     name: Editor Due
+    groups: [Squadra di prova]

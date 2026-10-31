@@ -148,7 +148,30 @@ async def _lifespan(_app: FastAPI):
         knock("startup")
     except Exception as exc:          # noqa: BLE001
         log.warning("reachability: the start-up knock itself failed: %s", exc)
+    apply_accredited_list()
     yield
+
+
+def apply_accredited_list() -> Optional[Dict[str, int]]:
+    """LA LISTA FA LE PERSONE (31 ott 2026): profili e squadre dal file degli
+    accreditati, a ogni avvio (`accredited_apply.py`). Come la bussata, non
+    impedisce l'avvio: una lista sbagliata si dice nel log e il nodo parte."""
+    import logging
+    from . import accredited, accredited_apply
+    log = logging.getLogger("stratigraph.people")
+    path = (os.environ.get(accredited.ENV_FILE) or "").strip()
+    if not path:
+        return None
+    try:
+        entries = accredited.load(path)
+        said = accredited_apply.apply(entries, people_module.registry(), groups())
+    except Exception as exc:          # noqa: BLE001
+        log.warning("accredited list %s not applied: %s", path, exc)
+        return None
+    if any(said.values()):
+        people_module.log_event("accredited-list", by=accredited_apply.BY, **said)
+    log.info("accredited list %s applied: %s", path, said)
+    return said
 
 
 # ── WHAT THE /docs PAGE SAYS ABOUT THIS SERVER (17 Oct 2026) ─────────────────
