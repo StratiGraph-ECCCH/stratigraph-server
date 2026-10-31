@@ -65,7 +65,10 @@ cd "$SERVER/dev-stack"
 #: `< /dev/tty`: quando questo script arriva da `curl … | bash`, il suo stdin è
 #: la pipe; l'installazione può chiedere (la password di sudo, per esempio) e
 #: deve chiederlo alla persona, non alla pipe
-if [ -r /dev/tty ]; then
+#: …e solo se un terminale c'è DAVVERO: `-r /dev/tty` è vero anche dentro una
+#: sessione senza terminale (ssh senza -t, un servizio), dove poi aprirlo
+#: fallisce. Misurato sul Pi il 31 ottobre 2026; la prova è aprirlo.
+if (: < /dev/tty) 2>/dev/null; then
   exec ./fcn-install.sh --field "$@" < /dev/tty
 fi
 exec ./fcn-install.sh --field "$@"
