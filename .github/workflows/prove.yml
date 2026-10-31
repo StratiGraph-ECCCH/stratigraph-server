@@ -28,5 +28,9 @@ jobs:
           cache: pip
       - name: Il server con le sue dipendenze
         run: pip install -e ".[all,s3,dev]"
+      - name: Il file d'ambiente che chi clona crea a mano
+        #: `.env.dev` è in .gitignore; alcune prove avviano `fcn-up.sh` nella
+        #: cartella vera, come sul Mac dove il file c'è.
+        run: cp dev-stack/.env.dev.example dev-stack/.env.dev
       - name: Le prove
         run: python -m pytest -q -p no:cacheprovider --deselect tests/test_emstudio_sotto_supervisione.py
