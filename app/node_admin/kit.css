@@ -150,3 +150,6 @@ dialog.k-dialog menu { display: flex; gap: 8px; justify-content: flex-end; paddi
 .t-step p { margin: 4px 0 8px; color: var(--sg-muted); line-height: 1.55; }
 .t-n { width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--sg-surface-sunk); display: grid; place-items: center; font-weight: 600; font-size: .85rem; }
 a.k-btn { display: inline-flex; align-items: center; text-decoration: none; }
+/* i link della casa con l'inchiostro del tema: il blu del browser sul fondo
+   scuro non si leggeva (31 ott, screenshot di E.D.) */
+.h-doors a, .h-said a, .k-faint a, .t-card a:not(.k-btn) { color: var(--sg-info-ink); }
