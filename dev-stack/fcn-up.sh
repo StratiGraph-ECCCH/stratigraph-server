@@ -1,31 +1,50 @@
 #!/usr/bin/env bash
-# fcn-up — accendi il Field Computing Node: Caddy+https su hostname (mai IP nudo),
-# e tira su l'intera stack StratiGraph.
+# fcn-up — accendi il nodo StratiGraph su questo computer: Caddy con https, il
+# realm Keycloak, il server delle stanze, StratiField, il catalogo, le immagini.
 #
-#   ./fcn-up.sh                 # locale: https://em.localhost:8443 (+ serve anche il nome mDNS .local)
-#   ./fcn-up.sh mac.local       # host PRIMARIO = un hostname risolvibile (per l'altro computer)
-#                               #   …e si annuncia sulla rete locale (_stratigraph._tcp; lo ferma fcn-down)
-#   ./fcn-up.sh --demo          # …e POPOLA: studi, stanze, immagini IIIF. Idempotente.
-#   ./fcn-up.sh --local-s3d     # s3Dgraphy dal CHECKOUT LOCALE (editi e testi live)
-#   ./fcn-up.sh mac.local --local-s3d
-#   ./fcn-up.sh --no-studio     # …senza il dev server di EMStudio (/em/studio/ dà 502)
-#   ./fcn-up.sh --studio        # …e lo PRETENDE: se il checkout non è pronto, si ferma
+# USO
+#   ./fcn-up.sh [HOST] [--offline] [--demo] [--local-s3d] [--studio | --no-studio]
 #
-# EMSTUDIO: `/em/studio/` e `/em/read/` sono il dev server Vite di EMStudio, che
-# gira SULL'HOST (porta 5173) e che Caddy raggiunge da `host.docker.internal`.
-# Lo accende questo script, in background, se `../../EMStudio/frontend/
-# node_modules` c'è; altrimenti tace — un nodo di campo non ha EMStudio, e non
-# è rotto. Pid e log in `dev-stack/emstudio-dev.{pid,log}`; lo spegne
-# `./fcn-down.sh`. Se sulla 5173 risponde già qualcosa, non ne avvia un secondo.
+#   HOST           l'indirizzo con cui gli ALTRI dispositivi raggiungono il nodo.
+#                  Si ricorda in .env.dev (FCN_HOST): le volte dopo basta ./fcn-up.sh
+#                  Un nome .local (mDNS: Bonjour su macOS, avahi su Linux) o un indirizzo
+#   --offline      niente build e niente EMStudio dev: riparte in 2-3 minuti, senza rete
+#   --demo         popola studi, stanze e immagini dimostrative (si può ripetere)
+#   --local-s3d    s3Dgraphy dal checkout locale (lo modifichi e lo provi subito)
+#   --studio       pretende il dev server di EMStudio su /em/studio/
+#   --no-studio    lo salta
 #
-# NB: la CA interna di Caddy NON fa certificati per un IP nudo → per l'altro computer
-# serve un HOSTNAME (il nome mDNS `<host>.local` — Bonjour su macOS, avahi su
-# Linux — oppure /etc/hosts, oppure un dominio vero),
-# non 172.x.x.x. E la rete deve vedersi (hotspot che isola i client → travel-router/Tailscale).
+# ESEMPI
+#   ./fcn-up.sh                       # solo questo computer: https://em.localhost:8443
+#   ./fcn-up.sh 192.168.1.214         # anche il telefono e gli altri della stessa Wi-Fi,
+#                                     #   all'indirizzo numerico (vale se il router non
+#                                     #   fa passare i nomi .local, come a casa il 31 ott)
+#   ./fcn-up.sh mio-mac.local         # …oppure al nome .local, dove il router lo permette
+#   ./fcn-up.sh --offline             # riaccendere dopo un riavvio, con l'host già scelto
+#   ./fcn-up.sh --demo                # la prima volta, per avere qualcosa da guardare
 #
-# DATI: i volumi (studi, stanze, bucket asset+corpus, realm, CA di Caddy) PERSISTONO fra i
-# riavvii — `./fcn-down.sh` poi `./fcn-up.sh` (o un restart dei container) ritrova tutto.
-# Solo `./fcn-down.sh --wipe` cancella i volumi (dati persi; dopo serve ./fcn-trust-ca.sh).
+# DOPO L'AVVIO
+#   https://HOST:8443/em/admin/      la console del nodo: stanze, persone, gruppi, memoria
+#   https://HOST:8443/em/work/       le tue stanze e le porte per gli strumenti
+#   https://HOST:8443/chat/          StratiField
+#   docker ps                        che cosa è acceso
+#   ./fcn-down.sh                    spegne (i dati restano)
+#
+# ATTENZIONE · LE SESSIONI NON SOPRAVVIVONO AL RIAVVIO (stack di sviluppo)
+#   Keycloak qui tiene le sessioni dentro il container: dopo ogni fcn-up chi era
+#   dentro (EMStudio, StratiField, il browser) deve rifare l'accesso. EMStudio lo
+#   mostra come «connection lost»: nel pannello del nodo, «Sign in as another user».
+#   Il nodo da campo (--campo, fcn-field-setup.sh) tiene Keycloak su un volume e
+#   le sessioni restano.
+#
+# EMSTUDIO DEV: /em/studio/ e /em/read/ sono il dev server Vite di EMStudio, che
+# gira SULL'HOST (porta 5173); lo accende questo script se ../../EMStudio/frontend/
+# node_modules c'è, e lo spegne ./fcn-down.sh.
+#
+# DATI: studi, stanze, bucket, realm e CA di Caddy stanno su volumi e restano fra
+# un riavvio e l'altro. Solo ./fcn-down.sh --wipe li cancella.
+#
+# Il manuale: stratigraph-server-doc, «Running the node on your computer».
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next} /^[[:space:]]*$/{next} {exit}' "$0"; exit 0
 fi
@@ -71,6 +90,17 @@ sg_ensure_docker || exit 1
 #: ogni giorno, e quello automatico all'accensione, è `./fcn-up.sh` e basta.
 FCN_HOST_SAVED="$( [ -f .env.dev ] && grep -E '^FCN_HOST=' .env.dev | tail -1 | cut -d= -f2- || true)"
 PRIMARY="${ARG_HOST:-${FCN_HOST_SAVED:-em.localhost}}"   # dove punta il browser (URL pubblici)
+#: UN HOST DATO A MANO SI RICORDA (31 ott 2026): `--help` lo prometteva e non era
+#: vero — la volta dopo, `./fcn-up.sh --offline` ripartiva su em.localhost e il
+#: telefono perdeva il nodo. Si scrive in .env.dev, che resta fuori da git.
+if [ -n "$ARG_HOST" ] && [ "$ARG_HOST" != "$FCN_HOST_SAVED" ] && [ -f .env.dev ]; then
+  if grep -qE '^FCN_HOST=' .env.dev; then
+    sed -i.bak -E "s#^FCN_HOST=.*#FCN_HOST=${ARG_HOST}#" .env.dev && rm -f .env.dev.bak
+  else
+    printf '\nFCN_HOST=%s\n' "$ARG_HOST" >> .env.dev
+  fi
+  echo "· ricordo l'host: FCN_HOST=${ARG_HOST} (in .env.dev)"
+fi
 #: IN MINUSCOLO (31 ottobre 2026): il browser scrive l'host in minuscolo
 #: («macbook-pro-di-emanuel.local») e Keycloak confronta le redirect URI come
 #: stringhe, quindi un realm reso per «MacBook-Pro-di-Emanuel.local» — il nome

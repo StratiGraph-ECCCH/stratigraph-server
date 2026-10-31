@@ -330,3 +330,9 @@ details.small button { margin-top: .4rem; }
   color: var(--ink-soft);
 }
 .orphan-row button { flex: none; }
+
+/* le azioni in blocco sulle stanze (31 ottobre) */
+.k-pick { width: 2.2rem; text-align: center; }
+.k-pick input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
+.k-batch { position: sticky; top: 0; z-index: 5; }
+.k-batch-acts { display: flex; gap: 8px; flex-wrap: wrap; }

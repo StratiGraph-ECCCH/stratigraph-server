@@ -15,6 +15,10 @@ import { L, RANK, ROLE_WORD, button, bytes, chips, drawer, head, roleChip, tag, 
 
 let filter = "active";
 let query = "";
+//: LE STANZE SCELTE per un'azione in blocco (31 ottobre: «voglio anche le
+//: operazioni in batch su più stanze»). Sopravvive al cambio di filtro: si
+//: sceglie in «Attive» e in «Implicite», e si agisce una volta.
+const picked = new Set();
 
 async function render(root) {
   const [rooms, storage] = await Promise.all([
@@ -61,7 +65,13 @@ async function render(root) {
 
   const wrap = document.createElement("div");
   wrap.className = "k-tw";
+  // LA BARRA DELLE AZIONI IN BLOCCO: compare quando c'è almeno una scelta
+  const batch = document.createElement("div");
+  batch.className = "k-banner k-batch";
+  batch.hidden = true;
+  root.appendChild(batch);
   wrap.innerHTML = `<table class="k-table"><thead><tr>
+    <th class="k-pick"><input type="checkbox" id="k-pick-all" aria-label="${escapeHtml(L("Scegli tutte quelle elencate", "Pick every listed room"))}"></th>
     <th>${L("Stanza", "Room")}</th><th>${L("Proprietario", "Owner")}</th>
     <th>${L("Persone", "People")}</th><th>${L("Il tuo ruolo", "Your role")}</th>
     <th class="num">${L("File", "Files")}</th><th class="num">${L("Spazio", "Space")}</th>
@@ -80,6 +90,7 @@ async function render(root) {
       const s = space[r.room_id] || {};
       const people = (r.members || []).length + Object.keys(r.groups || {}).length + (r.owner ? 1 : 0);
       return `<tr class="k-click" tabindex="0" data-room="${escapeHtml(r.room_id)}">
+        <td class="k-pick"><input type="checkbox" data-pick="${escapeHtml(r.room_id)}" ${picked.has(r.room_id) ? "checked" : ""} aria-label="${escapeHtml(L("Scegli", "Pick") + " " + r.room_id)}"></td>
         <td class="k-title"><b>${escapeHtml(r.title || r.room_id)}</b><small>${escapeHtml(r.room_id)}</small></td>
         <td class="k-mono">${escapeHtml(r.owner || L("nessuno", "nobody"))}</td>
         <td>${people}${Object.keys(r.groups || {}).length ? ` <span class="k-faint">· ${Object.keys(r.groups).length} ${L("gruppi", "groups")}</span>` : ""}</td>
@@ -87,27 +98,95 @@ async function render(root) {
         <td class="num">${s.assets ?? "—"}${(r.missing_refs || []).length ? " " + tag("!", "warn") : ""}</td>
         <td class="num">${bytes(s.bytes)}</td>
         <td class="k-mono">${r.archived_at ? tag(L("archiviata", "archived")) : escapeHtml(String(r.created_at || "").slice(0, 10))}</td></tr>`;
-    }).join("") || `<tr><td colspan="7" class="k-faint">${escapeHtml(L("Nessuna stanza in questo elenco.", "No room in this list."))}</td></tr>`;
+    }).join("") || `<tr><td colspan="8" class="k-faint">${escapeHtml(L("Nessuna stanza in questo elenco.", "No room in this list."))}</td></tr>`;
+    body.querySelectorAll("input[data-pick]").forEach((box) => {
+      box.addEventListener("click", (e) => e.stopPropagation());
+      box.addEventListener("change", () => {
+        if (box.checked) picked.add(box.dataset.pick); else picked.delete(box.dataset.pick);
+        paintBatch();
+      });
+    });
+    const all = wrap.querySelector("#k-pick-all");
+    all.checked = list.length > 0 && list.every((r) => picked.has(r.room_id));
+    all.onchange = () => {
+      for (const r of list) { if (all.checked) picked.add(r.room_id); else picked.delete(r.room_id); }
+      drawRows();
+    };
+    paintBatch();
     body.querySelectorAll("tr[data-room]").forEach((tr) => {
       const open = () => openRoom(rooms.find((r) => r.room_id === tr.dataset.room), space, root);
       tr.addEventListener("click", open);
       tr.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
     });
   }
+  function paintBatch() {
+    // solo le scelte che esistono ancora (una stanza eliminata altrove esce)
+    for (const id of [...picked]) if (!rooms.some((r) => r.room_id === id)) picked.delete(id);
+    const chosen = rooms.filter((r) => picked.has(r.room_id));
+    batch.hidden = !chosen.length;
+    if (!chosen.length) { batch.innerHTML = ""; return; }
+    const live = chosen.filter((r) => !r.archived_at && !r.implicit);
+    const gone = chosen.filter((r) => r.archived_at);
+    batch.innerHTML = `<span><b>${chosen.length}</b> ${escapeHtml(L(chosen.length === 1 ? "stanza scelta" : "stanze scelte", chosen.length === 1 ? "room picked" : "rooms picked"))}</span>`;
+    const acts = document.createElement("span");
+    acts.className = "k-batch-acts";
+    if (live.length) acts.appendChild(button(L(`Archivia (${live.length})`, `Archive (${live.length})`),
+      () => void archiveMany(live, true, root)));
+    if (gone.length) acts.appendChild(button(L(`Riapri (${gone.length})`, `Restore (${gone.length})`),
+      () => void archiveMany(gone, false, root)));
+    acts.appendChild(button(L(`Elimina (${chosen.length})…`, `Delete (${chosen.length})…`),
+      () => void deleteMany(chosen, root), "warn"));
+    acts.appendChild(button(L("Togli la scelta", "Clear"), () => { picked.clear(); drawRows(); }));
+    batch.appendChild(acts);
+  }
   drawRows();
+}
+
+/** Archiviare (o riaprire) più stanze: un segno, mai una cancellazione. Le
+ *  implicite non si archiviano — non hanno un registro su cui scrivere il segno —
+ *  e per questo la barra non le offre. */
+async function archiveMany(list, archived, root) {
+  const n = list.length;
+  const what = archived
+    ? L(`l'archiviazione di ${n} stanze: restano leggibili, nessuno ci scrive più`,
+        `archiving ${n} rooms: they stay readable, nobody writes in them`)
+    : L(`la riapertura di ${n} stanze`, `restoring ${n} rooms`);
+  if (!confirmTyped(what, archived ? L("ARCHIVIA", "ARCHIVE") : L("RIAPRI", "RESTORE"))) return;
+  let done = 0;
+  const refused = [];
+  for (const r of list) {
+    try {
+      await api.post(`/admin/rooms/${encodeURIComponent(r.room_id)}/archive`,
+                     { archived, confirm_room_id: r.room_id });
+      done++;
+    } catch (error) { refused.push(`${r.room_id}: ${error.message}`); }
+  }
+  for (const r of list) picked.delete(r.room_id);
+  toast((archived ? L(`${done} stanze archiviate.`, `${done} rooms archived.`)
+                  : L(`${done} stanze riaperte.`, `${done} rooms restored.`))
+        + (refused.length ? " " + L(`${refused.length} rifiutate.`, `${refused.length} refused.`) : ""),
+        refused.length ? "bad" : "");
+  if (refused.length) console.warn(refused.join("\n"));
+  await render(root);
 }
 
 async function deleteMany(list, root) {
   const n = list.length;
   const word = L("ELIMINA", "DELETE");
-  if (!confirmTyped(L(`l'eliminazione di ${n} stanze implicite, con i loro em.json e tutte le revisioni`,
-    `deleting ${n} implicit rooms, with their em.json and every revision`), word)) return;
+  const implicitOnly = list.every((r) => r.implicit);
+  const names = list.slice(0, 8).map((r) => r.room_id).join(", ") + (n > 8 ? ` … (+${n - 8})` : "");
+  if (!confirmTyped(implicitOnly
+    ? L(`l'eliminazione di ${n} stanze implicite, con i loro em.json e tutte le revisioni`,
+        `deleting ${n} implicit rooms, with their em.json and every revision`)
+    : L(`l'eliminazione DEFINITIVA di ${n} stanze (${names}), con i loro em.json, le revisioni, i membri e gli inviti. Non si può annullare`,
+        `the PERMANENT deletion of ${n} rooms (${names}), with their em.json, revisions, members and invitations. It cannot be undone`), word)) return;
   let done = 0;
   const refused = [];
   for (const r of list) {
     try { await api.del(`/rooms/${encodeURIComponent(r.room_id)}`, { confirm: r.room_id }); done++; }
     catch (error) { refused.push(`${r.room_id}: ${error.message}`); }
   }
+  for (const r of list) picked.delete(r.room_id);
   toast(L(`${done} stanze eliminate.`, `${done} rooms deleted.`) + (refused.length ? " " + L(`${refused.length} rifiutate.`, `${refused.length} refused.`) : ""),
     refused.length ? "bad" : "");
   if (refused.length) console.warn(refused.join("\n"));

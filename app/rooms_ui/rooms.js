@@ -158,12 +158,18 @@ function note(element, text, bad = false) {
 // taken: the three are the same thing at three moments of its life, and the
 // component is the place that says so.
 
-function card({ title, id, tag, notes = [], verb, build }) {
+function card({ title, id, tag, notes = [], verb, verbHref, build }) {
   const box = el("div", "room");
   const head = el("div", "room-head");
   head.append(el("span", "room-title", title));
   if (id) head.append(el("span", "room-id", id));
-  if (verb) head.append(el("span", "verb", verb));
+  // IL VERBO È UNA PORTA quando ha dove portare (31 ottobre: «se premo enter
+  // non succede nulla» — era una parola colorata come un link, e non lo era)
+  if (verb && verbHref) {
+    const go = el("a", "verb", verb);
+    go.href = verbHref;
+    head.append(go);
+  } else if (verb) head.append(el("span", "verb", verb));
   if (tag) head.append(el("span", "role", tag));
   box.append(head);
   for (const line of notes.filter(Boolean)) box.append(el("p", "note", line));
@@ -216,6 +222,7 @@ function roomCard(room) {
     id: room.room_id,
     tag: room.your_role || "—",
     verb: t("rooms.verb"),
+    verbHref: shareUrl(room.room_id),
     // REPORTED, never hidden: a workspace whose container was moved still
     // exists, and the honest answer is the name of what is missing.
     notes: (room.missing_refs || []).length

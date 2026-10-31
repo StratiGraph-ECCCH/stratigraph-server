@@ -9,6 +9,14 @@
 #
 # I flag si combinano: es.  ./fcn-down.sh --wipe --colima
 #
+# ESEMPI
+#   ./fcn-down.sh                    # fine giornata: spento, i dati restano
+#   ./fcn-down.sh --colima           # …e libera anche la memoria della VM sul Mac
+#   ./fcn-down.sh --stop             # una pausa breve: ./fcn-up.sh --offline riparte subito
+#
+# Dopo la riaccensione si rifà l'accesso (le sessioni dello stack di sviluppo
+# non sopravvivono: vedi ./fcn-up.sh --help).
+#
 # In ogni modo spegne PRIMA il dev server di EMStudio acceso da ./fcn-up.sh (il
 # suo pid file in dev-stack/), poi i container. `--wipe` non cambia niente su
 # questo: è un processo, non un volume. Un Vite lanciato a mano non lo tocca.
