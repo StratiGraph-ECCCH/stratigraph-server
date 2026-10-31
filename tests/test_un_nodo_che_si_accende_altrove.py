@@ -51,6 +51,17 @@ UNAME = {"macos": "Darwin", "linux": "Linux", "wsl": "Linux",
          "windows": "MINGW64_NT-10.0-22631", "unknown": "Plan9"}
 
 
+
+def _compose_vero() -> str:
+    """Il compose vero come parola di shell: `docker-compose`, oppure
+    `docker compose` dove c'è solo il plugin (le macchine della CI)."""
+    import shlex
+    dc = shutil.which("docker-compose")
+    if dc:
+        return shlex.quote(dc)
+    d = shutil.which("docker")
+    return f"{shlex.quote(d)} compose" if d else ""
+
 def _finti(tmp_path, *, docker_ok: bool, nomi=(),
            plugin: bool = True, autonomo: bool = False) -> pathlib.Path:
     """Una cartella di comandi finti, e il registro che scrivono.
@@ -80,7 +91,7 @@ def _finti(tmp_path, *, docker_ok: bool, nomi=(),
     #: invece dell'installer — che dal compose ricava QUALI repository servono.
     #: `up`, `pull` e `build` restano finti e registrati, che è dove le
     #: asserzioni sull'ordine mordono.
-    vero = shutil.which("docker-compose") or shutil.which("docker") or ""
+    vero = _compose_vero()
     for nome in ("docker", "colima", "sudo", "security", "scutil", "hostname",
                  "update-ca-certificates", "update-ca-trust", "certutil",
                  "cmd.exe", "wslpath", "getent", "ip", "route",
@@ -108,7 +119,7 @@ def _finti(tmp_path, *, docker_ok: bool, nomi=(),
                        #: `docker compose … config` → il compose vero
                        '  for a in "$@"; do',
                        '    if [ "$a" = "config" ]; then',
-                       f'      shift; exec {vero!r} "$@"' if vero else
+                       f'      shift; exec {vero} "$@"' if vero else
                        '      exit 0',
                        '    fi',
                        '  done',
@@ -117,7 +128,7 @@ def _finti(tmp_path, *, docker_ok: bool, nomi=(),
         elif nome == "docker-compose":
             script += ['for a in "$@"; do',
                        '  if [ "$a" = "config" ]; then',
-                       f'    exec {vero!r} "$@"' if vero else '    exit 0',
+                       f'    exec {vero} "$@"' if vero else '    exit 0',
                        '  fi',
                        'done',
                        'exit 0']
@@ -1432,7 +1443,7 @@ def _reso_con_primario(tmp_path, primario: str = PRIMARIO):
     shutil.copy(DEV / ".env.dev.example", dev / ".env.dev")
     bin_ = _finti(tmp_path, docker_ok=True, plugin=False, autonomo=True)
     _uname(bin_, "linux")
-    vero = shutil.which("docker-compose") or shutil.which("docker")
+    vero = _compose_vero()
     if not vero:
         pytest.skip("nessun compose: l'ambiente reso non si può misurare qui")
     uscita = tmp_path / "reso.yml"
@@ -1451,9 +1462,9 @@ def _reso_con_primario(tmp_path, primario: str = PRIMARIO):
         '  args+=("$a")\n'
         'done\n'
         'for a in "$@"; do\n'
-        f'  if [ "$a" = "config" ]; then exec {vero!r} "$@"; fi\n'
+        f'  if [ "$a" = "config" ]; then exec {vero} "$@"; fi\n'
         'done\n'
-        f'exec {vero!r} "${{args[@]}}" config > "{uscita}" 2>/dev/null\n')
+        f'exec {vero} "${{args[@]}}" config > "{uscita}" 2>/dev/null\n')
     fc.chmod(0o755)
     done = subprocess.run(["bash", str(dev / "fcn-up.sh"), primario],
                           capture_output=True, text=True, cwd=str(dev),
