@@ -153,3 +153,4 @@ a.k-btn { display: inline-flex; align-items: center; text-decoration: none; }
 /* i link della casa con l'inchiostro del tema: il blu del browser sul fondo
    scuro non si leggeva (31 ott, screenshot di E.D.) */
 .h-doors a, .h-said a, .k-faint a, .t-card a:not(.k-btn) { color: var(--sg-info-ink); }
+.k-link { word-break: break-all; }

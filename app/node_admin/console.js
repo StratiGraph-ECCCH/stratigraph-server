@@ -33,6 +33,9 @@ let active = null;
 /** Register a module. Order of registration is the order in the nav. */
 export function register(module) {
   MODULES.push(module);
+  // L'ORDINE LO DICE IL MODULO (`order`, 100 se tace), non l'ordine degli
+  // import: un modulo che ne importa un altro lo farebbe registrare prima
+  MODULES.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
   return module;
 }
 
@@ -168,7 +171,31 @@ function drawNav() {
     button.textContent = module.title;
     button.addEventListener("click", () => show(module));
     nav.appendChild(button);
-  }
+  }  // SU QUESTO NODO: le altre facce, dalla descrizione pubblica del nodo, e la
+  // guida. Al posto della vecchia barra in alto (31 ott 2026, la casa unica).
+  const links = document.createElement("div");
+  links.className = "nav-links";
+  links.innerHTML = `<span class="nav-group">${escapeHtml(t("casa.onNode"))}</span>`;
+  const add = (href, text) => {
+    const a = document.createElement("a");
+    a.className = "nav-item nav-out"; a.href = href; a.textContent = text;
+    a.target = "_blank"; a.rel = "noopener";
+    links.appendChild(a);
+  };
+  nav.appendChild(links);
+  void nodeOffers().then((offers) => {
+    const find = (re) => offers.find((o) => re.test(o.name || "") && o.url && o.state !== "off by choice");
+    const cat = find(/catalog/i), chat = find(/chatbot|stratifield/i);
+    if (cat) add(cat.url, t("casa.catalog"));
+    if (chat) add(chat.url.replace(/\/?$/, "/"), t("casa.field"));
+    add(DOCS, t("casa.guide"));
+  });
+}
+
+let offersOnce = null;
+function nodeOffers() {
+  offersOnce = offersOnce || api.get("/node").then((n) => n?.offers || []).catch(() => []);
+  return offersOnce;
 }
 
 export async function show(module) {
@@ -227,6 +254,9 @@ function scheduleRefresh(seconds) {
 
 /** Take the token from a completed sign-in. */
 function adoptSession(result) {
+  // una firma riuscita rimette la prova silenziosa per la prossima pagina:
+  // il token vive in memoria, e un link aperto in questa scheda deve entrare
+  sessionStorage.removeItem(SILENT_KEY);
   token = result.token;
   refreshToken = result.refresh_token || "";
   scheduleRefresh(result.expires_in);
@@ -292,9 +322,13 @@ async function enter(me) {
     : (me.orcid || "signed in");
   isOperator = me.operator === true;
   document.body.classList.remove("porta");
+  document.body.classList.add("casa");
+  showSignOut();
+  // `#tools` (l'indirizzo vecchio «Attrezzarsi») apre gli Strumenti
+  const asked = location.hash === "#tools" ? visible().find((m) => m.id === "tools") : null;
   if (!me.operator && visible().length) {
     drawNav();
-    await show(visible()[0]);
+    await show(asked || visible()[0]);
     return;
   }
   if (!me.operator) {
@@ -321,7 +355,7 @@ async function enter(me) {
     return;
   }
   drawNav();
-  if (visible().length) await show(visible()[0]);
+  if (visible().length) await show(asked || visible()[0]);
 }
 
 /** The signed-out screen: one button, and the fallback under it. */
@@ -386,9 +420,15 @@ function showSignIn() {
   void api.get("/node").then((node) => {
     const catalogue = (node?.offers || []).find((o) => /catalog/i.test(o.id || o.name || ""));
     if (catalogue?.url) link(catalogue.url, t("porta.catalog"));
-    link("../tools/", t("porta.tools"));
+    toolsLink();
     if (DOCS) link(DOCS, t("porta.guide"));
-  }).catch(() => { link("../tools/", t("porta.tools")); });
+  }).catch(() => { toolsLink(); });
+  function toolsLink() {
+    const a = document.createElement("a");
+    a.href = "#tools"; a.textContent = t("porta.tools");
+    a.addEventListener("click", (e) => { e.preventDefault(); void showToolsUnsigned(); });
+    quiet.appendChild(a);
+  }
   box.appendChild(quiet);
 
   const advanced = document.createElement("details");
@@ -402,6 +442,42 @@ function showSignIn() {
   advanced.append(summary, paste);
   box.appendChild(advanced);
   panel.appendChild(box);
+  if (location.hash === "#tools") void showToolsUnsigned();
+}
+
+/** «Esci»: chiude la sessione del realm, non solo questa scheda. */
+function showSignOut() {
+  if (document.getElementById("casa-out")) return;
+  const out = document.createElement("button");
+  out.id = "casa-out";
+  out.className = "ghost";
+  out.textContent = t("casa.out");
+  out.addEventListener("click", () => {
+    token = ""; refreshToken = ""; window.clearTimeout(refreshTimer);
+    sessionStorage.removeItem(SILENT_KEY);
+    if (authConfig?.end_session_endpoint) window.location.assign(oidc.signOutUrl(authConfig));
+    else window.location.reload();
+  });
+  whoEl.after(out);
+}
+
+/** Gli strumenti anche SENZA accesso: dalla porta, gli stessi passi della casa.
+ *  Il modulo legge solo `/v1/node`, che è pubblico. */
+async function showToolsUnsigned() {
+  const tools = MODULES.find((m) => m.id === "tools");
+  if (!tools) return;
+  panel.innerHTML = "";
+  const back = document.createElement("button");
+  back.className = "ghost porta-back";
+  back.textContent = t("casa.back");
+  back.addEventListener("click", () => {
+    history.replaceState(null, "", location.pathname + location.search);
+    showSignIn();
+  });
+  const holder = document.createElement("div");
+  holder.className = "porta-tools";
+  panel.append(back, holder);
+  await tools.render(holder, api);
 }
 
 /** Dove sta la guida del nodo: la documentazione pubblicata del server. */

@@ -213,7 +213,7 @@ async function deleteMany(list, root) {
   await render(root);
 }
 
-function openRoom(room, space, root) {
+export function openRoom(room, space, root, { operator = true, onClose = null } = {}) {
   const manage = ["owner", "admin"].includes(room.your_role);
   drawer({
     title: room.title || room.room_id,
@@ -221,14 +221,14 @@ function openRoom(room, space, root) {
     chips: [room.archived_at ? tag(L("archiviata", "archived")) : "",
             room.implicit ? tag(L("implicita", "implicit"), "warn") : "",
             `<span class="k-faint">${escapeHtml(L("il tuo ruolo:", "your role:"))}</span>`, roleChip(room.your_role)].join(" "),
-    onClose: () => void render(root),
+    onClose: onClose || (() => void render(root)),
     tabs: [
       ["people", L("Persone e ruoli", "People and roles"), (b, d) => tabPeople(b, d, room, manage)],
       ["invites", L("Inviti", "Invitations"), (b, d) => tabInvites(b, d, room, manage)],
       ["vis", L("Chi vede lo studio", "Who sees the study"), (b, d) => tabVisibility(b, d, room, manage)],
-      ["mem", L("Memoria", "Memory"), (b) => tabMemory(b, room, space[room.room_id] || {})],
-      ["life", L("Ciclo di vita", "Lifecycle"), (b, d) => tabLife(b, d, room)],
-    ],
+      operator ? ["mem", L("Memoria", "Memory"), (b) => tabMemory(b, room, space[room.room_id] || {})] : null,
+      (operator || manage) ? ["life", L("Ciclo di vita", "Lifecycle"), (b, d) => tabLife(b, d, room, operator)] : null,
+    ].filter(Boolean),
   });
 }
 
@@ -290,6 +290,10 @@ async function tabPeople(body, drawerCtl, room, manage) {
   }
 }
 
+//: l'ultimo link creato: il nodo ne tiene solo l'impronta, quindi si mostra
+//: UNA volta, subito, invece di sparire con il ridisegno del pannello
+let lastLink = null;
+
 async function tabInvites(body, drawerCtl, room, manage) {
   const id = encodeURIComponent(room.room_id);
   if (!manage) {
@@ -307,8 +311,10 @@ async function tabInvites(body, drawerCtl, room, manage) {
     || `<div class="k-li"><span class="k-faint">${escapeHtml(L("Nessun link di invito.", "No invitation link."))}</span></div>`}</div>
     <div class="k-form"><select id="k-inv-role"><option value="editor">${escapeHtml(ROLE_WORD().editor)}</option><option value="viewer">${escapeHtml(ROLE_WORD().viewer)}</option></select>
     <select id="k-inv-days"><option value="1">1 ${L("giorno", "day")}</option><option value="7" selected>7 ${L("giorni", "days")}</option><option value="30">30 ${L("giorni", "days")}</option></select></div>
+    ${lastLink && lastLink.room === room.room_id ? `<p class="k-note"><b>${escapeHtml(L("Il link, da mandare adesso (non si potrà rivedere):", "The link, to send now (it cannot be shown again):"))}</b><br><code class="k-link">${escapeHtml(lastLink.url)}</code></p>` : ""}
     <p class="k-note">${escapeHtml(L("Il link apre la porta, l'ORCID dice chi è entrato, il ruolo viene dal link. Un link non autentica nessuno.",
       "The link opens the door, the ORCID says who came in, the role comes from the link. A link authenticates nobody."))}</p>`;
+  if (lastLink && lastLink.room === room.room_id) lastLink = null;   // mostrato
   body.querySelectorAll("[data-inv]").forEach((slot) => {
     const tokenId = slot.dataset.inv;
     if (!tokenId) return;
@@ -322,11 +328,12 @@ async function tabInvites(body, drawerCtl, room, manage) {
     const days = Number(body.querySelector("#k-inv-days").value);
     try {
       const made = await api.post(`/rooms/${id}/invites`, { role: body.querySelector("#k-inv-role").value, ttl_seconds: days * 86400 });
-      const door = new URL("../work/", window.location.href);
-      door.searchParams.set("room", room.room_id);
+      // l'invito porta alla CASA del nodo, che lo accetta e apre la stanza
+      const door = new URL(window.location.pathname, window.location.href);
       if (made.token) door.searchParams.set("join", made.token);
       const text = made.token ? door.toString() : "";
       if (text) { try { await navigator.clipboard.writeText(text); } catch { /* shown below */ } }
+      lastLink = text ? { room: room.room_id, url: text } : null;
       toast(L("Link creato e copiato.", "Link created and copied."));
     } catch (error) { toast(error.message, "bad"); }
     drawerCtl.reopen();
@@ -380,36 +387,51 @@ function tabMemory(body, room, s) {
       "Files are named by their content: the same file in two rooms takes space once in the bucket. File by file, see «Memory and bucket»."))}</p>`;
 }
 
-async function tabLife(body, drawerCtl, room) {
+async function tabLife(body, drawerCtl, room, operator = true) {
   const id = encodeURIComponent(room.room_id);
+  const owner = room.your_role === "owner";
   body.innerHTML = `
     <div class="k-danger"><h3>${escapeHtml(room.archived_at ? L("Riapri la stanza", "Bring the room back") : L("Archivia la stanza", "Archive the room"))}</h3>
       <p class="k-faint">${escapeHtml(room.archived_at ? L("Torna fra le attive e si può di nuovo scrivere.", "It returns among the active rooms and can be written again.")
         : L("Resta leggibile e citabile, ma nessuno ci scrive più. Si riapre quando serve.", "It stays readable and citable; nobody writes in it. It can be brought back."))}</p>
       <div data-slot="archive"></div></div>
-    <div class="k-danger"><h3>${escapeHtml(L("Un nuovo proprietario", "A new owner"))}</h3>
+    ${operator ? `<div class="k-danger"><h3>${escapeHtml(L("Un nuovo proprietario", "A new owner"))}</h3>
       <p class="k-faint">${escapeHtml(L("Solo per una stanza che non ha più nessuno che la gestisca: il proprietario non è più sul nodo e non resta un amministratore. Il passaggio resta nel registro del nodo.",
         "Only for a room nobody can manage any more: the owner has left the node and no admin remains. The act is written to the node's log."))}</p>
-      <div class="k-form" data-slot="rescue"><input id="k-new-owner" placeholder="ORCID"></div></div>
+      <div class="k-form" data-slot="rescue"><input id="k-new-owner" placeholder="ORCID"></div></div>`
+    : owner ? `<div class="k-danger"><h3>${escapeHtml(L("Passa la stanza", "Hand the room over"))}</h3>
+      <p class="k-faint">${escapeHtml(L("Il nuovo proprietario gestisce anche gli amministratori. Tu resti amministratore.",
+        "The new owner also manages the admins. You stay an admin."))}</p>
+      <div class="k-form" data-slot="transfer"><input id="k-new-owner" placeholder="ORCID"></div></div>` : ""}
     <div class="k-danger"><h3>${escapeHtml(L("Elimina la stanza", "Delete the room"))}</h3>
       <p class="k-faint">${escapeHtml(L("Toglie la stanza e il suo em.json con tutte le revisioni, il registro delle operazioni, membri e inviti. I file restano nel bucket e, se nessun'altra stanza li cita, diventano orfani. Non si elimina mentre qualcuno è dentro.",
         "Removes the room and its em.json with every revision, the operations log, members and invitations. Files stay in the bucket and become orphans if no other room cites them. Refused while somebody is connected."))}</p>
       <div data-slot="delete"></div></div>`;
+  if (!operator && !owner) body.querySelector('[data-slot="delete"]').closest(".k-danger").remove();
   body.querySelector('[data-slot="archive"]').appendChild(button(room.archived_at ? L("Riapri", "Bring back") : L("Archivia", "Archive"), async () => {
     if (!confirmNamed(room.archived_at ? L("la riapertura", "bringing back") : L("l'archiviazione", "archiving"), room.room_id)) return;
     try {
-      await api.post(`/admin/rooms/${id}/archive`, { archived: !room.archived_at, confirm_room_id: room.room_id });
+      // l'operatore archivia qualunque stanza; chi la governa, la sua
+      if (operator) await api.post(`/admin/rooms/${id}/archive`, { archived: !room.archived_at, confirm_room_id: room.room_id });
+      else await api.post(`/rooms/${id}/archive`, { archived: !room.archived_at });
       toast(room.archived_at ? L("Riaperta.", "Brought back.") : L("Archiviata.", "Archived."));
       drawerCtl.close();
     } catch (error) { toast(error.message, "bad"); }
   }));
-  body.querySelector('[data-slot="rescue"]').appendChild(button(L("Passa", "Hand over"), async () => {
+  body.querySelector('[data-slot="transfer"]')?.appendChild(button(L("Passa", "Hand over"), async () => {
+    const orcid = body.querySelector("#k-new-owner").value.trim();
+    if (!orcid) return;
+    if (!confirmNamed(L("il passaggio della proprietà", "handing the room over"), room.room_id)) return;
+    try { await api.put(`/rooms/${id}/members/${encodeURIComponent(orcid)}`, { role: "owner" }); toast(L("Nuovo proprietario.", "New owner.")); drawerCtl.close(); }
+    catch (error) { toast(error.message, "bad"); }
+  }));
+  body.querySelector('[data-slot="rescue"]')?.appendChild(button(L("Passa", "Hand over"), async () => {
     const orcid = body.querySelector("#k-new-owner").value.trim();
     if (!orcid) return;
     try { await api.put(`/admin/rooms/${id}/owner`, { orcid }); toast(L("Nuovo proprietario.", "New owner.")); drawerCtl.close(); }
     catch (error) { toast(error.message, "bad"); }
   }));
-  body.querySelector('[data-slot="delete"]').appendChild(button(L("Elimina…", "Delete…"), async () => {
+  body.querySelector('[data-slot="delete"]')?.appendChild(button(L("Elimina…", "Delete…"), async () => {
     if (!confirmTyped(L("l'eliminazione definitiva della stanza", "deleting the room for good"), room.room_id)) return;
     try { await api.del(`/rooms/${id}`, { confirm: room.room_id }); toast(L("Stanza eliminata.", "Room deleted.")); drawerCtl.close(); }
     catch (error) { toast(error.message, "bad"); }

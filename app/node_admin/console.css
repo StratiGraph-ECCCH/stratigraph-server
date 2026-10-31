@@ -358,3 +358,27 @@ body.porta #panel { display: flex; justify-content: center; align-items: center;
   :root:not([data-sg-theme="light"]) .porta-main { color: var(--sg-text); }
 }
 :root[data-sg-theme="dark"] .porta-main { color: var(--sg-text); }
+
+/* ── LA CASA UNICA: niente barra vecchia, le altre facce nella colonna ── */
+body.casa #node-bar, body.casa #back-door, body.porta #casa-out { display: none; }
+.nav-links { margin-top: 18px; display: flex; flex-direction: column; }
+.nav-group { font-size: .72rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--sg-muted); padding: 10px 12px 4px; }
+a.nav-item.nav-out { text-decoration: none; color: var(--sg-muted); }
+.porta-back { margin: 18px 0 0 18px; }
+.porta-tools { padding: 8px 24px 40px; max-width: 1100px; }
+body.porta #panel:has(.porta-tools) { display: block; }
+
+/* ── LA CASA SUL TELEFONO (31 ott 2026): la colonna diventa una riga che
+   scorre, la barra va a capo; niente scorrimento orizzontale della pagina ── */
+@media (max-width: 720px) {
+  .bar { flex-wrap: wrap; row-gap: .4rem; }
+  .bar .sub, .bar .spacer { display: none; }
+  .bar .lang { max-width: 7.5rem; }
+  .shell { flex-direction: column; min-width: 0; }
+  .shell > nav { width: auto; flex: none; display: flex; gap: .3rem; overflow-x: auto;
+                 border-right: 0; border-bottom: 1px solid var(--line); padding: .5rem; }
+  .shell > nav .nav-item { width: auto; white-space: nowrap; margin: 0; }
+  .nav-links { flex-direction: row; margin: 0; }
+  .nav-group { display: none; }
+  #panel { min-width: 0; padding-left: 12px; padding-right: 12px; }
+}

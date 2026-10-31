@@ -489,12 +489,17 @@ def test_all_three_doors_are_actually_SERVED(client):
     would answer 200 for both and show the same thing, which is the failure that
     looks like a success.
     """
-    for path, marker in (("/rooms/", 'id="destinations"'),
-                         ("/work/", 'id="zone-rooms"'),
-                         ("/tools/", 'id="tools-install"')):
-        answer = client.get(path)
-        assert answer.status_code == 200, (path, answer.status_code)
-        assert marker in answer.text, f"{path} served somebody else's page"
+    # LA CASA UNICA (31 ottobre 2026): i tre indirizzi vecchi portano alla casa,
+    # con quello che dicevano — un link già mandato apre ancora la sua stanza
+    for path, target in (("/rooms/", "../admin/"),
+                         ("/work/?room=scavo&join=t0k", "../admin/?room=scavo&join=t0k"),
+                         ("/tools/", "../admin/#tools")):
+        answer = client.get(path, follow_redirects=False)
+        assert answer.status_code == 302, (path, answer.status_code)
+        assert answer.headers["location"] == target, path
+    assert client.get("/admin/").status_code == 200
+    # …e i file restano serviti: la casa carica da lì il QR
+    assert client.get("/rooms/vendor/qrcode-generator-1.4.4.js").status_code == 200
     # …and the script and stylesheet the two child pages reach for
     for asset in ("/rooms/rooms.js", "/rooms/rooms.css", "/admin/console.css"):
         assert client.get(asset).status_code == 200, asset

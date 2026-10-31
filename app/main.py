@@ -164,7 +164,7 @@ def apply_accredited_list() -> Optional[Dict[str, int]]:
         return None
     try:
         entries = accredited.load(path)
-        said = accredited_apply.apply(entries, people_module.registry(), groups())
+        said = accredited_apply.make_people(entries, people_module.registry(), groups())
     except Exception as exc:          # noqa: BLE001
         log.warning("accredited list %s not applied: %s", path, exc)
         return None
@@ -6879,6 +6879,34 @@ if _CONSOLE.is_dir():
 _BRAND = pathlib.Path(__file__).resolve().parent / "brand"
 if _BRAND.is_dir():
     app.mount("/brand", _FreshStatic(directory=str(_BRAND)), name="brand")
+
+# ── LA CASA UNICA (31 ottobre 2026, scrivania «casa del nodo») ───────────────
+#
+# Il vestibolo, «Lavorare» e «Attrezzarsi» erano tre pagine con tre sessioni, e
+# da una non si tornava nell'altra (E.D.: «da quelle se premo work si va nelle
+# vecchie e non si torna nelle nuove»). Ora la porta e la casa sono `/admin/`:
+# i tre indirizzi vecchi ci portano, con quello che dicevano (`?room=`, `?join=`)
+# — un link già mandato a qualcuno continua ad aprire la sua stanza. RELATIVI,
+# perché il nodo non sa sotto quale prefisso lo serve il proxy (`/em/`).
+#
+# I file restano dove sono: `rooms.js` è ancora il lettore delle porte e la
+# libreria del QR vive in `rooms_ui/vendor/`, che la casa carica da lì.
+_OLD_FACES = {"/rooms/": "../admin/", "/rooms/index.html": "../admin/",
+              "/work/": "../admin/", "/work/index.html": "../admin/",
+              "/tools/": "../admin/#tools", "/tools/index.html": "../admin/#tools"}
+
+
+@app.middleware("http")
+async def _to_the_house(request: Request, call_next):
+    target = _OLD_FACES.get(request.url.path) if request.method == "GET" else None
+    if target is None:
+        return await call_next(request)
+    from fastapi.responses import RedirectResponse
+    path, _, frag = target.partition("#")
+    query = request.url.query
+    location = path + (f"?{query}" if query else "") + (f"#{frag}" if frag else "")
+    return RedirectResponse(location, status_code=302)
+
 
 _ROOMS_UI = pathlib.Path(__file__).resolve().parent / "rooms_ui"
 if _ROOMS_UI.is_dir():

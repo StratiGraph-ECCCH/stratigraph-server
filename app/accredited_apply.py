@@ -32,7 +32,7 @@ def team_id(name: str) -> str:
     return slug[:60] or "team"
 
 
-def apply(entries: List[Dict[str, Any]], people: Any, groups: Any) -> Dict[str, int]:
+def make_people(entries: List[Dict[str, Any]], people: Any, groups: Any) -> Dict[str, int]:
     """Bring the registers in line with the list. Returns what changed."""
     from .access import Group
     from .people import Person

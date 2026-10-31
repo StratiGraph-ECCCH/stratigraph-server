@@ -97,7 +97,7 @@ api.get("/node").then((node) => {
   const sub = document.getElementById("app-sub");
   const words = { personal: L("nodo personale", "personal node"), field: L("nodo da campo", "field node"),
     institutional: L("nodo istituzionale", "institutional node") };
-  if (sub && words[node.kind]) sub.textContent = `${L("console", "console")} · ${words[node.kind]}`;
+  if (sub && words[node.kind]) sub.textContent = words[node.kind];
 }).catch(() => {});
 
 /** What a probe learned, when it learned anything worth a line: a bucket's size,

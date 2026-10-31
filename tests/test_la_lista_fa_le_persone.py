@@ -4,7 +4,7 @@ squadre a ogni avvio — senza mai togliere nessuno."""
 import pytest
 
 from app import accredited
-from app.accredited_apply import apply, team_id
+from app.accredited_apply import make_people as apply, team_id
 from app.access import Groups, InMemoryGroupStore
 from app.people import InMemoryPeopleStore, People, Person
 

@@ -12,15 +12,46 @@
  */
 import { api, escapeHtml, register, show } from "../console.js";
 import { L, ROLE_WORD, button, head, toast } from "../kit.js";
+import { openRoom } from "./rooms.js";
 
 let tools = null;   // il modulo Strumenti, per i link «installa»
+let home = null;    // questa sezione, per ridisegnarla quando la stanza si chiude
+let operator = false;
+
+/** La stanza nella casa: lo stesso pannello della console (persone, inviti,
+ *  chi vede lo studio, ciclo di vita), con quello che il ruolo nella stanza
+ *  permette — e la memoria solo all'operatore, che è chi la legge. */
+function openHere(room) {
+  openRoom(room, {}, null, { operator, onClose: () => { if (home) void show(home); } });
+}
 export function setToolsModule(m) { tools = m; }
 
 async function render(root) {
-  const [rooms, me] = await Promise.all([
+  const [rooms, me, op] = await Promise.all([
     api.get("/rooms"),
     api.get("/whoami").catch(() => ({})),
+    api.get("/admin/whoami").catch(() => ({})),
   ]);
+  operator = op?.operator === true;
+  // UN INVITO (`?join=<token>`): si accetta qui, poi si apre la stanza. È il
+  // link che i proprietari mandano; prima atterrava su una pagina che non lo
+  // leggeva.
+  const join = new URLSearchParams(location.search).get("join");
+  if (join) {
+    history.replaceState(null, "", location.pathname);
+    try {
+      const got = await api.post("/join", { token: join });
+      toast(got.already_had
+        ? L(`Eri già nella stanza «${got.title}».`, `You were already in «${got.title}».`)
+        : L(`Sei entrato nella stanza «${got.title}» come ${ROLE_WORD()[got.role] || got.role}.`,
+            `You joined «${got.title}» as ${ROLE_WORD()[got.role] || got.role}.`));
+      return render(root);
+    } catch (error) { toast(error.message, "bad"); }
+  }
+  // UNA STANZA NELL'INDIRIZZO (`#room=…`, e i vecchi `?room=` della pagina
+  // Lavorare): si apre il suo pannello, l'elenco resta sotto
+  const asked = decodeURIComponent((location.hash.match(/room=([^&]+)/) || [])[1]
+    || new URLSearchParams(location.search).get("room") || "");
   root.innerHTML = "";
   const actions = [];
   if (me.may_create) {
@@ -49,6 +80,9 @@ async function render(root) {
       "You hold no role in any room of this node yet."))}</p>`;
   }
   for (const room of live) list.appendChild(card(room));
+  const wanted = asked && rooms.find((r) => r.room_id === asked);
+  if (asked) history.replaceState(null, "", location.pathname);   // una volta sola
+  if (wanted) openHere(wanted);
 
   if (gone.length) {
     const more = document.createElement("details");
@@ -68,13 +102,14 @@ function card(room) {
   // elenca, e «1 persona» sarebbe falso
   const knows = ["owner", "admin"].includes(room.your_role);
   box.innerHTML = `<div class="h-room-head">
-      <div><a class="h-room-title" href="../work/?room=${encodeURIComponent(room.room_id)}">${escapeHtml(room.title || room.room_id)}</a>
+      <div><a class="h-room-title" href="#room=${encodeURIComponent(room.room_id)}">${escapeHtml(room.title || room.room_id)}</a>
       <span class="h-room-line">${knows ? escapeHtml(L(`${people} ${people === 1 ? "persona" : "persone"}`, `${people} ${people === 1 ? "person" : "people"}`)) : ""}${room.implicit ? " · " + escapeHtml(L("ancora senza titolo", "no title yet")) : ""}</span></div>
       <span class="h-role">${escapeHtml(ROLE_WORD()[room.your_role] || room.your_role || "")}</span>
     </div>
     <div class="h-doors"><span class="h-doors-lab">${escapeHtml(L("Apri in", "Open in"))}</span></div>
     <div class="h-said" role="status"></div>`;
   void addDoors(room, box);
+  box.querySelector(".h-room-title").addEventListener("click", (e) => { e.preventDefault(); openHere(room); });
   return box;
 }
 
@@ -98,8 +133,9 @@ async function addDoors(room, box) {
   spacer.className = "h-grow";
   row.appendChild(spacer);
   const share = document.createElement("a");
-  share.href = `../work/?room=${encodeURIComponent(room.room_id)}`;
+  share.href = `#room=${encodeURIComponent(room.room_id)}`;
   share.textContent = L("Persone e condivisione", "People and sharing");
+  share.addEventListener("click", (e) => { e.preventDefault(); openHere(room); });
   row.appendChild(share);
 }
 
@@ -189,4 +225,4 @@ async function createRoom(root) {
   await render(root);
 }
 
-register({ id: "home", title: L("Le tue stanze", "Your rooms"), render, everyone: true });
+home = register({ id: "home", title: L("Le tue stanze", "Your rooms"), render, everyone: true, order: 0 });

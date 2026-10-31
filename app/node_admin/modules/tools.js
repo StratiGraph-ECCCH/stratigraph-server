@@ -53,4 +53,4 @@ async function render(root) {
   root.appendChild(grid);
 }
 
-setToolsModule(register({ id: "tools", title: L("Strumenti", "Tools"), render, everyone: true }));
+setToolsModule(register({ id: "tools", title: L("Strumenti", "Tools"), render, everyone: true, order: 1 }));
