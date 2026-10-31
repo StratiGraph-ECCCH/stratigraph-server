@@ -145,7 +145,7 @@ async function render(root) {
 /** UNA PER VOLTA ERA LENTO E MUTO (31 ottobre: 36 stanze, ~0,4 s l'una, e
  *  nessun segno di vita — la seconda volta si è premuto di nuovo). Sei alla
  *  volta, e un contatore che dice a che punto si è. */
-async function inPool(list, work, say) {
+export async function inPool(list, work, say) {
   const POOL = 6;
   let next = 0, done = 0;
   const refused = [];
@@ -153,6 +153,7 @@ async function inPool(list, work, say) {
   note.className = "k-banner k-progress";
   note.setAttribute("role", "status");
   document.querySelector(".k-batch, .k-banner")?.before(note);
+  note.scrollIntoView?.({ block: "nearest" });
   const paint = () => { note.textContent = say(done, list.length); };
   paint();
   document.querySelectorAll(".k-batch button, .k-banner button").forEach((b) => { b.disabled = true; });

@@ -15,6 +15,7 @@
  */
 import { api, confirmNamed, confirmTyped, escapeHtml, register } from "../console.js";
 import { L, button, bytes, chips, head, shortRef, tag, toast } from "../kit.js";
+import { inPool } from "./rooms.js";
 
 let state = "all";
 let roomFilter = "";
@@ -80,6 +81,59 @@ async function render(root) {
   const out = document.createElement("div");
   files.appendChild(out);
 
+  //: GLI ORFANI SCELTI per toglierli insieme (31 ott 2026, E.D.: «per
+  //: cancellare in batch sarebbe importante poterci mettere mano»). Solo
+  //: orfani: un file citato da una stanza non ha la casella.
+  const picked = new Map();   // ref → size
+  const orphansIn = (list) => list.assets.filter((a) => a.state === "orphan");
+
+  function wirePicks(list) {
+    const batch = out.querySelector(".k-batch");
+    const paint = () => {
+      const n = picked.size;
+      batch.hidden = !n;
+      if (!n) { batch.innerHTML = ""; return; }
+      const total = [...picked.values()].reduce((x, y) => x + (y || 0), 0);
+      batch.innerHTML = `<span><b>${n}</b> ${escapeHtml(L(n === 1 ? "orfano scelto" : "orfani scelti", n === 1 ? "orphan picked" : "orphans picked"))} · ${bytes(total)}</span>`;
+      const acts = document.createElement("span");
+      acts.className = "k-batch-acts";
+      acts.appendChild(button(L(`Togli (${n})…`, `Remove (${n})…`), () => void removeMany(total), "warn"));
+      acts.appendChild(button(L("Togli la scelta", "Clear"), () => { picked.clear(); void drawFiles(); }));
+      batch.appendChild(acts);
+    };
+    out.querySelectorAll("input[data-pick-ref]").forEach((box) => box.addEventListener("change", () => {
+      const a = list.assets.find((x) => x.ref === box.dataset.pickRef);
+      if (box.checked) picked.set(a.ref, a.size); else picked.delete(a.ref);
+      paint();
+    }));
+    const all = out.querySelector("#k-pick-orphans");
+    if (all) {
+      all.checked = orphansIn(list).every((a) => picked.has(a.ref));
+      all.addEventListener("change", () => {
+        for (const a of orphansIn(list)) { if (all.checked) picked.set(a.ref, a.size); else picked.delete(a.ref); }
+        out.querySelectorAll("input[data-pick-ref]").forEach((b) => { b.checked = picked.has(b.dataset.pickRef); });
+        paint();
+      });
+    }
+    paint();
+  }
+
+  async function removeMany(total) {
+    const refs = [...picked.keys()];
+    if (!confirmTyped(L(`la rimozione di ${refs.length} file orfani (${bytes(total)}): i byte non tornano`,
+                        `removing ${refs.length} orphan files (${bytes(total)}): the bytes do not come back`),
+                      L("TOGLI", "REMOVE"))) return;
+    const { done, refused } = await inPool(refs.map((ref) => ({ room_id: shortRef(ref), ref })),
+      (x) => api.del(`/admin/assets/${encodeURIComponent(x.ref)}`),
+      (d, n) => L(`Tolgo… ${d} di ${n}`, `Removing… ${d} of ${n}`));
+    picked.clear();
+    toast(L(`${done} file tolti dal bucket.`, `${done} files removed from the bucket.`)
+          + (refused.length ? " " + L(`${refused.length} rifiutati: qualcuno li cita.`, `${refused.length} refused: something cites them.`) : ""),
+          refused.length ? "bad" : "");
+    if (refused.length) console.warn(refused.join("\n"));
+    await drawFiles();
+  }
+
   async function drawFiles() {
     bar.querySelectorAll(".k-chip").forEach((c, i) => c.setAttribute("aria-pressed", String(["all", "in_use", "orphan", "missing"][i] === state)));
     out.innerHTML = `<p class="k-faint">${escapeHtml(L("Chiedo al nodo…", "Asking the node…"))}</p>`;
@@ -92,18 +146,21 @@ async function render(root) {
     catch (error) { out.innerHTML = `<p class="k-note bad">${escapeHtml(error.message)}</p>`; return; }
     out.innerHTML = `<p class="k-faint">${escapeHtml(L(`${list.matched} file · ${bytes(list.bytes)} · dal ${list.listed_from}`, `${list.matched} files · ${bytes(list.bytes)} · from the ${list.listed_from}`))}
       ${list.truncated ? " · " + escapeHtml(L("elenco interrotto al limite: non tutti i file sono qui", "listing stopped at the cap: not every file is here")) : ""}</p>
-      <div class="k-tw"><table class="k-table"><thead><tr><th>${L("File", "File")}</th><th class="num">${L("Dimensione", "Size")}</th>
+      <div class="k-banner k-batch" hidden></div>
+      <div class="k-tw"><table class="k-table"><thead><tr><th class="k-pick">${orphansIn(list).length ? `<input type="checkbox" id="k-pick-orphans" aria-label="${escapeHtml(L("Scegli tutti gli orfani elencati", "Pick every listed orphan"))}">` : ""}</th><th>${L("File", "File")}</th><th class="num">${L("Dimensione", "Size")}</th>
         <th>${L("Stanze che lo citano", "Rooms citing it")}</th><th>${L("Entrato da", "Came in through")}</th><th>${L("Caricato da", "Uploaded by")}</th><th></th></tr></thead>
       <tbody>${list.assets.map((a) => `<tr>
+        <td class="k-pick">${a.state === "orphan" ? `<input type="checkbox" data-pick-ref="${escapeHtml(a.ref)}" ${picked.has(a.ref) ? "checked" : ""} aria-label="${escapeHtml(L("Scegli", "Pick") + " " + shortRef(a.ref))}">` : ""}</td>
         <td class="k-mono" title="${escapeHtml(a.ref)}">${escapeHtml(shortRef(a.ref))}</td>
         <td class="num">${bytes(a.size)}</td>
         <td>${a.rooms.length ? escapeHtml(a.rooms.join(", ")) : '<span class="k-faint">—</span>'}</td>
         <td>${escapeHtml(a.home || "—")}</td>
         <td class="k-mono">${escapeHtml(a.uploaded_by.join(", ") || "—")}</td>
         <td>${a.state === "orphan" ? `<span data-forget="${escapeHtml(a.ref)}"></span>` : a.state === "missing" ? tag(L("mancante", "missing"), "warn") : tag(L("in uso", "in use"), "ok")}</td></tr>`).join("")
-        || `<tr><td colspan="6" class="k-faint">${escapeHtml(L("Nessun file.", "No file."))}</td></tr>`}</tbody></table></div>
-      <p class="k-note">${escapeHtml(L("Un file orfano è nel bucket ma nessuna stanza lo cita. Si toglie uno alla volta, scrivendone l'impronta per intero: il nodo ricontrolla chi lo usa e rifiuta se qualcuno lo cita.",
-        "An orphan file is in the bucket but no room cites it. It is removed one at a time, typing its digest in full: the node re-checks who uses it and refuses if anybody does."))}</p>`;
+        || `<tr><td colspan="7" class="k-faint">${escapeHtml(L("Nessun file.", "No file."))}</td></tr>`}</tbody></table></div>
+      <p class="k-note">${escapeHtml(L("Un file orfano è nel bucket ma nessuna stanza lo cita. Si toglie uno alla volta scrivendone l'impronta, oppure se ne spuntano molti e si tolgono insieme: per ognuno il nodo ricontrolla chi lo usa e rifiuta se qualcuno lo cita.",
+        "An orphan file is in the bucket but no room cites it. Remove one by typing its digest, or tick many and remove them together: for each the node re-checks who uses it and refuses if anybody does."))}</p>`;
+    wirePicks(list);
     out.querySelectorAll("[data-forget]").forEach((slot) => slot.appendChild(button(L("Togli…", "Remove…"), async () => {
       const ref = slot.dataset.forget;
       if (!confirmTyped(L("la rimozione di questi byte, che non tornano", "removing these bytes, which do not come back"), ref)) return;
