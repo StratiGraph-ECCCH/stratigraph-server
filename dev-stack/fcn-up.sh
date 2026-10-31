@@ -39,14 +39,20 @@ HTTPS_PORT="${HTTPS_PORT:-8443}"
 DEV_REALM="${DEV_REALM:-em-dev}"
 
 # ── argomenti: hostname PRIMARIO opzionale + --local-s3d ─────────────────────
-LOCAL_S3D="no"; DEMO="no"; ARG_HOST=""; STUDIO="auto"
+LOCAL_S3D="no"; DEMO="no"; ARG_HOST=""; STUDIO="auto"; BUILD="--build"
 for a in "$@"; do
   case "$a" in
     --local-s3d) LOCAL_S3D="yes" ;;
     --demo)      DEMO="yes" ;;
     --studio)    STUDIO="yes" ;;
     --no-studio) STUDIO="no" ;;
-    -*) echo "flag sconosciuto: $a (usa --local-s3d | --demo | --studio | --no-studio)"; exit 2 ;;
+    #: --offline (31 ott 2026): l'avvio di un nodo che può non avere rete —
+    #: quello che fa da sé all'accensione (`fcn-autostart.sh`). Niente build:
+    #: anche con tutto in cache, una build chiede al registro i metadati delle
+    #: immagini di base, e senza rete si ferma. Le immagini le ha già fatte il
+    #: primo `fcn-up.sh`, a casa. E niente dev server di EMStudio.
+    --offline)   BUILD=""; STUDIO="no" ;;
+    -*) echo "flag sconosciuto: $a (usa --local-s3d | --demo | --studio | --no-studio | --offline)"; exit 2 ;;
     *) ARG_HOST="$a" ;;
   esac
 done
@@ -60,7 +66,11 @@ done
 sg_ensure_docker || exit 1
 
 # ── 2 · host primario (browser) + gli indirizzi che Caddy serve ──────────────
-PRIMARY="${ARG_HOST:-em.localhost}"                 # dove punta il browser (URL pubblici)
+#: …e se non lo si passa, quello che il nodo ha scelto una volta per tutte
+#: (`FCN_HOST` in `.env.dev`, lo scrive `fcn-field-setup.sh`): così l'avvio di
+#: ogni giorno, e quello automatico all'accensione, è `./fcn-up.sh` e basta.
+FCN_HOST_SAVED="$( [ -f .env.dev ] && grep -E '^FCN_HOST=' .env.dev | tail -1 | cut -d= -f2- || true)"
+PRIMARY="${ARG_HOST:-${FCN_HOST_SAVED:-em.localhost}}"   # dove punta il browser (URL pubblici)
 # Il nome con cui l'altro computer può raggiungere questo (mai un IP: la CA
 # interna di Caddy non fa certificati per un IP nudo). `scutil` su macOS,
 # `hostname -s` altrove — la differenza sta in `platform.sh`, non qui.
@@ -304,7 +314,8 @@ elif [ "$STUDIO" = "yes" ] && [ "$studio_pronto" != "yes" ]; then
   exit 1
 fi
 
-"${COMPOSE[@]}" --profile https up -d --build
+# shellcheck disable=SC2086  # BUILD è vuoto con --offline, e allora non è un argomento
+"${COMPOSE[@]}" --profile https up -d $BUILD
 
 # ── 4-bis-campo · IL GESTORE ENTRA ───────────────────────────────────────────
 #

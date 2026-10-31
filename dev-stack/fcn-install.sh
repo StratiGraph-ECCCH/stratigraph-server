@@ -5,6 +5,9 @@
 #   ./fcn-install.sh fcn.local      # …e insegna QUEL nome anche al realm
 #   ./fcn-install.sh --local-s3d    # …e serve anche il checkout di s3Dgraphy
 #   ./fcn-install.sh --dry-run      # dice cosa farebbe e non fa niente
+#   ./fcn-install.sh --field        # NODO DA CAMPO: installa anche quello che
+#                                   #   manca al sistema (Docker, avahi, la riga
+#                                   #   di /etc/hosts), con sudo — vedi «0 · …»
 #
 # COSA GARANTISCE, e sono le cose che hanno fatto fallire il primo avvio sul
 # Raspberry Pi il 7 settembre 2026:
@@ -39,16 +42,23 @@ cd "$(dirname "$0")"                     # stratigraph-server/dev-stack
 . ./platform.sh
 
 HTTPS_PORT="${HTTPS_PORT:-8443}"
-LOCAL_S3D="no"; DRY="no"; ARG_HOST=""
+LOCAL_S3D="no"; DRY="no"; ARG_HOST=""; FIELD="no"
 for a in "$@"; do
   case "$a" in
     --local-s3d) LOCAL_S3D="yes" ;;
     --dry-run|-n) DRY="yes" ;;
-    -*) echo "flag sconosciuto: $a (usa --local-s3d | --dry-run)"; exit 2 ;;
+    --field) FIELD="yes" ;;
+    -*) echo "flag sconosciuto: $a (usa --local-s3d | --dry-run | --field)"; exit 2 ;;
     *) ARG_HOST="$a" ;;
   esac
 done
-PRIMARY="${ARG_HOST:-em.localhost}"
+#: il nome scelto una volta (`FCN_HOST` in .env.dev), come in fcn-up.sh; e su un
+#: nodo da campo, senza niente, il nome di rete della macchina (`<host>.local`)
+FCN_HOST_SAVED="$( [ -f .env.dev ] && grep -E '^FCN_HOST=' .env.dev | tail -1 | cut -d= -f2- || true)"
+if [ -z "$ARG_HOST" ] && [ -z "$FCN_HOST_SAVED" ] && [ "$FIELD" = "yes" ]; then
+  _h="$(sg_local_hostname)"; [ -n "$_h" ] && ARG_HOST="${_h}.local"
+fi
+PRIMARY="${ARG_HOST:-${FCN_HOST_SAVED:-em.localhost}}"
 
 #: Il conto di cosa è cambiato: serve per la frase finale, perché
 #: «idempotente» vuol dire anche DIRE che non si è fatto niente.
@@ -75,6 +85,79 @@ say ""
 # nello STESSO file. Non c'è nessuna lista qui dentro da tenere allineata, e se
 # un `context:` nuovo non ha il suo URL questo script lo dice invece di
 # clonare il nulla.
+# ══ 0 · IL SISTEMA, SOLO PER IL NODO DA CAMPO (31 ottobre 2026) ══════════════
+#
+# Per il dev-stack la dottrina resta quella scritta in testa: niente sudo, si
+# stampa la riga. Per un NODO DA CAMPO no, e per una ragione precisa: chi lo
+# installa è un archeologo che prepara una macchina dedicata, e «installa Docker
+# da te, poi rientra, poi aggiungi una riga a /etc/hosts» sono tre posti dove
+# fermarsi (E.D.: «l'install pensa lui a tutto»). `--field` è il consenso,
+# scritto da chi lo lancia; sudo chiede la password una volta, e ogni passo dice
+# cosa fa prima di farlo. Idempotente: quello che c'è già non si tocca.
+if [ "$FIELD" = "yes" ] && [ "$DRY" != "yes" ]; then
+  say "0 · il sistema (nodo da campo)"
+  case "$(sg_os)" in
+    linux)
+      if ! command -v apt-get >/dev/null 2>&1; then
+        male "questo Linux non ha apt: installa a mano Docker, git, python3 e avahi."
+      else
+        mancano=""
+        for pkg in git curl python3 avahi-daemon; do
+          dpkg -s "$pkg" >/dev/null 2>&1 || mancano="$mancano $pkg"
+        done
+        if [ -n "$mancano" ]; then
+          say "  ⇣ installo:$mancano"
+          sudo apt-get update -qq && sudo apt-get install -y -qq $mancano \
+            && fatto "installati:$mancano" || male "apt non ha installato:$mancano"
+        else
+          ok "git, curl, python3, avahi"
+        fi
+        sudo systemctl enable --now avahi-daemon >/dev/null 2>&1 || true
+        if ! command -v docker >/dev/null 2>&1; then
+          say "  ⇣ installo Docker (lo script ufficiale, get.docker.com)…"
+          curl -fsSL https://get.docker.com | sudo sh >/dev/null \
+            && fatto "Docker installato" || male "l'installazione di Docker è fallita"
+        else
+          ok "docker"
+        fi
+        sudo systemctl enable --now docker >/dev/null 2>&1 || true
+        if ! id -nG "$USER" | tr ' ' '\n' | grep -qx docker; then
+          sudo usermod -aG docker "$USER" && fatto "$USER nel gruppo docker"
+          #: il gruppo vale dalla prossima sessione: questa giro lo si
+          #: riprende sotto il gruppo nuovo, così nessuno deve uscire e rientrare
+          if command -v sg >/dev/null 2>&1 && [ -z "${FCN_REGROUPED:-}" ]; then
+            say "  ↻ riprendo con il gruppo docker attivo…"
+            export FCN_REGROUPED=1
+            exec sg docker -c "$(printf '%q ' "$0" "$@")"
+          fi
+        fi
+        if ! getent hosts em.localhost >/dev/null 2>&1; then
+          echo "127.0.0.1 em.localhost" | sudo tee -a /etc/hosts >/dev/null \
+            && fatto "em.localhost in /etc/hosts"
+        fi
+      fi
+      ;;
+    macos)
+      if ! command -v brew >/dev/null 2>&1; then
+        male "su questo Mac manca Homebrew: installalo da https://brew.sh, poi rilancia."
+      else
+        mancano=""
+        for f in git colima docker docker-compose; do
+          command -v "$f" >/dev/null 2>&1 || mancano="$mancano $f"
+        done
+        if [ -n "$mancano" ]; then
+          say "  ⇣ brew install$mancano"
+          brew install $mancano && fatto "installati:$mancano" || male "brew non ha installato:$mancano"
+        else
+          ok "git, colima, docker, docker-compose"
+        fi
+      fi
+      ;;
+    *) male "il nodo da campo si installa su Linux o su macOS." ;;
+  esac
+  say ""
+fi
+
 say "1 · i repository affiancati"
 
 #: I `context:` risolti in percorsi assoluti — li stampa compose, che è la cosa
@@ -174,7 +257,10 @@ done
 # vorrebbe dire non installarlo mai.
 avviso(){ printf '  ⚠ %s\n' "$*" >&2; }
 FRONTEND="$EMSTUDIO/frontend"
-if [ ! -d "$EMSTUDIO" ]; then
+if [ "$FIELD" = "yes" ]; then
+  #: un nodo da campo non serve l'editor dal suo dev server: niente npm
+  ok "EMStudio: sul nodo da campo non serve il suo dev server (npm saltato)"
+elif [ ! -d "$EMSTUDIO" ]; then
   #: in --dry-run (o se il clone è fallito) non c'è niente da guardare: il clone
   #: l'ha già detto sopra, e i due passi npm verranno al giro dopo
   [ "$DRY" = "yes" ] && nota "(dopo il clone: npm install e npm run build:reader in EMStudio/frontend)"
@@ -234,6 +320,8 @@ say ""
 say "2 · l'ambiente"
 if [ -f .env.dev ]; then
   ok ".env.dev"
+elif [ "$FIELD" = "yes" ]; then
+  ok ".env.dev lo scrive il passo dopo, ./fcn-field-setup.sh"
 elif [ ! -f .env.dev.example ]; then
   male "non c'è né \`.env.dev\` né \`.env.dev.example\`: checkout incompleto."
 else
@@ -330,6 +418,13 @@ else
   say "✔ pronto ($CAMBIATO cosa/e preparate)."
 fi
 say ""
-say "  Adesso:   ./fcn-up.sh$( [ "$PRIMARY" != "em.localhost" ] && echo " $PRIMARY" )$( [ "$LOCAL_S3D" = "yes" ] && echo " --local-s3d" )"
-say "  E la CA, una volta sola:   ./fcn-trust-ca.sh"
+if [ "$FIELD" = "yes" ] && ! grep -qE '^EM_NODE_KIND=field' .env.dev 2>/dev/null; then
+  say "  Adesso, una volta sola (il tuo ORCID, il nome del nodo, l'avvio automatico):"
+  say "    ./fcn-field-setup.sh"
+  say "  e poi:"
+  say "    ./fcn-up.sh"
+else
+  say "  Adesso:   ./fcn-up.sh$( [ "$PRIMARY" != "em.localhost" ] && [ "$PRIMARY" != "$FCN_HOST_SAVED" ] && echo " $PRIMARY" )$( [ "$LOCAL_S3D" = "yes" ] && echo " --local-s3d" )"
+  say "  E la CA, una volta sola:   ./fcn-trust-ca.sh"
+fi
 say ""

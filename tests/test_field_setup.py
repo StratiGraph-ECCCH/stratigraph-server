@@ -44,7 +44,7 @@ def test_l_orcid_si_controlla():
 
 
 def test_un_nodo_nuovo_riceve_i_suoi_segreti_e_il_suo_gestore(here, capsys):
-    assert fs.main(["--orcid", ME, "--name", "Josiah Carberry", "--node-name", "scavo-2027"],
+    assert fs.main(["--orcid", ME, "--name", "Josiah Carberry", "--node-name", "scavo-2027", "--host", "h.local", "--no-autostart"],
                    here=here, volume_check=lambda v: False) == 0
     env = _env(here)
     for key, defaults in fs.DEV_DEFAULTS.items():
@@ -60,9 +60,9 @@ def test_un_nodo_nuovo_riceve_i_suoi_segreti_e_il_suo_gestore(here, capsys):
 
 
 def test_rilanciarlo_non_rompe_un_nodo_che_funziona(here):
-    fs.main(["--orcid", ME, "--name", "A B"], here=here, volume_check=lambda v: False)
+    fs.main(["--orcid", ME, "--name", "A B", "--host", "h.local", "--no-autostart"], here=here, volume_check=lambda v: False)
     before = _env(here)
-    fs.main(["--orcid", "0000-0003-1111-1112", "--name", "C D"], here=here, volume_check=lambda v: False)
+    fs.main(["--orcid", "0000-0003-1111-1112", "--name", "C D", "--host", "h.local", "--no-autostart"], here=here, volume_check=lambda v: False)
     after = _env(here)
     for key in fs.DEV_DEFAULTS:
         assert before[key] == after[key]
@@ -71,7 +71,7 @@ def test_rilanciarlo_non_rompe_un_nodo_che_funziona(here):
 
 
 def test_dati_che_esistono_gia_tengono_il_loro_segreto(here):
-    fs.main(["--orcid", ME, "--name", "A B"], here=here,
+    fs.main(["--orcid", ME, "--name", "A B", "--host", "h.local", "--no-autostart"], here=here,
             volume_check=lambda v: v == fs.RUSTFS_VOLUME)
     env = _env(here)
     assert env["RUSTFS_ACCESS_KEY"] == "em-dev-s3" and env["RUSTFS_SECRET_KEY"] == "em-dev-s3-secret"
@@ -79,7 +79,7 @@ def test_dati_che_esistono_gia_tengono_il_loro_segreto(here):
 
 
 def test_un_iD_sbagliato_si_ferma_prima_di_scrivere(here):
-    assert fs.main(["--orcid", "1234", "--name", "A B"], here=here, volume_check=lambda v: False) == 2
+    assert fs.main(["--orcid", "1234", "--name", "A B", "--host", "h.local"], here=here, volume_check=lambda v: False) == 2
     assert not (here / ".env.dev").exists()
 
 
@@ -119,3 +119,68 @@ def test_keycloak_tiene_i_suoi_dati_sul_nodo_da_campo():
     down = (DEV / "fcn-down.sh").read_text()
     assert "docker-compose.field.yml" in up and "docker-compose.field.yml" in down
     assert "render_realm.py --campo" in up and "accredit.sh accredited.field.yaml" in up
+
+
+def _silent(prompt, secret=False):
+    return ""
+
+
+def test_si_ricorda_il_nome_di_rete_e_lo_usa_fcn_up(here):
+    assert fs.main(["--orcid", ME, "--name", "A B", "--host", "fcn.local", "--no-autostart"],
+                   here=here, volume_check=lambda v: False, ask=_silent) == 0
+    assert _env(here)["FCN_HOST"] == "fcn.local"
+    up = (DEV / "fcn-up.sh").read_text()
+    assert "FCN_HOST=" in up and "${FCN_HOST_SAVED:-em.localhost}" in up
+
+
+def test_chiede_quello_che_manca_e_il_segreto_di_orcid_di_nascosto(here):
+    asked = []
+
+    def person(prompt, secret=False):
+        asked.append((prompt, secret))
+        if "ORCID iD" in prompt:
+            return ME
+        if "nome, come" in prompt:
+            return "Josiah Carberry"
+        if "nome per il nodo" in prompt:
+            return "scavo-2027"
+        if "nome di rete" in prompt:
+            return "fcn.local"
+        if "client ID" in prompt:
+            return "APP-TEST123"
+        if "client secret" in prompt:
+            return "orcid-secret-value"
+        if "accendersi da solo" in prompt:
+            return "s"
+        return ""
+
+    started = []
+    assert fs.main([], here=here, volume_check=lambda v: False, ask=person,
+                   autostart=lambda h: started.append(h) or True) == 0
+    env = _env(here)
+    assert env["ORCID_CLIENT_ID"] == "APP-TEST123" and env["ORCID_CLIENT_SECRET"] == "orcid-secret-value"
+    assert [s for p, s in asked if "client secret" in p] == [True]
+    assert env["EM_NODE_NAME"] == "scavo-2027" and env["FCN_HOST"] == "fcn.local"
+
+
+def test_rilanciato_chiede_solo_quello_che_manca(here):
+    fs.main(["--orcid", ME, "--name", "A B", "--host", "fcn.local", "--node-name", "x",
+             "--no-autostart"], here=here, volume_check=lambda v: False, ask=_silent)
+    asked = []
+    fs.main(["--no-autostart"], here=here, volume_check=lambda v: False,
+            ask=lambda p, secret=False: asked.append(p) or "")
+    assert all("ORCID iD" not in p and "nome" not in p.lower() for p in asked), asked
+
+
+def test_l_avvio_all_accensione_non_ricostruisce_le_immagini():
+    up = (DEV / "fcn-up.sh").read_text()
+    assert '--offline)   BUILD=""' in up and "up -d $BUILD" in up
+    auto = (DEV / "fcn-autostart.sh").read_text()
+    assert "fcn-up.sh --offline" in auto and "Requires=docker.service" in auto
+
+
+def test_il_primo_comando_scarica_e_installa():
+    get = (DEV / "fcn-get.sh").read_text()
+    assert "git clone" in get and "fcn-install.sh --field" in get and "--ff-only" in get
+    install = (DEV / "fcn-install.sh").read_text()
+    assert "--field) FIELD=\"yes\"" in install and "get.docker.com" in install

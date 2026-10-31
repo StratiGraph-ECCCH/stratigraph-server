@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fcn-field-setup — prepara la configurazione di un NODO DA CAMPO, in un comando.
 #
-#   ./fcn-field-setup.sh --orcid 0000-0002-1825-0097 --name "Nome Cognome"
+#   ./fcn-field-setup.sh          # chiede quello che serve, una volta
 #   ./fcn-field-setup.sh --orcid … --name … --node-name scavo-2027 --host scavo-mac.local
 #
 # Genera i segreti del nodo dove c'è ancora il valore di sviluppo, dichiara il
