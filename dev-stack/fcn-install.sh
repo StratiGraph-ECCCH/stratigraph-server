@@ -8,6 +8,15 @@
 #   ./fcn-install.sh --field        # NODO DA CAMPO: installa anche quello che
 #                                   #   manca al sistema (Docker, avahi, la riga
 #                                   #   di /etc/hosts), con sudo — vedi «0 · …»
+#   ./fcn-install.sh --images       # la STRADA DELLE IMMAGINI: niente repository
+#                                   #   compagni, si tirano le immagini da GHCR
+#   ./fcn-install.sh --source       # la strada di sviluppo (build dai repository)
+#
+# QUALE STRADA (1 novembre 2026): il flag; poi EM_NODE_ROAD (ambiente o
+# .env.dev); poi il tipo di nodo — `--field` vuol dire immagini, tutto il resto
+# sviluppo. Sulla strada delle immagini i passi 1 e 1-bis non clonano niente e
+# l'ultimo passo, «6 · le immagini», fa il `pull`: a casa, con la rete, così il
+# nodo si accende poi anche senza (`./fcn-up.sh --offline`).
 #
 # COSA GARANTISCE, e sono le cose che hanno fatto fallire il primo avvio sul
 # Raspberry Pi il 7 settembre 2026:
@@ -42,13 +51,15 @@ cd "$(dirname "$0")"                     # stratigraph-server/dev-stack
 . ./platform.sh
 
 HTTPS_PORT="${HTTPS_PORT:-8443}"
-LOCAL_S3D="no"; DRY="no"; ARG_HOST=""; FIELD="no"
+LOCAL_S3D="no"; DRY="no"; ARG_HOST=""; FIELD="no"; ROAD_ARG=""
 for a in "$@"; do
   case "$a" in
     --local-s3d) LOCAL_S3D="yes" ;;
     --dry-run|-n) DRY="yes" ;;
     --field) FIELD="yes" ;;
-    -*) echo "flag sconosciuto: $a (usa --local-s3d | --dry-run | --field)"; exit 2 ;;
+    --images) ROAD_ARG="images" ;;
+    --source) ROAD_ARG="source" ;;
+    -*) echo "flag sconosciuto: $a (usa --local-s3d | --dry-run | --field | --images | --source)"; exit 2 ;;
     *) ARG_HOST="$a" ;;
   esac
 done
@@ -164,6 +175,25 @@ if [ "$FIELD" = "yes" ] && [ "$DRY" != "yes" ]; then
   say ""
 fi
 
+#: LA STRADA. Con `--field` il tipo di nodo è «da campo» anche prima che
+#: `.env.dev` lo dica (lo scrive il passo dopo, fcn-field-setup.sh).
+if [ "$FIELD" = "yes" ]; then
+  ROAD="$(EM_NODE_KIND=field sg_node_road "$ROAD_ARG")" || exit 1
+else
+  ROAD="$(sg_node_road "$ROAD_ARG")" || exit 1
+fi
+if [ "$ROAD" = "images" ] && [ "$LOCAL_S3D" = "yes" ]; then
+  male "--local-s3d è della strada di sviluppo: sulla strada delle immagini s3Dgraphy è quello dentro le immagini."
+  nota "Per un s3Dgraphy locale:  ./fcn-install.sh --source --local-s3d"
+  exit 1
+fi
+
+if [ "$ROAD" = "images" ]; then
+say "1 · i repository affiancati — strada delle immagini: nessuno"
+sg_compose_array || exit 1
+ok "i servizi vengono dalle immagini di GHCR (docker-compose.images.yml): niente da clonare"
+ok "EMStudio: il reader è nell'immagine del catalogo, il dev server non serve"
+else
 say "1 · i repository affiancati"
 
 #: I `context:` risolti in percorsi assoluti — li stampa compose, che è la cosa
@@ -316,6 +346,7 @@ else
     fi
   fi
 fi
+fi   # strada di sviluppo: fine dei passi 1 e 1-bis
 
 # ══ 2 · .env.dev ═════════════════════════════════════════════════════════════
 #
@@ -356,6 +387,14 @@ else
 fi
 #: il compose l'ha già trovato il passo 1 — dirlo qui è dove chi legge lo cerca
 ok "compose: ${COMPOSE[*]}"
+#: …e sulla strada delle immagini deve conoscere `!override` (2.24.4)
+if [ "$ROAD" = "images" ]; then
+  if sg_compose_supports_images; then
+    ok "compose ≥ ${SG_COMPOSE_MIN_IMAGES} (la strada delle immagini)"
+  else
+    male "compose troppo vecchio per la strada delle immagini (vedi sopra)."
+  fi
+fi
 
 # ══ 4 · em.localhost ═════════════════════════════════════════════════════════
 #
@@ -410,6 +449,33 @@ else
   fi
 fi
 
+# ══ 6 · LE IMMAGINI (solo sulla strada delle immagini) ═══════════════════════
+#
+# Per ultimo, e solo se tutto il resto è a posto: è il passo che costa rete e
+# disco, e la proprietà di questo script è che fallisce PRIMA dei pull. Si tira
+# qui, a casa, perché sul campo la rete può non esserci: dopo, `./fcn-up.sh
+# --offline` accende con quello che c'è. `fcn-up.sh` (senza --offline) tira di
+# nuovo, ed è un niente se i tag non sono cambiati.
+if [ "$ROAD" = "images" ]; then
+  say ""
+  say "6 · le immagini"
+  TIRA=("${COMPOSE[@]}")
+  [ -f .env.dev ] && TIRA+=(--env-file .env.dev)
+  TIRA+=(-f docker-compose.dev.yml -f docker-compose.images.yml --profile https)
+  if [ "$GUAI" -gt 0 ]; then
+    nota "pull saltato: prima le cose qui sopra."
+  elif [ "$DRY" = "yes" ]; then
+    fatto "farei: ${TIRA[*]} pull"
+  elif "${TIRA[@]}" pull; then
+    fatto "immagini scaricate (i tag sono in docker-compose.images.yml)"
+  else
+    male "il pull delle immagini non è riuscito."
+    nota "Rete (ghcr.io raggiungibile?), un tag non ancora pubblicato su GHCR,"
+    nota "o un'immagine senza la variante per $(uname -m) («no matching manifest»)."
+    nota "Rilancia questo comando quando la rete c'è: è idempotente."
+  fi
+fi
+
 # ══ E ADESSO ═════════════════════════════════════════════════════════════════
 say ""
 if [ "$GUAI" -gt 0 ]; then
@@ -430,7 +496,7 @@ if [ "$FIELD" = "yes" ] && ! grep -qE '^EM_NODE_KIND=field' .env.dev 2>/dev/null
   say "  e poi:"
   say "    ./fcn-up.sh"
 else
-  say "  Adesso:   ./fcn-up.sh$( [ "$PRIMARY" != "em.localhost" ] && [ "$PRIMARY" != "$FCN_HOST_SAVED" ] && echo " $PRIMARY" )$( [ "$LOCAL_S3D" = "yes" ] && echo " --local-s3d" )"
+  say "  Adesso:   ./fcn-up.sh$( [ "$PRIMARY" != "em.localhost" ] && [ "$PRIMARY" != "$FCN_HOST_SAVED" ] && echo " $PRIMARY" )$( [ "$LOCAL_S3D" = "yes" ] && echo " --local-s3d" )$( [ -n "$ROAD_ARG" ] && echo " --$ROAD_ARG" )"
   say "  E la CA, una volta sola:   ./fcn-trust-ca.sh"
 fi
 say ""

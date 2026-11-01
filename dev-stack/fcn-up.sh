@@ -4,6 +4,7 @@
 #
 # USO
 #   ./fcn-up.sh [HOST] [--offline] [--demo] [--local-s3d] [--studio | --no-studio]
+#               [--images | --source]
 #
 #   HOST           l'indirizzo con cui gli ALTRI dispositivi raggiungono il nodo.
 #                  Si ricorda in .env.dev (FCN_HOST): le volte dopo basta ./fcn-up.sh
@@ -13,6 +14,12 @@
 #   --local-s3d    s3Dgraphy dal checkout locale (lo modifichi e lo provi subito)
 #   --studio       pretende il dev server di EMStudio su /em/studio/
 #   --no-studio    lo salta
+#   --images       la STRADA DELLE IMMAGINI: i servizi dalle immagini pubblicate
+#                  su GHCR (docker-compose.images.yml), niente build e niente
+#                  repository compagni; `pull` prima di accendere
+#   --source       la strada di sviluppo: build dai repository affiancati
+#                  Senza nessuno dei due decide EM_NODE_ROAD in .env.dev, e senza
+#                  quello il tipo di nodo: un nodo da campo va per immagini
 #
 # ESEMPI
 #   ./fcn-up.sh                       # solo questo computer: https://em.localhost:8443
@@ -59,6 +66,7 @@ DEV_REALM="${DEV_REALM:-em-dev}"
 
 # ── argomenti: hostname PRIMARIO opzionale + --local-s3d ─────────────────────
 LOCAL_S3D="no"; DEMO="no"; ARG_HOST=""; STUDIO="auto"; BUILD="--build"
+OFFLINE="no"; ROAD_ARG=""
 for a in "$@"; do
   case "$a" in
     --local-s3d) LOCAL_S3D="yes" ;;
@@ -70,8 +78,10 @@ for a in "$@"; do
     #: anche con tutto in cache, una build chiede al registro i metadati delle
     #: immagini di base, e senza rete si ferma. Le immagini le ha già fatte il
     #: primo `fcn-up.sh`, a casa. E niente dev server di EMStudio.
-    --offline)   BUILD=""; STUDIO="no" ;;
-    -*) echo "flag sconosciuto: $a (usa --local-s3d | --demo | --studio | --no-studio | --offline)"; exit 2 ;;
+    --offline)   BUILD=""; STUDIO="no"; OFFLINE="yes" ;;
+    --images)    ROAD_ARG="images" ;;
+    --source)    ROAD_ARG="source" ;;
+    -*) echo "flag sconosciuto: $a (usa --local-s3d | --demo | --studio | --no-studio | --offline | --images | --source)"; exit 2 ;;
     *) ARG_HOST="$a" ;;
   esac
 done
@@ -193,6 +203,26 @@ export EM_PUBLIC_BASE="https://${PRIMARY}:${HTTPS_PORT}/em"
 env_dev_val() { [ -f .env.dev ] && grep -E "^$1=" .env.dev | tail -1 | cut -d= -f2- || true; }
 FIELD="no"
 [ "${EM_NODE_KIND:-$(env_dev_val EM_NODE_KIND)}" = "field" ] && FIELD="yes"
+# ── 3-ter · QUALE STRADA (1 novembre 2026) ───────────────────────────────────
+#
+# `source`: build dai repository affiancati, codice montato — il dev-stack.
+# `images`: i servizi dalle immagini pubblicate, `docker-compose.images.yml`
+# sopra il compose di base. Chi decide: il flag, poi `EM_NODE_ROAD`, poi il tipo
+# di nodo (`sg_node_road` in platform.sh). Sulla strada delle immagini non c'è
+# niente da costruire, nessun checkout di s3Dgraphy da montare e, di regola,
+# nessun EMStudio accanto.
+ROAD="$(sg_node_road "$ROAD_ARG")" || exit 1
+if [ "$ROAD" = "images" ]; then
+  BUILD=""
+  if [ "$LOCAL_S3D" = "yes" ]; then
+    echo "✖ --local-s3d monta il checkout di s3Dgraphy, e la strada delle immagini" >&2
+    echo "  non monta codice: s3Dgraphy è quello dentro le immagini. Per provare un" >&2
+    echo "  s3Dgraphy locale:  ./fcn-up.sh --source --local-s3d" >&2
+    exit 1
+  fi
+  [ "$STUDIO" = "auto" ] && STUDIO="no"
+  echo "· strada delle immagini: i servizi da GHCR (docker-compose.images.yml), niente build"
+fi
 if [ "$FIELD" = "yes" ]; then
   if [ ! -f accredited.field.yaml ]; then
     echo "✖ il nodo è dichiarato «da campo» ma manca accredited.field.yaml." >&2
@@ -256,6 +286,10 @@ sg_need_env_dev || exit 1
 # manca invece di proseguire al buio.
 sg_compose_array || exit 1
 COMPOSE+=(--env-file .env.dev -f docker-compose.dev.yml)
+if [ "$ROAD" = "images" ]; then
+  sg_compose_supports_images || exit 1
+  COMPOSE+=(-f docker-compose.images.yml)
+fi
 [ "$FIELD" = "yes" ] && COMPOSE+=(-f docker-compose.field.yml)
 if [ "$LOCAL_S3D" = "yes" ]; then
   COMPOSE+=(-f docker-compose.local-s3d.yml)
@@ -352,8 +386,45 @@ elif [ "$STUDIO" = "yes" ] && [ "$studio_pronto" != "yes" ]; then
   exit 1
 fi
 
-# shellcheck disable=SC2086  # BUILD è vuoto con --offline, e allora non è un argomento
-"${COMPOSE[@]}" --profile https up -d $BUILD
+# ── 4-sexies · LA STRADA DELLE IMMAGINI: PRIMA SI TIRA, POI SI ACCENDE ──────
+#
+# Il controllo dei fratelli qui sopra, su questa strada, non trova niente da
+# controllare: `build: !reset null` toglie ogni `context:`. Si verifica che sia
+# davvero così — un compose che avesse fuso invece di sostituire lo direbbe qui,
+# non dopo — e poi `pull`, PRIMA di `up`, così un'immagine che manca si
+# scopre con un messaggio solo e nessun container mezzo acceso.
+#
+# Con --offline NON si tira, e `up --pull never` garantisce che non ci provi da
+# sé: si accende con le immagini che la macchina ha già (il pull l'ha fatto
+# `fcn-install.sh` o un `fcn-up.sh` precedente, a casa, con la rete).
+UP_PULL=""
+if [ "$ROAD" = "images" ]; then
+  if "${COMPOSE[@]}" --profile https config 2>/dev/null | grep -qE '^[[:space:]]+(build|context):'; then
+    echo "✖ strada delle immagini, ma il compose reso costruisce ancora qualcosa." >&2
+    echo "  docker-compose.images.yml non ha tolto un \`build:\` — non accendo." >&2
+    exit 1
+  fi
+  if [ "$OFFLINE" = "yes" ]; then
+    UP_PULL="--pull never"
+  else
+    echo "▶ scarico le immagini (pull)…"
+    if ! "${COMPOSE[@]}" --profile https pull; then
+      echo >&2
+      echo "✖ il pull delle immagini non è riuscito: non accendo niente." >&2
+      echo "  Le cause, dalla più probabile:" >&2
+      echo "   · la RETE: niente Internet, o ghcr.io non raggiungibile da qui;" >&2
+      echo "   · un TAG non ancora pubblicato: i tag sono in docker-compose.images.yml," >&2
+      echo "     e ciascuno esiste su GHCR solo dopo il workflow «immagine» del suo repository;" >&2
+      echo "   · l'ARCHITETTURA: questa macchina è $(uname -m), e un'immagine senza quella" >&2
+      echo "     variante risponde «no matching manifest». Le nostre sono amd64 + arm64." >&2
+      echo "  Se le immagini ci sono già su questa macchina:  ./fcn-up.sh --offline" >&2
+      exit 1
+    fi
+  fi
+fi
+
+# shellcheck disable=SC2086  # BUILD e UP_PULL vuoti non sono argomenti
+"${COMPOSE[@]}" --profile https up -d $BUILD $UP_PULL
 
 # ── 4-bis-campo · IL GESTORE ENTRA ───────────────────────────────────────────
 #

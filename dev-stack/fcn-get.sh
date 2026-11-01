@@ -11,7 +11,11 @@
 #       clonato la prima volta, aggiornato le volte dopo (solo fast-forward: un
 #       nodo con modifiche locali lo DICE invece di inventare una fusione);
 #   2 · `fcn-install.sh --field`, che installa quello che manca al sistema,
-#       scarica i repository compagni e controlla tutto.
+#       controlla tutto e scarica le IMMAGINI dei servizi da GHCR: dal 1
+#       novembre 2026 un nodo da campo va per la strada delle immagini
+#       (`docker-compose.images.yml`), e i repository compagni non servono.
+#       Con `--source` (passato qui, arriva all'installer) si torna alla
+#       strada di sviluppo, che li clona.
 #
 # Rilanciarlo è il modo di aggiornare il nodo, a casa, con la rete.
 # Poi, una volta sola: ./fcn-field-setup.sh — e da lì in avanti ./fcn-up.sh.
@@ -51,8 +55,9 @@ else
 fi
 echo "  ✔ $(git -C "$SERVER" log -1 --format='%h %s' | cut -c1-70)"
 
-#: gli altri repository del nodo, se ci sono già: aggiornati allo stesso modo
-#: (quelli che mancano li clona fcn-install, che sa dal compose quali servono)
+#: gli altri repository del nodo, se ci sono già (la strada di sviluppo):
+#: aggiornati allo stesso modo. Sulla strada delle immagini non ci sono, e il
+#: ciclo non fa niente; quelli che mancano li clona fcn-install solo con --source
 for altro in stratigraph-chatbot stratigraph-catalog; do
   if [ -d "$DOVE/$altro/.git" ]; then
     git -C "$DOVE/$altro" pull --ff-only --quiet \

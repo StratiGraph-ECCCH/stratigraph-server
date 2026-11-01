@@ -208,6 +208,73 @@ sg_need_env_dev() {
   return 1
 }
 
+#: ## LE DUE STRADE (E.D., 1 novembre 2026)
+#:
+#: `source` — il dev-stack di sempre: build dai repository affiancati e mount
+#: del loro codice. `images` — il nodo dalle immagini pubblicate su GHCR,
+#: `docker-compose.images.yml` sopra il compose di base: nessun build, nessun
+#: repository compagno.
+#:
+#: Chi decide, in quest'ordine: `$1` (il flag `--images`/`--source` di chi
+#: chiama, già tradotto), `EM_NODE_ROAD` nell'ambiente, `EM_NODE_ROAD` in
+#: `.env.dev`; e senza nessuno dei tre il TIPO di nodo — `images` per un nodo
+#: da campo (`EM_NODE_KIND=field`), `source` per tutti gli altri. Stampa la
+#: strada; un valore che non è nessuna delle due è un errore, non un default.
+#: Va chiamata da `dev-stack/`.
+sg_node_road() {
+  local scelta="${1:-}" kind=""
+  _sg_env_dev() { [ -f .env.dev ] && grep -E "^$1=" .env.dev | tail -1 | cut -d= -f2- || true; }
+  [ -n "$scelta" ] || scelta="${EM_NODE_ROAD:-$(_sg_env_dev EM_NODE_ROAD)}"
+  if [ -z "$scelta" ]; then
+    kind="${EM_NODE_KIND:-$(_sg_env_dev EM_NODE_KIND)}"
+    [ "$kind" = "field" ] && scelta="images" || scelta="source"
+  fi
+  case "$scelta" in
+    images|source) echo "$scelta" ;;
+    *) echo "✖ EM_NODE_ROAD=$scelta: le strade sono «images» o «source»." >&2
+       return 1 ;;
+  esac
+}
+
+#: La versione minima di Compose per `docker-compose.images.yml`: 2.24.4, la
+#: prima che conosce `!override` (`!reset` c'è dalla 2.18). Un compose più
+#: vecchio NON si ferma davanti al tag sconosciuto in modo affidabile, e il
+#: guasto peggiore è quello silenzioso: liste di volumi FUSE invece che
+#: sostituite, cioè i mount `../../` di nuovo dentro, su una macchina che non ha
+#: quelle cartelle. Quindi si chiede la versione prima, e si dice.
+#: Uso, dopo `sg_compose_array`:  sg_compose_supports_images || exit 1
+SG_COMPOSE_MIN_IMAGES="2.24.4"
+sg_compose_supports_images() {
+  local v
+  v="$("${COMPOSE[@]}" version --short 2>/dev/null | head -1 | sed -E 's/^v//; s/[^0-9.].*$//')"
+  if [ -z "$v" ]; then
+    echo "✖ non riesco a leggere la versione di \`${COMPOSE[*]}\`." >&2
+    echo "  La strada delle immagini vuole Compose ${SG_COMPOSE_MIN_IMAGES} o più nuovo." >&2
+    return 1
+  fi
+  if ! sg_version_at_least "$v" "$SG_COMPOSE_MIN_IMAGES"; then
+    echo "✖ \`${COMPOSE[*]}\` è la versione $v; la strada delle immagini vuole" >&2
+    echo "  Compose ${SG_COMPOSE_MIN_IMAGES} o più nuovo (\`!override\` in docker-compose.images.yml)." >&2
+    echo "  Su Linux: il pacchetto docker-compose-plugin aggiornato (o get.docker.com);" >&2
+    echo "  su macOS: brew upgrade docker-compose." >&2
+    return 1
+  fi
+}
+
+#: `sg_version_at_least 2.29.1 2.24.4` → 0. Numeri puntati, confrontati campo
+#: per campo; `sort -V` non c'è sul `sort` di macOS più vecchio.
+sg_version_at_least() {
+  local IFS=.
+  # shellcheck disable=SC2206
+  local a=($1) b=($2) i x y
+  for i in 0 1 2; do
+    x="${a[$i]:-0}"; y="${b[$i]:-0}"
+    [ "$x" -gt "$y" ] && return 0
+    [ "$x" -lt "$y" ] && return 1
+  done
+  return 0
+}
+
 #: L'indirizzo di questa macchina sulla LAN, o "". Serve SOLO come ripiego da
 #: stampare quando un nome non regge — mai come indirizzo da usare: la CA
 #: interna di Caddy non firma per un IP nudo, quindi con l'IP il TLS non

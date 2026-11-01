@@ -18,6 +18,51 @@ path. `.env.dev.example` holds dev-only S3 keys (`em-dev-s3`) and a realm called
 
 ---
 
+## Two roads — from the code, or from the published images
+
+*Decided by E.D. on 1 November 2026. Both roads stay alive.*
+
+| | **source** (development) | **images** |
+|---|---|---|
+| compose files | `docker-compose.dev.yml` | `docker-compose.dev.yml` + `docker-compose.images.yml` |
+| our three services | built from the sibling repositories, their code bind-mounted (`../../…`) | pulled from `ghcr.io/stratigraph-eccch/…` (amd64 + arm64), no build, no code mount |
+| sibling repositories | needed (`fcn-install.sh` clones them) | **not needed** — only this checkout |
+| s3Dgraphy | the anchor `x-s3dgraphy-version`, or your checkout with `--local-s3d` | the wheel inside each image (same version as the anchor) |
+| schede | `stratigraph-templates/templates` mounted as a development override | the compiled copies vendored in the StratiField image |
+| EMStudio reader | `EMStudio/frontend/dist` mounted | built into the catalogue image (`/srv/em-reader-dist`) |
+| EMStudio dev server (`/em/studio/`) | started on the host if the checkout has `node_modules` | off (`--studio` still forces it if a checkout is there) |
+| Docker Compose | any v2 | **2.24.4 or newer** (`!override`); the scripts check it |
+
+**Use `source`** when you are changing code in any of the repositories — the
+whole point is that an edit shows without rebuilding an image.
+
+**Use `images`** for a node that only has to *run*: the field node
+(`EM_NODE_KIND=field`, first target a Raspberry Pi 5 8 GB on Raspberry Pi OS
+64-bit), a demo machine, and tomorrow the institutional node. The overlay knows
+nothing about hardware or node kind.
+
+**Who chooses:** `--images` / `--source` on `fcn-up.sh` and `fcn-install.sh`;
+otherwise `EM_NODE_ROAD=images|source` in `.env.dev`; otherwise the node kind —
+a field node goes by images, everything else by source.
+
+**The tags live in one place:** the three `image:` lines of
+`docker-compose.images.yml`, never `latest`. Raising one is editing that line;
+`./fcn-up.sh` pulls before it starts. Each tag exists on GHCR only after the
+`immagine` workflow of its repository has run (it publishes
+`1.6.0-dev.N` from `version = "1.6.0.devN"` in `pyproject.toml`).
+
+On the images road `fcn-install.sh` clones nothing and ends with a `pull`
+(do it at home, with the network); `fcn-up.sh` pulls again before `up` and, with
+`--offline`, starts with `up --pull never` from what the machine already has. If
+the pull fails it says why it probably did — network, a tag not yet published,
+or an image without this machine's architecture — and starts nothing.
+
+`tests/test_la_strada_delle_immagini.py` holds the road to its promise: no
+service with `build:`, no `../` mount, every data volume still in place, every
+tag explicit.
+
+---
+
 ## Prerequisites — WHAT IS ACTUALLY NEEDED, PER PLATFORM
 
 **Two things on the host: Docker, and a shell.** Everything else is inside the

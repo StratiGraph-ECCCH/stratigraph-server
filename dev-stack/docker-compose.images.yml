@@ -1,0 +1,89 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# LA STRADA DELLE IMMAGINI — il nodo che si accende dalle immagini pubblicate
+# (E.D., 1 novembre 2026)
+#
+# Due strade, tutte e due vive:
+#
+#   · SVILUPPO (`docker-compose.dev.yml` da solo): costruisce dal codice dei
+#     repository affiancati e ne monta i sorgenti (`../../…`), così una modifica
+#     si vede senza ricostruire. È la strada di chi scrive il codice.
+#   · IMMAGINI (questo file SOPRA quello): ogni servizio nostro viene da GHCR,
+#     multi-architettura (amd64 + arm64), a un tag fissato QUI. Nessun build,
+#     nessun repository compagno, nessun mount di codice. È la strada del nodo
+#     da campo (`EM_NODE_KIND=field`, primo bersaglio un Raspberry Pi 5) — ma
+#     questo file non sa niente né del Pi né del campo: è la stessa strada per
+#     qualunque nodo che debba solo girare, anche quello istituzionale.
+#
+#   docker compose --env-file .env.dev -f docker-compose.dev.yml \
+#                  -f docker-compose.images.yml [-f docker-compose.field.yml] …
+#
+# Lo aggiungono da sé `fcn-up.sh`, `fcn-down.sh` e `fcn-install.sh` quando la
+# strada è `images` (`EM_NODE_ROAD` in `.env.dev`; senza, è `images` per un
+# nodo da campo e `source` per tutti gli altri — vedi `sg_node_road` in
+# `platform.sh`).
+#
+# ── COSA RESTA DAL CHECKOUT DI stratigraph-server, e perché va bene ──────────
+# Questo file e il compose di base, il `Caddyfile.dev`, il realm di Keycloak, la
+# lista degli accreditati: sono la CONFIGURAZIONE del nodo, non il codice di un
+# servizio, e stanno nel repository che `fcn-get.sh` clona. Il codice, le schede
+# (vendorate compilate in StratiField), i vocabolari, s3Dgraphy e il reader di
+# EMStudio stanno DENTRO le immagini: il censimento che lo ha verificato è nel
+# referto del 1 novembre 2026 (`2026-11-01-MICRO-il-nodo-da-campo-tira-le-immagini`).
+#
+# ── VERSIONE MINIMA DI COMPOSE: 2.24.4 ──────────────────────────────────────
+# `!reset` (Compose 2.18) toglie il `build:`; `!override` (Compose 2.24.4)
+# SOSTITUISCE la lista dei volumi invece di fonderla. Un compose più vecchio non
+# conosce il secondo tag e fonderebbe le liste, rimettendo i mount `../../`: per
+# questo gli script lo controllano prima di usare questo file
+# (`sg_compose_supports_images`).
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── I TAG: UN POSTO SOLO, MAI `latest` ──────────────────────────────────────
+# Le versioni pubblicate su ghcr.io/stratigraph-eccch, che il workflow
+# `immagine.yml` di ciascun repository deriva dal suo `pyproject.toml`
+# (`1.6.0.devN` → `1.6.0-dev.N`). Alzarne una è cambiare la riga qui, poi
+# `./fcn-up.sh` (che fa `pull` prima di accendere).
+#
+# Tutte e tre portano s3Dgraphy 1.6.0.dev83, la stessa dell'ancora
+# `x-s3dgraphy-version` del compose di base: si legge nell'etichetta
+# `org.stratigraph.s3dgraphy.version` e nel file `/licenses/s3dgraphy-version`.
+# (StratiField si pubblica come `stratigraph-stratifield`, il nome del suo
+# repository; il servizio qui resta `stratigraph-chatbot`.)
+#
+# Il posto sono le tre righe `image:` qui sotto, e nient'altro: niente variabile
+# d'ambiente che le sovrascriva, perché un tag che un `.env.dev` può spostare è
+# un tag che due nodi possono leggere diverso. `tests/test_la_strada_delle_immagini.py`
+# rifiuta `latest`, un tag mancante e qualunque `build:` o mount `../../`.
+
+services:
+  stratigraph-server:
+    image: ghcr.io/stratigraph-eccch/stratigraph-server:1.6.0-dev.47
+    build: !reset null
+    environment:
+      # il sorgente di s3Dgraphy non c'è: vale il wheel dell'immagine
+      PYTHONPATH: ""
+    # i DATI restano; il codice (`../app`, `../../s3Dgraphy/src`) no
+    volumes: !override
+      - em_data:/srv/em-data
+      - ./accredited.yaml:/srv/em-node/accredited.yaml:ro
+
+  stratigraph-chatbot:
+    image: ghcr.io/stratigraph-eccch/stratigraph-stratifield:1.6.0-dev.3
+    build: !reset null
+    environment:
+      # le schede sono quelle VENDORATE e compilate nell'immagine
+      # (/srv/stratigraph-chatbot/schede); la cartella del checkout di
+      # stratigraph-templates è una sovrascrittura di sviluppo, e qui non c'è
+      STRATIGRAPH_SCHEDE_DIR: ""
+    volumes: !override
+      - chatbot_data:/srv/chatbot-data
+
+  stratigraph-catalog:
+    image: ghcr.io/stratigraph-eccch/stratigraph-catalog:1.6.0-dev.3
+    build: !reset null
+    environment:
+      PYTHONPATH: ""
+      # il reader di EMStudio è nell'immagine, in /srv/em-reader-dist: è lo
+      # stesso percorso che il compose di base dà già a EM_CATALOG_READER
+    volumes: !override
+      - em_catalog_data:/srv/em-catalog-data

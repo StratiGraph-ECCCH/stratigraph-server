@@ -36,6 +36,17 @@ cd "$(dirname "$0")"                     # stratigraph-server/dev-stack
 # esiste.
 sg_compose_array || exit 1
 COMPOSE+=(-f docker-compose.dev.yml --profile https --profile engine)
+#: la strada delle immagini (1 nov 2026): lo stesso file che l'ha accesa, così
+#: `down` legge lo stesso progetto che `up` ha letto. Un compose troppo vecchio
+#: per `!override` lo dice, e si spegne lo stesso col solo file di base — per
+#: spegnere i servizi bastano i loro nomi.
+if [ "$(sg_node_road 2>/dev/null || echo source)" = "images" ]; then
+  if sg_compose_supports_images 2>/dev/null; then
+    COMPOSE+=(-f docker-compose.images.yml)
+  else
+    echo "· compose più vecchio di ${SG_COMPOSE_MIN_IMAGES}: spengo senza docker-compose.images.yml." >&2
+  fi
+fi
 #: il nodo da campo (31 ott 2026): il suo file porta il volume di Keycloak, e
 #: `--wipe` deve conoscerlo per cancellarlo; un `down` semplice lo conserva.
 if [ "${EM_NODE_KIND:-$( [ -f .env.dev ] && grep -E '^EM_NODE_KIND=' .env.dev | tail -1 | cut -d= -f2- || true)}" = "field" ]; then
