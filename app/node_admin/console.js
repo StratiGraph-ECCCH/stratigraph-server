@@ -64,6 +64,7 @@ let authConfig = null;
 //: token: a refresh token in web storage is a credential that outlives the tab.
 let refreshToken = "";
 let refreshTimer = 0;
+let refreshDue = 0;
 const SILENT_KEY = "sg.console.silent-tried";
 //: LA VIA D'USCITA. Misurato il 7 ottobre chiedendo al DOCUMENTO e non al
 //: testo: questa pagina aveva ZERO ancore. Era l'isola più isolata delle
@@ -93,7 +94,7 @@ export const api = {
   },
 };
 
-async function request(method, path, body) {
+async function request(method, path, body, retried = false) {
   const headers = { Accept: "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -107,6 +108,19 @@ async function request(method, path, body) {
     payload = text ? JSON.parse(text) : null;
   } catch {
     payload = { detail: text };
+  }
+  if (answer.status === 401 && token && !retried) {
+    //: LA SESSIONE SCADUTA (E.D., 1 nov 2026: «quando il token è scaduto
+    //: andrebbe proposto un pulsante di login again»). Prima un rinnovo
+    //: silenzioso e la stessa richiesta ancora una volta — un Mac che ha
+    //: dormito ha saltato il timer, non ha perso la sessione; se nemmeno
+    //: così passa, la frase del nodo diventa un pulsante.
+    if (await renewNow()) return request(method, path, body, true);
+    sessionLapsed();
+    const error = new Error(t("console.session.lapsed"));
+    error.status = 401;
+    error.lapsed = true;
+    throw error;
   }
   if (!answer.ok) {
     // The node's own sentence, surfaced as-is. Every refusal in em-server says
@@ -206,7 +220,8 @@ export async function show(module) {
     await module.render(panel, api);
   } catch (error) {
     panel.innerHTML = "";
-    say(error.message, "bad");
+    if (error.lapsed) sessionLapsed();       // il pulsante, non la frase nuda
+    else say(error.message, "bad");
   }
   panel.focus();
 }
@@ -235,21 +250,62 @@ async function whoami() {
  *  enough that it is not a poll. */
 function scheduleRefresh(seconds) {
   window.clearTimeout(refreshTimer);
+  refreshDue = 0;
   if (!refreshToken || !seconds) return;
   const wait = Math.max(15, Math.floor(seconds * 0.8)) * 1000;
+  refreshDue = Date.now() + wait;
   refreshTimer = window.setTimeout(async () => {
-    const result = await oidc.refresh(authConfig, refreshToken);
-    if (!result.ok) {
-      // Said, not swallowed: the next call would 401 and the page would look
-      // broken for a reason that has nothing to do with the node.
-      say(t("console.session.notRefreshed", { error: result.error }),
-          "bad");
-      return;
-    }
-    token = result.token;
-    refreshToken = result.refresh_token || refreshToken;
-    scheduleRefresh(result.expires_in);
+    // Said, not swallowed: the next call would 401 and the page would look
+    // broken for a reason that has nothing to do with the node.
+    if (!(await renewNow())) sessionLapsed();
   }, wait);
+}
+
+/** Rinnova adesso, una volta sola anche se lo chiedono in tanti. */
+let renewing = null;
+async function renewNow() {
+  if (!refreshToken || !authConfig) return false;
+  if (!renewing) {
+    renewing = oidc.refresh(authConfig, refreshToken).then((result) => {
+      renewing = null;
+      if (!result.ok) return false;
+      token = result.token;
+      refreshToken = result.refresh_token || refreshToken;
+      scheduleRefresh(result.expires_in);
+      return true;
+    }, () => { renewing = null; return false; });
+  }
+  return renewing;
+}
+
+//: IL MAC CHE SI RISVEGLIA. Safari sospende i timer mentre il computer dorme:
+//: al ritorno il rinnovo programmato è già in ritardo e il token è scaduto.
+//: Quando la scheda torna visibile, se il rinnovo era dovuto, si fa subito.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && refreshDue
+      && Date.now() >= refreshDue) {
+    renewNow().then((ok) => { if (!ok) sessionLapsed(); });
+  }
+});
+
+/** La sessione è finita: una riga e un pulsante, una volta sola. */
+let lapsedNote = null;
+function sessionLapsed() {
+  window.clearTimeout(refreshTimer);
+  refreshDue = 0;
+  if (lapsedNote?.isConnected) return;
+  lapsedNote = say(t("console.session.lapsed"), "bad");
+  lapsedNote.classList.add("lapsed");
+  const again = document.createElement("button");
+  again.type = "button";
+  again.textContent = t("console.session.again");
+  again.addEventListener("click", () => {
+    // il ritorno riporta qui, con la stessa query e lo stesso #modulo
+    if (authConfig?.authorization_endpoint) oidc.signIn(authConfig);
+    else window.location.reload();          // nodo senza realm: la porta
+  });
+  lapsedNote.append(" ", again);
+  lapsedNote.scrollIntoView({ block: "nearest" });
 }
 
 /** Take the token from a completed sign-in. */

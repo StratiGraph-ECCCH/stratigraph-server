@@ -232,6 +232,9 @@ select, input, textarea {
 }
 .note.good { border-color: var(--good); }
 .note.bad { border-color: var(--bad); }
+/* la sessione scaduta: la frase e il pulsante sulla stessa riga */
+.note.lapsed { display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: .5rem 1rem; }
 
 dialog {
   border: 1px solid var(--line);
