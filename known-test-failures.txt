@@ -6,10 +6,10 @@
 # here from 2026-10-02 (e7ce40d): it depended on the wall clock, not on the
 # library nor on the server, and its scene now runs on a clock anchored at T0.
 #
-# 2026-10-31 (sera): i due test qui sotto leggono il dev-stack/.env.dev VERO della
-# macchina; oggi il dev stack è stato portato sull'indirizzo di rete locale
-# (FCN_HOST=192.168.1.214), quindi fcn-up.sh stampa quell'indirizzo invece di
-# em.localhost. Non è un difetto del server: il test va reso ermetico (un .env
-# finto in tmp_path) e poi tolto da qui.
-tests/test_emstudio_sotto_supervisione.py::test_ACCESO_POI_IDEMPOTENTE_POI_SPENTO
-tests/test_emstudio_sotto_supervisione.py::test_NO_STUDIO_non_lo_accende
+# 2026-10-31 (sera) → 2026-11-05: tests/test_emstudio_sotto_supervisione.py::
+# test_ACCESO_POI_IDEMPOTENTE_POI_SPENTO e ::test_NO_STUDIO_non_lo_accende sono
+# stati qui sei giorni: leggevano il dev-stack/.env.dev VERO della macchina, e il
+# dev stack di E.D. era passato sull'indirizzo di rete locale
+# (FCN_HOST=192.168.1.214), quindi fcn-up.sh stampava quell'indirizzo invece di
+# em.localhost. Non era un difetto del server: ora girano su una copia del
+# dev-stack con un .env.dev finto nato da .env.dev.example (_dev_stack_ermetico).

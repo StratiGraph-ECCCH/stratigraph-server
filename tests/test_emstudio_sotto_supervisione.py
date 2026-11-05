@@ -24,11 +24,12 @@ from __future__ import annotations
 import os
 import pathlib
 import signal
+import subprocess
 import time
 
 from test_un_nodo_che_si_accende_altrove import (
-    COMPOSE_YML, PATH_MINIMO, _chiamati, _clone_finto, _finti, _fratelli_dal_compose,
-    _installa, _run, _uname, needs_bash)
+    COMPOSE_YML, DEV, PATH_MINIMO, _chiamati, _clone_finto, _finti,
+    _fratelli_dal_compose, _installa, _run, _uname, needs_bash)
 
 
 def _scrivi(bin_: pathlib.Path, nome: str, corpo: str) -> None:
@@ -59,6 +60,40 @@ def _curl_finto(bin_: pathlib.Path, tmp_path) -> None:
             f'  *:5173*) [ -f "{tmp_path}/vite-su" ] && exit 0; exit 7 ;;\n'
             'esac\n'
             'exit 7\n')
+
+
+def _dev_stack_ermetico(tmp_path) -> pathlib.Path:
+    """Una COPIA di `dev-stack/` con un `.env.dev` finto, nato dal modello.
+
+    Il 31 ottobre 2026 il dev stack di E.D. è passato sull'indirizzo di rete
+    locale (`FCN_HOST=192.168.1.214` nel `.env.dev` vero), e le prove che
+    leggono l'URL stampato da `fcn-up.sh` hanno cominciato a fallire su quella
+    macchina sola. L'URL viene da `.env.dev`, quindi la prova se ne porta uno
+    suo: `.env.dev.example` senza `FCN_HOST`, cioè l'host di default
+    `em.localhost`. Il `.env.dev` vero, i pid e i log della copia si tolgono
+    prima di scriverlo; i fratelli che il compose vuole accanto sono vuoti.
+    """
+    dev = _clone_finto(tmp_path,
+                       fratelli=("stratigraph-chatbot", "stratigraph-catalog"))
+    for f in (*dev.glob("*.pid"), *dev.glob("*.log"), dev / ".env.dev"):
+        f.unlink(missing_ok=True)
+    righe = (DEV / ".env.dev.example").read_text().splitlines()
+    (dev / ".env.dev").write_text("".join(
+        r + "\n" for r in righe if not r.startswith("FCN_HOST=")))
+    return dev
+
+
+def _run_ermetico(dev: pathlib.Path, script: str, bin_: pathlib.Path, tmp_path,
+                  extra_env=None, args=()):
+    """`_run`, ma sulla copia di `_dev_stack_ermetico`."""
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_}{os.pathsep}{env['PATH']}"
+    env["HOME"] = str(tmp_path)
+    env.pop("WSL_DISTRO_NAME", None)
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(["bash", str(dev / script), *args],
+                          capture_output=True, text=True, env=env, cwd=str(dev))
 
 
 def _emstudio_finto(tmp_path, *, node_modules=True, dist=True) -> pathlib.Path:
@@ -196,8 +231,9 @@ def test_ACCESO_POI_IDEMPOTENTE_POI_SPENTO(tmp_path):
     _npm_finto(bin_, tmp_path)
     _curl_finto(bin_, tmp_path)
     env = {"SG_STUDIO_DIR": str(ems)}
+    dev = _dev_stack_ermetico(tmp_path)
 
-    uno = _run("fcn-up.sh", bin_, tmp_path, extra_env=env)
+    uno = _run_ermetico(dev, "fcn-up.sh", bin_, tmp_path, extra_env=env)
     assert uno.returncode == 0, uno.stderr
     assert "dev server acceso su :5173" in uno.stdout, uno.stdout + uno.stderr
     assert "EMStudio (dev):       https://em.localhost:8443/em/studio/" in uno.stdout
@@ -211,12 +247,12 @@ def test_ACCESO_POI_IDEMPOTENTE_POI_SPENTO(tmp_path):
         c = _chiamati(tmp_path)
         assert c.index("up -d --build") < c.index("npm run dev")
 
-        due = _run("fcn-up.sh", bin_, tmp_path, extra_env=env)
+        due = _run_ermetico(dev, "fcn-up.sh", bin_, tmp_path, extra_env=env)
         assert due.returncode == 0, due.stderr
         assert f"già attivo su :5173 (pid {pid})" in due.stdout, due.stdout
         assert _chiamati(tmp_path).count("npm run dev") == 1, "un secondo processo"
 
-        giu = _run("fcn-down.sh", bin_, tmp_path, args=("--stop",))
+        giu = _run_ermetico(dev, "fcn-down.sh", bin_, tmp_path, args=("--stop",))
         assert giu.returncode == 0, giu.stderr
         assert f"dev server spento (pid {pid}), prima dei container" in giu.stdout
         assert not pf.exists()
@@ -259,8 +295,9 @@ def test_NO_STUDIO_non_lo_accende(tmp_path):
     _uname(bin_, "linux")
     _npm_finto(bin_, tmp_path)
     _curl_finto(bin_, tmp_path)
-    done = _run("fcn-up.sh", bin_, tmp_path, args=("--no-studio",),
-                extra_env={"SG_STUDIO_DIR": str(ems)})
+    dev = _dev_stack_ermetico(tmp_path)
+    done = _run_ermetico(dev, "fcn-up.sh", bin_, tmp_path, args=("--no-studio",),
+                         extra_env={"SG_STUDIO_DIR": str(ems)})
     assert done.returncode == 0, done.stderr
     assert "npm run dev" not in _chiamati(tmp_path)
     assert "/em/studio/" not in done.stdout
