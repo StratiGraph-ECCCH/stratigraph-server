@@ -27,7 +27,26 @@ jobs:
           python-version: "3.12"     # quella del Dockerfile
           cache: pip
       - name: Il server con le sue dipendenze
-        run: pip install -e ".[all,s3,dev]"
+        #: LA CORSA CON PyPI (6 nov 2026). Il rilascio a cascata di s3Dgraphy
+        #: spinge qui il commit «Pin s3dgraphy 1.6.0.devNN» qualche minuto
+        #: PRIMA che quella versione compaia su PyPI: le prove partivano,
+        #: non la trovavano e fallivano (dev92 alle 8:29, dev93 alle 10:00),
+        #: per poi passare rilanciate. Se manca proprio s3dgraphy si aspetta
+        #: e si riprova, fino a 15 minuti; ogni altro errore ferma subito.
+        run: |
+          for prova in $(seq 1 30); do
+            if pip install --no-cache-dir -e ".[all,s3,dev]" 2> pip.err; then
+              exit 0
+            fi
+            if grep -q "No matching distribution found for s3dgraphy" pip.err; then
+              echo "s3dgraphy non è ancora su PyPI: riprovo fra 30 s ($prova/30)"
+              sleep 30
+            else
+              cat pip.err; exit 1
+            fi
+          done
+          cat pip.err
+          echo "s3dgraphy non è arrivata su PyPI in 15 minuti"; exit 1
       - name: Il file d'ambiente che chi clona crea a mano
         #: `.env.dev` è in .gitignore; alcune prove avviano `fcn-up.sh` nella
         #: cartella vera, come sul Mac dove il file c'è.
