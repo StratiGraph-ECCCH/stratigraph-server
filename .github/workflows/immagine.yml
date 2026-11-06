@@ -82,6 +82,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0       # la storia intera: le note di rilascio contano dall'ultimo tag
       # Un tag che non è la versione del pacchetto pubblicherebbe un'immagine
       # con un nome e un contenuto diversi: si ferma qui, prima di costruire.
       - name: Il tag e la versione dicono la stessa cosa
@@ -259,3 +261,25 @@ jobs:
         run: |
           git tag "v${{ needs.decidi.outputs.versione }}"
           git push origin "v${{ needs.decidi.outputs.versione }}"
+
+      # LE NOTE DI RILASCIO (6 nov 2026): a ogni versione una release su GitHub,
+      # con l'immagine, il suo digest, la s3Dgraphy dentro e i commit
+      # dall'ultima versione. Una dev o una rc è segnata come pre-release.
+      - name: Le note di rilascio
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${{ needs.decidi.outputs.versione }}"
+          git fetch --tags --force --quiet
+          ./scripts/note-di-rilascio.sh "$v" \
+            "$(echo 'ghcr.io/${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" \
+            "${{ steps.build.outputs.digest }}" "${{ steps.s3d.outputs.versione }}" > note.md
+          pre=""
+          case "$v" in *dev*|*rc*|*a[0-9]*|*b[0-9]*) pre="--prerelease" ;; esac
+          if gh release view "v$v" >/dev/null 2>&1; then
+            gh release edit "v$v" --notes-file note.md
+          else
+            gh release create "v$v" --verify-tag $pre \
+              --title "${{ github.event.repository.name }} $v" --notes-file note.md
+          fi
+          cat note.md >> "$GITHUB_STEP_SUMMARY"
