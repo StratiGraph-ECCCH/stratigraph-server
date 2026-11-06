@@ -21,11 +21,13 @@ let query = "";
 const picked = new Set();
 
 async function render(root) {
-  const [rooms, storage] = await Promise.all([
+  const [all, storage] = await Promise.all([
     api.get("/admin/rooms"),
     api.get("/admin/storage").catch(() => ({ rooms: [] })),
   ]);
   const space = Object.fromEntries((storage.rooms || []).map((r) => [r.room_id, r]));
+  //: quelle nel cestino stanno nel modulo «Cestino», non qui
+  const rooms = all.filter((r) => !r.trashed_at);
   root.innerHTML = "";
   const implicit = rooms.filter((r) => r.implicit);
   const counts = {
@@ -196,22 +198,37 @@ async function archiveMany(list, archived, root) {
 
 async function deleteMany(list, root) {
   const n = list.length;
-  const word = L("ELIMINA", "DELETE");
-  const implicitOnly = list.every((r) => r.implicit);
   const names = list.slice(0, 8).map((r) => r.room_id).join(", ") + (n > 8 ? ` … (+${n - 8})` : "");
-  if (!confirmTyped(implicitOnly
-    ? L(`l'eliminazione di ${n} stanze implicite, con i loro em.json e tutte le revisioni`,
-        `deleting ${n} implicit rooms, with their em.json and every revision`)
-    : L(`l'eliminazione DEFINITIVA di ${n} stanze (${names}), con i loro em.json, le revisioni, i membri e gli inviti. Non si può annullare`,
-        `the PERMANENT deletion of ${n} rooms (${names}), with their em.json, revisions, members and invitations. It cannot be undone`), word)) return;
+  //: IL CESTINO (6 nov 2026): togliere mette nel cestino per trenta giorni,
+  //: da cui si riprende; oltre la soglia sul blocco la parola cambia e il
+  //: nodo riceve la conferma esplicita (`bulk=true`)
+  const limit = await bulkRooms();
+  const bulk = n > limit;
+  const word = bulk ? L(`IN BLOCCO ${n}`, `IN BULK ${n}`) : L("CESTINO", "TRASH");
+  if (!confirmTyped(bulk
+    ? L(`un'operazione in blocco: ${n} stanze nel cestino (${names}), oltre la soglia di ${limit}. Per 30 giorni si riprendono dal «Cestino»`,
+        `an operation in bulk: ${n} rooms into the trash (${names}), over the threshold of ${limit}. For 30 days they can be taken back from «Trash»`)
+    : L(`${n} stanze nel cestino (${names}). Per 30 giorni si riprendono dal «Cestino», poi il nodo le elimina`,
+        `${n} rooms into the trash (${names}). For 30 days they can be taken back from «Trash», then the node deletes them`), word)) return;
+  const q = bulk ? "?bulk=true" : "";
   const { done, refused } = await inPool(list,
-    (r) => api.del(`/rooms/${encodeURIComponent(r.room_id)}`, { confirm: r.room_id }),
-    (d, n) => L(`Elimino… ${d} di ${n}`, `Deleting… ${d} of ${n}`));
+    (r) => api.del(`/rooms/${encodeURIComponent(r.room_id)}${q}`, { confirm: r.room_id }),
+    (d, n) => L(`Nel cestino… ${d} di ${n}`, `Into the trash… ${d} of ${n}`));
   for (const r of list) picked.delete(r.room_id);
-  toast(L(`${done} stanze eliminate.`, `${done} rooms deleted.`) + (refused.length ? " " + L(`${refused.length} rifiutate.`, `${refused.length} refused.`) : ""),
+  toast(L(`${done} stanze nel cestino.`, `${done} rooms in the trash.`) + (refused.length ? " " + L(`${refused.length} rifiutate.`, `${refused.length} refused.`) : ""),
     refused.length ? "bad" : "");
   if (refused.length) console.warn(refused.join("\n"));
   await render(root);
+}
+
+/** La soglia del nodo, chiesta una volta: 20 se il nodo non risponde. */
+let _bulkRooms = 0;
+async function bulkRooms() {
+  if (!_bulkRooms) {
+    try { _bulkRooms = (await api.get("/admin/trash")).bulk_rooms || 20; }
+    catch { _bulkRooms = 20; }
+  }
+  return _bulkRooms;
 }
 
 export function openRoom(room, space, root, { operator = true, onClose = null } = {}) {
@@ -404,9 +421,9 @@ async function tabLife(body, drawerCtl, room, operator = true) {
       <p class="k-faint">${escapeHtml(L("Il nuovo proprietario gestisce anche gli amministratori. Tu resti amministratore.",
         "The new owner also manages the admins. You stay an admin."))}</p>
       <div class="k-form" data-slot="transfer"><input id="k-new-owner" placeholder="ORCID"></div></div>` : ""}
-    <div class="k-danger"><h3>${escapeHtml(L("Elimina la stanza", "Delete the room"))}</h3>
-      <p class="k-faint">${escapeHtml(L("Toglie la stanza e il suo em.json con tutte le revisioni, il registro delle operazioni, membri e inviti. I file restano nel bucket e, se nessun'altra stanza li cita, diventano orfani. Non si elimina mentre qualcuno è dentro.",
-        "Removes the room and its em.json with every revision, the operations log, members and invitations. Files stay in the bucket and become orphans if no other room cites them. Refused while somebody is connected."))}</p>
+    <div class="k-danger"><h3>${escapeHtml(L("Metti nel cestino", "Put in the trash"))}</h3>
+      <p class="k-faint">${escapeHtml(L("La stanza non si apre più e sparisce dagli elenchi, ma resta tutta com'è: per 30 giorni il proprietario o l'operatore la riprendono. Poi il nodo la elimina con il suo em.json, le revisioni, membri e inviti; i file restano e, se nessun'altra stanza li cita, diventano orfani. Non si fa mentre qualcuno è dentro.",
+        "The room no longer opens and leaves the lists, but stays whole: for 30 days its owner or the operator can take it back. Then the node deletes it with its em.json, revisions, members and invitations; files stay and become orphans if no other room cites them. Refused while somebody is connected."))}</p>
       <div data-slot="delete"></div></div>`;
   if (!operator && !owner) body.querySelector('[data-slot="delete"]').closest(".k-danger").remove();
   body.querySelector('[data-slot="archive"]').appendChild(button(room.archived_at ? L("Riapri", "Bring back") : L("Archivia", "Archive"), async () => {
@@ -432,10 +449,13 @@ async function tabLife(body, drawerCtl, room, operator = true) {
     try { await api.put(`/admin/rooms/${id}/owner`, { orcid }); toast(L("Nuovo proprietario.", "New owner.")); drawerCtl.close(); }
     catch (error) { toast(error.message, "bad"); }
   }));
-  body.querySelector('[data-slot="delete"]')?.appendChild(button(L("Elimina…", "Delete…"), async () => {
-    if (!confirmTyped(L("l'eliminazione definitiva della stanza", "deleting the room for good"), room.room_id)) return;
-    try { await api.del(`/rooms/${id}`, { confirm: room.room_id }); toast(L("Stanza eliminata.", "Room deleted.")); drawerCtl.close(); }
-    catch (error) { toast(error.message, "bad"); }
+  body.querySelector('[data-slot="delete"]')?.appendChild(button(L("Nel cestino…", "Into the trash…"), async () => {
+    if (!confirmNamed(L("la stanza nel cestino per 30 giorni", "the room into the trash for 30 days"), room.room_id)) return;
+    try {
+      await api.del(`/rooms/${id}`, { confirm: room.room_id });
+      toast(L("Stanza nel cestino: si riprende per 30 giorni.", "Room in the trash: it can be taken back for 30 days."));
+      drawerCtl.close();
+    } catch (error) { toast(error.message, "bad"); }
   }, "warn"));
 }
 

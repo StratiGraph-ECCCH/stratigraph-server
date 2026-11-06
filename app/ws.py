@@ -44,7 +44,7 @@ from .identity import identity_of, signature_auth
 from . import keeping
 from . import holds as holds_module
 from . import presence
-from .rooms import RoomRegistry, now_iso
+from .rooms import RoomInTrash, RoomRegistry, now_iso
 from .store import store_from_env
 from .wire import WIRE, WireError, envelope, read
 
@@ -197,6 +197,12 @@ async def _keep(room, why: str, *, asked: bool = False):
 
 #: Uno per processo, come le stanze.
 KEEPER = keeping.Keeper(_keep)
+
+
+async def keep_before_trash(room):
+    """Il salvataggio di una stanza che va nel cestino (6 nov 2026): quello che
+    non era ancora scritto va con lei. Passa da `_keep`, sotto il suo lock."""
+    return await _keep(room, "trash")
 
 
 # ── IL RIFIUTO, E PERCHÉ È DEL SERVER ────────────────────────────────────────
@@ -496,7 +502,13 @@ async def room_socket(websocket: WebSocket, room_id: str,
         return
     author = _identity(claims)
 
-    room = await ROOMS.get(room_id)
+    try:
+        room = await ROOMS.get(room_id)
+    except RoomInTrash as exc:
+        # nel cestino: la porta lo dice e si chiude (4410, come il 410 HTTP)
+        await websocket.close(code=4410, reason=(
+            f"room in the trash since {exc.trashed_at}")[:120])
+        return
 
     # ── the door ────────────────────────────────────────────────────────────
     # Authentication said WHO; this says WHETHER, and they are different

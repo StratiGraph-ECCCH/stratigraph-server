@@ -939,6 +939,16 @@ class Room:
 # which is the one question that must have a single answer. The record holds what
 # only it knows.
 
+class RoomInTrash(Exception):
+    """Una stanza nel cestino non si apre: né una sessione né una lettura.
+    Il modulo principale la traduce in 410, il socket in una chiusura detta."""
+
+    def __init__(self, room_id: str, trashed_at: str):
+        super().__init__(room_id)
+        self.room_id = room_id
+        self.trashed_at = trashed_at
+
+
 #: A room with no descriptor is not an error: every room that existed before this
 #: record did is exactly that, and it must keep working. `implicit()` is what it
 #: means — one container, named after the room, nothing declared.
@@ -959,6 +969,13 @@ class RoomDescriptor:
     #: orphan is reported and, at most, marked — a workspace that vanished
     #: because a container was moved is a data loss nobody consented to.
     archived_at: Optional[str] = None
+    #: IL CESTINO (E.D., 31 ott 2026: «cestino di 30 giorni»). Quando la
+    #: stanza è stata messa nel cestino, e da chi. Una stanza nel cestino non
+    #: si apre e non si elenca fra le tue; tutto quello che era resta dov'era,
+    #: e chi l'ha messa lì (o l'operatore) la può riprendere. Dopo
+    #: `trash.TRASH_DAYS` giorni la vuota il nodo; prima, solo una persona.
+    trashed_at: Optional[str] = None
+    trashed_by: Optional[str] = None
     #: True when this record was invented on the fly for a room that predates the
     #: register. Never written to the store: it says "nobody declared this".
     implicit: bool = False
@@ -982,14 +999,22 @@ class RoomDescriptor:
                         if raw.get("created_by") else None),
             created_at=str(raw.get("created_at") or now_iso()),
             archived_at=(str(raw["archived_at"])
-                         if raw.get("archived_at") else None))
+                         if raw.get("archived_at") else None),
+            trashed_at=(str(raw["trashed_at"])
+                        if raw.get("trashed_at") else None),
+            trashed_by=(str(raw["trashed_by"])
+                        if raw.get("trashed_by") else None))
 
     def as_dict(self) -> Dict[str, Any]:
         """What goes to the store — and `members` is deliberately not in it."""
         return {"room_id": self.room_id, "title": self.title,
                 "container_refs": list(self.container_refs),
                 "created_by": self.created_by, "created_at": self.created_at,
-                "archived_at": self.archived_at}
+                "archived_at": self.archived_at,
+                # il segno del cestino c'è solo quando c'è: il record resta
+                # magro per tutte le stanze che nel cestino non sono
+                **({"trashed_at": self.trashed_at, "trashed_by": self.trashed_by}
+                   if self.trashed_at else {})}
 
     @property
     def primary_ref(self) -> str:
@@ -1108,7 +1133,8 @@ class RoomRegistry:
         to its own design note — so it is named here, not guessed at.
         """
         for room in self.declared():
-            if room.room_id == except_room or room.archived_at:
+            if (room.room_id == except_room or room.archived_at
+                    or room.trashed_at):
                 continue
             if room.primary_ref == primary:
                 return room.room_id
@@ -1198,6 +1224,37 @@ class RoomRegistry:
         descriptor.archived_at = (at or now_iso()) if archived else None
         return self.declare(descriptor)
 
+    def trash(self, room_id: str, *, by: Optional[str] = None,
+              at: Optional[str] = None) -> RoomDescriptor:
+        """Nel cestino: un segno sul registro, nient'altro si muove.
+
+        Una stanza che non aveva un registro (implicita, nata prima del
+        registro) ne riceve uno adesso, perché il segno ha bisogno di un posto.
+        La copia di lavoro in memoria la chiude chi chiama, che sa se c'è
+        qualcuno dentro."""
+        descriptor = self.descriptor(room_id)
+        descriptor.trashed_at = at or now_iso()
+        descriptor.trashed_by = by
+        self._rooms.pop(room_id, None)
+        return self.declare(descriptor)
+
+    def restore(self, room_id: str) -> RoomDescriptor:
+        """Fuori dal cestino, com'era: archiviata se lo era già prima."""
+        descriptor = self.descriptor(room_id)
+        if descriptor.trashed_at and not descriptor.archived_at:
+            taken = self.room_already_on(descriptor.primary_ref,
+                                         except_room=room_id)
+            if taken:
+                raise RoomGraphTaken(room_id, descriptor.primary_ref, taken)
+        descriptor.trashed_at = None
+        descriptor.trashed_by = None
+        return self.declare(descriptor)
+
+    def trashed(self) -> List[RoomDescriptor]:
+        """Le stanze nel cestino, dalla più vecchia."""
+        return sorted((d for d in self.declared() if d.trashed_at),
+                      key=lambda d: (d.trashed_at or "", d.room_id))
+
     def orphans(self) -> List[RoomDescriptor]:
         """Declared rooms pointing at containers the store does not have.
 
@@ -1228,6 +1285,10 @@ class RoomRegistry:
             # which for every room that predates the register is the room id
             # itself, so a one-container room resolves exactly as it always did.
             descriptor = self.descriptor(room_id)
+            if descriptor.trashed_at:
+                # nel cestino: niente copia di lavoro, né per scrivere né per
+                # leggere — riaprirla qui la rimetterebbe in vita di nascosto
+                raise RoomInTrash(room_id, descriptor.trashed_at)
             snapshot = None
             for ref in descriptor.container_refs or [room_id]:
                 snapshot = self.store.get(ref)
@@ -1244,7 +1305,12 @@ class RoomRegistry:
     def exists(self, room_id: str) -> bool:
         """Whether there is a room here to READ: live, declared, or a container
         in the store (a room that predates the register). Nothing is opened."""
-        if room_id in self._rooms or not self.descriptor(room_id).implicit:
+        if room_id in self._rooms:
+            return True
+        descriptor = self.descriptor(room_id)
+        if descriptor.trashed_at:
+            return False                    # nel cestino: non c'è da leggere
+        if not descriptor.implicit:
             return True
         return self.has_container(room_id)
 

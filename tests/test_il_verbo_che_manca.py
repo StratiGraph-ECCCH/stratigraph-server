@@ -309,11 +309,17 @@ def test_E_QUANDO_NESSUNO_LO_RIFERISCE_si_toglie(nodo, client):
     solo allora il verbo dell'operatore passa."""
     for room in ("scavo", "mostra"):
         nodo["snapshots"].put(room, _stanza([]))
-    answer = client.delete(f"/v1/admin/assets/{nodo['ref']}", headers=HEAD)
+    #: dal 6 novembre 2026 sono due gesti: nel cestino, poi via
+    primo = client.delete(f"/v1/admin/assets/{nodo['ref']}", headers=HEAD)
+    assert primo.status_code == 200 and primo.json()["in_trash"] is True
+    assert nodo["store"].head(nodo["ref"]) is not None
+    answer = client.delete(f"/v1/admin/assets/{nodo['ref']}?for_good=true",
+                           headers=HEAD)
     assert answer.status_code == 200, answer.text
     detto = answer.json()
     assert detto == {"ref": nodo["ref"], "removed": True,
-                     "rooms": [], "corpus": False}
+                     "rooms": [], "corpus": False,
+                     "in_trash": False, "purge_after": None}
     assert nodo["store"].head(nodo["ref"]) is None
 
 

@@ -138,6 +138,9 @@ class _Homes:
             if who and who not in people:
                 people.append(who)
                 changed = True
+            if revive and entry.pop("trash", None) is not None:
+                # gli stessi byte ricaricati in una stanza escono dal cestino
+                changed = True
             if revive and entry.pop("orphan", None) is not None:
                 # REUSED (E.D., 16 Oct 2026): the same bytes sent into a room
                 # again are no longer an orphan — the store did not take them
@@ -240,6 +243,45 @@ class _Homes:
             if isinstance(mark, dict):
                 out[key] = dict(mark)
         return out
+
+    # ── IL CESTINO (E.D., 31 ott 2026) ───────────────────────────────────────
+    def trash(self, digest: str, mark: Dict[str, Any]) -> Dict[str, Any]:
+        """I byte restano nello store; il record dice che sono nel cestino
+        (`{trashed_at, trashed_by, media_type, size}`). → il record dopo."""
+        key = _hex(digest)
+        if not key:
+            raise ValueError("a trash mark needs a digest")
+        with self._lock:
+            entry = self._load(key)
+            entry["trash"] = dict(mark)
+            self._save(key, entry)
+            return json.loads(json.dumps(entry))
+
+    def untrash(self, digest: str) -> bool:
+        """Fuori dal cestino. → se c'era un segno da togliere."""
+        key = _hex(digest)
+        if not key:
+            return False
+        with self._lock:
+            entry = self._load(key)
+            had = entry.pop("trash", None) is not None
+            if had:
+                self._save(key, entry)
+            return had
+
+    def trashed(self) -> Dict[str, Dict[str, Any]]:
+        """`<hex>` → segno del cestino, per ogni record che ne porta uno."""
+        out: Dict[str, Dict[str, Any]] = {}
+        for key in self._keys():
+            mark = self._load(key).get("trash")
+            if isinstance(mark, dict):
+                out[key] = dict(mark)
+        return out
+
+    def in_trash(self, digest: str) -> Optional[Dict[str, Any]]:
+        key = _hex(digest)
+        mark = self._load(key).get("trash") if key else None
+        return dict(mark) if isinstance(mark, dict) else None
 
     def forget(self, digest: str) -> bool:
         """The bytes were deleted (`DELETE /v1/admin/assets/{ref}`): the

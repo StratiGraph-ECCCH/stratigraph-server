@@ -214,3 +214,22 @@ def _nessun_emstudio_vero(tmp_path, monkeypatch):
 def _politica_di_creazione_di_prima(monkeypatch):
     monkeypatch.setenv("EM_CREATE_POLICY", "anyone")
     yield
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# IL CESTINO — il contatore della soglia sul blocco riparte a ogni prova
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Dal 6 novembre 2026 il nodo conta quante stanze e quanti byte toglie
+# ciascuno nell'arco di un'ora (`app/trash.py`): in una sessione di prove lo
+# stesso «dev» ne toglie decine, e la soglia scatterebbe dove nessuno l'ha
+# cercata. E il giro che vuota il cestino non parte dentro le prove.
+@_pytest.fixture(autouse=True)
+def _il_contatore_del_blocco_riparte(monkeypatch):
+    monkeypatch.setenv("EM_TRASH_SWEEP", "0")
+    try:
+        from app import trash as _trash
+        _trash.BULK.reset()
+    except Exception:  # noqa: BLE001
+        pass
+    yield

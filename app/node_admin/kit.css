@@ -154,3 +154,6 @@ a.k-btn { display: inline-flex; align-items: center; text-decoration: none; }
    scuro non si leggeva (31 ott, screenshot di E.D.) */
 .h-doors a, .h-said a, .k-faint a, .t-card a:not(.k-btn) { color: var(--sg-info-ink); }
 .k-link { word-break: break-all; }
+
+/* il cestino: i due gesti di una riga, affiancati */
+.k-acts { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; }

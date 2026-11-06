@@ -79,7 +79,8 @@ from . import oplog as oplog_module
 from . import reach as reach_module
 from . import conversation as chat
 from . import roomview
-from .rooms import RoomDescriptor, RoomGraphTaken
+from .rooms import RoomDescriptor, RoomGraphTaken, RoomInTrash
+from . import trash as trash_module
 from .store import describe as snapshot_describe
 from .store import describe_rooms as room_describe
 from . import ws as _ws
@@ -149,7 +150,15 @@ async def _lifespan(_app: FastAPI):
     except Exception as exc:          # noqa: BLE001
         log.warning("reachability: the start-up knock itself failed: %s", exc)
     apply_accredited_list()
-    yield
+    import asyncio
+    sweeper = None
+    if os.environ.get("EM_TRASH_SWEEP", "1") != "0":
+        sweeper = asyncio.get_running_loop().create_task(_trash_sweeper())
+    try:
+        yield
+    finally:
+        if sweeper is not None:
+            sweeper.cancel()
 
 
 def apply_accredited_list() -> Optional[Dict[str, int]]:
@@ -311,6 +320,15 @@ app = FastAPI(
 # (The missing verb is named in the end-of rather than invented here: who may
 # re-point a room, and what happens if it is live while being re-pointed, is a
 # design question and not an afternoon inside a refusal handler.)
+@app.exception_handler(RoomInTrash)
+async def _room_in_trash(_request: Request, exc: RoomInTrash):
+    return JSONResponse(status_code=410, content={"detail": (
+        f"the room {exc.room_id!r} is in the trash since {exc.trashed_at}: it "
+        f"does not open. Its owner or the node's operator can take it back "
+        f"(POST /v1/rooms/{exc.room_id}/restore) until "
+        f"{trash_module.purge_after(exc.trashed_at)}.")})
+
+
 @app.exception_handler(RoomGraphTaken)
 async def _room_graph_taken(request: Request, exc: RoomGraphTaken):
     return JSONResponse(
@@ -3715,6 +3733,10 @@ class RoomOut(BaseModel):
     created_by: Optional[str] = None
     created_at: Optional[str] = None
     archived_at: Optional[str] = None
+    #: nel cestino da quando, da chi, e fino a quando (poi il nodo lo vuota)
+    trashed_at: Optional[str] = None
+    trashed_by: Optional[str] = None
+    purge_after: Optional[str] = None
     #: True when nobody declared this room: it predates the register and is
     #: described from its name alone. Said out loud rather than hidden, because
     #: "this room has no record" is a real state during a migration.
@@ -3750,6 +3772,8 @@ def _describe_room(descriptor: RoomDescriptor, *, role: Optional[Role] = None,
         container_refs=list(descriptor.container_refs),
         created_by=descriptor.created_by, created_at=descriptor.created_at,
         archived_at=descriptor.archived_at, implicit=descriptor.implicit,
+        trashed_at=descriptor.trashed_at, trashed_by=descriptor.trashed_by,
+        purge_after=trash_module.purge_after(descriptor.trashed_at),
         owner=acl.owner, members=members,
         groups={k: v.value for k, v in sorted(getattr(acl, "groups", {}).items())}
         if with_members else {},
@@ -3826,6 +3850,8 @@ async def list_rooms(request: Request) -> List[RoomOut]:
 
     declared = registry.declared()
     for descriptor in declared:
+        if descriptor.trashed_at:         # nel cestino: non è fra le tue
+            continue
         role = _role_here(descriptor.room_id)
         if role is None:
             continue
@@ -4589,6 +4615,11 @@ class RoomDeleteIn(BaseModel):
     #: the room id, typed again. Missing or different → 400: a DELETE that a
     #: stray click or a wrong row can send is not consent.
     confirm: str = Field(default="", description="the room id, repeated")
+    #: False (il default): nel cestino, da cui si riprende per 30 giorni.
+    #: True: via davvero — solo per una stanza che è GIÀ nel cestino.
+    for_good: bool = Field(default=False, description=(
+        "remove for good a room that is already in the trash; without it the "
+        "room goes into the trash"))
 
 
 class RoomDeletedAsset(BaseModel):
@@ -4624,6 +4655,10 @@ class RoomDeleted(BaseModel):
     orphaned: List[str] = Field(default_factory=list)
     #: `.blend` backups/packages: the room's register goes, the blobs stay
     blend_blobs_kept: List[str] = Field(default_factory=list)
+    #: True: è nel cestino, non cancellata — si riprende con
+    #: `POST /v1/rooms/{id}/restore` fino a `purge_after`
+    in_trash: bool = False
+    purge_after: Optional[str] = None
 
 
 def _room_is_there(room_id: str, known: Optional[set] = None) -> bool:
@@ -4671,13 +4706,16 @@ def _delete_piece(errors: List[str], what: str, fn, *args):
         return None
 
 
-@v1.delete("/rooms/{room_id}", summary="Delete a room (its assets stay, as orphans)", response_model=RoomDeleted, tags=["rooms"],
+@v1.delete("/rooms/{room_id}", summary="Put a room in the trash — or, from the trash, delete it (its assets stay, as orphans)", response_model=RoomDeleted, tags=["rooms"],
            responses={400: {"description": "confirmation missing or different"},
                       403: {"description": "neither the owner nor an operator"},
                       404: {"description": "no such room"},
                       409: {"description": "somebody is connected to the room"}})
 async def delete_room(room_id: str, request: Request,
-                      body: Optional[RoomDeleteIn] = Body(default=None)
+                      body: Optional[RoomDeleteIn] = Body(default=None),
+                      bulk: bool = Query(default=False, description=(
+                          "the explicit confirmation an operation in bulk "
+                          "needs (over 20 rooms in an hour)"))
                       ) -> RoomDeleted:
     """Delete a room — its record, members, invitations, group grants, pending
     uploads, op-log, working copy and container — and **keep its assets**.
@@ -4750,6 +4788,73 @@ async def delete_room(room_id: str, request: Request,
                     f"document back. Leave the room (all of its sessions), then "
                     f"delete it."))
 
+    # ── IL CESTINO (E.D., 31 ott 2026) ───────────────────────────────────────
+    #
+    # Il primo DELETE mette nel cestino: un segno sul registro, la copia di
+    # lavoro salvata e chiusa, tutto il resto dov'era. Il secondo, con
+    # `for_good`, fa quello che prima faceva il primo — e solo su una stanza
+    # che nel cestino c'è già: cancellare davvero sono due gesti, sempre.
+    who_key = orcid or "dev"
+    for_good = bool(body is not None and body.for_good)
+    as_ = "owner" if is_owner else "operator"
+    if not for_good:
+        if descriptor.trashed_at:
+            return RoomDeleted(room_id=room_id, deleted_at=descriptor.trashed_at,
+                               deleted_by=descriptor.trashed_by, deleted_as=as_,
+                               in_trash=True, purge_after=trash_module.purge_after(
+                                   descriptor.trashed_at))
+        over = trash_module.BULK.over(who_key, rooms=1)
+        if over and not bulk:
+            raise HTTPException(status_code=409, detail=over)
+        if live is not None:
+            if live.unsaved:
+                # quello che non era ancora salvato va nel cestino con lei —
+                # salvato da `ws.py`, l'unico che scrive una stanza
+                await _ws.keep_before_trash(live)
+            async with live.lock:
+                if live.sockets:
+                    raise HTTPException(status_code=409,
+                                        detail="somebody entered the room meanwhile: "
+                                               "they leave first")
+                _ws.KEEPER.forget(room_id)
+                _ws.WATCHER.forget(room_id)
+                live.unsaved = 0
+                registry.forget(room_id)
+        marked = registry.trash(room_id, by=orcid)
+        trash_module.BULK.count(who_key, rooms=1)
+        import logging
+        logging.getLogger("stratigraph.rooms").info(
+            "room %s put in the trash by %s (%s)", room_id, orcid or "dev", as_)
+        return RoomDeleted(room_id=room_id, deleted_at=marked.trashed_at or "",
+                           deleted_by=orcid, deleted_as=as_, in_trash=True,
+                           purge_after=trash_module.purge_after(marked.trashed_at))
+    if not descriptor.trashed_at:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"the room {room_id!r} is not in the trash. Deleting for "
+                    f"good is the second of two gestures: put it in the trash "
+                    f"first (the same call without for_good)."))
+    over = trash_module.BULK.over(who_key, rooms=1)
+    if over and not bulk:
+        raise HTTPException(status_code=409, detail=over)
+    trash_module.BULK.count(who_key, rooms=1)
+    return await _purge_room(room_id, orcid=orcid, as_=as_)
+
+
+async def _purge_room(room_id: str, *, orcid: Optional[str],
+                      as_: str) -> RoomDeleted:
+    """Via davvero: record, membri, inviti, registro delle operazioni,
+    contenitore. Chiamata dal secondo DELETE e dal nodo che vuota il cestino.
+    Gli asset restano (orfani, se nessun altro li tiene)."""
+    from . import asset_homes
+    from . import uploads
+    from .rooms import now_iso
+
+    registry = rooms()
+    descriptor = registry.descriptor(room_id)
+    live = registry.peek(room_id)
+    acl = load_acl(room_id)
+    is_owner = as_ == "owner"
     at = now_iso()
     errors: List[str] = []
     removed: Dict[str, Any] = {}
@@ -4884,6 +4989,135 @@ async def delete_room(room_id: str, request: Request,
         containers_kept=kept, assets=out_assets, orphaned=orphaned,
         blend_blobs_kept=sorted({str(r.get("sha256")) for r in blend_records
                                  if r.get("sha256")}))
+
+
+# ── IL CESTINO: riprendere, vedere, vuotare (E.D., 31 ott 2026) ──────────────
+
+
+@v1.post("/rooms/{room_id}/restore", summary="Take a room back from the trash", response_model=RoomOut, tags=["rooms"],
+         responses={403: {"description": "neither the owner nor an operator"},
+                    404: {"description": "no such room in the trash"},
+                    409: {"description": "its graph is now another room's"}})
+async def restore_room(room_id: str, request: Request) -> RoomOut:
+    """Fuori dal cestino, com'era: membri, inviti, storia, contenitore.
+    La riprende chi poteva cancellarla — il proprietario o l'operatore."""
+    from . import access as access_module
+
+    principal = authenticator.require_token(request)
+    dev_mode = bool(principal.get("em_dev_mode"))
+    orcid = None if dev_mode else _ws._identity(principal)
+    registry = rooms()
+    descriptor = registry.descriptor(room_id)
+    if not descriptor.trashed_at:
+        raise HTTPException(status_code=404,
+                            detail=f"no room {room_id!r} in the trash here")
+    owner = load_acl(room_id).owner
+    is_owner = dev_mode or bool(
+        orcid and owner and access_module._norm(orcid) == access_module._norm(owner))
+    if not (is_owner or ops.is_operator(principal)):
+        raise HTTPException(status_code=403, detail=(
+            "a room comes back from the trash through its owner or the node's "
+            "operator"))
+    return _describe_room(registry.restore(room_id), role=Role.OWNER if is_owner else None)
+
+
+class TrashedAsset(BaseModel):
+    ref: str
+    media_type: str = ""
+    size: int = 0
+    trashed_at: str = ""
+    trashed_by: Optional[str] = None
+    purge_after: Optional[str] = None
+
+
+class TrashOut(BaseModel):
+    #: i giorni che un oggetto passa nel cestino prima che il nodo lo vuoti
+    days: int
+    rooms: List[RoomOut] = Field(default_factory=list)
+    assets: List[TrashedAsset] = Field(default_factory=list)
+    #: le soglie oltre le quali un'operazione in blocco chiede conferma
+    bulk_rooms: int
+    bulk_bytes: int
+
+
+def _trashed_assets() -> List[TrashedAsset]:
+    from . import asset_homes
+    out = []
+    for key, mark in asset_homes.ASSET_HOMES.trashed().items():
+        out.append(TrashedAsset(
+            ref=f"sha256:{key}", media_type=str(mark.get("media_type") or ""),
+            size=int(mark.get("size") or 0),
+            trashed_at=str(mark.get("trashed_at") or ""),
+            trashed_by=mark.get("trashed_by"),
+            purge_after=trash_module.purge_after(mark.get("trashed_at"))))
+    return sorted(out, key=lambda a: (a.trashed_at, a.ref))
+
+
+@v1.get("/admin/trash", summary="What is in the trash, and until when (operators)", response_model=TrashOut, tags=["node"])
+async def list_trash(request: Request) -> TrashOut:
+    """Le stanze e i file nel cestino, dal più vecchio, con la data in cui il
+    nodo li vuoterà da sé."""
+    _require_operator(request)
+    return TrashOut(
+        days=trash_module.TRASH_DAYS,
+        rooms=[_describe_room(d, with_members=False)
+               for d in rooms().trashed()],
+        assets=_trashed_assets(),
+        bulk_rooms=trash_module.BULK_ROOMS, bulk_bytes=trash_module.BULK_BYTES)
+
+
+async def empty_due_trash(now=None) -> Dict[str, List[str]]:
+    """Il nodo vuota il cestino: SOLO quello che ci sta da più di TRASH_DAYS
+    giorni. È l'unica cancellazione che il nodo fa da sé, ed è quella decisa
+    il 31 ottobre: trenta giorni, poi via. Un errore su un oggetto non ferma
+    gli altri; si annota e si riprova al giro dopo."""
+    import logging
+    from . import asset_homes
+    log_ = logging.getLogger("stratigraph.trash")
+    done: Dict[str, List[str]] = {"rooms": [], "assets": [], "errors": []}
+    for descriptor in rooms().trashed():
+        if not trash_module.due(descriptor.trashed_at, now):
+            continue
+        try:
+            await _purge_room(descriptor.room_id, orcid=None, as_="operator")
+            done["rooms"].append(descriptor.room_id)
+        except Exception as exc:  # noqa: BLE001
+            done["errors"].append(f"room {descriptor.room_id}: {exc}")
+    homes = asset_homes.ASSET_HOMES
+    for key, mark in homes.trashed().items():
+        if not trash_module.due(mark.get("trashed_at"), now):
+            continue
+        ref = f"sha256:{key}"
+        try:
+            who = _who_mentions(ref)
+            if who["rooms"] or who["corpus"]:
+                # nel frattempo qualcuno lo cita di nuovo: torna fuori
+                homes.untrash(ref)
+                continue
+            ASSET_STORE.delete(ref)
+            homes.forget(ref)
+            done["assets"].append(ref)
+        except Exception as exc:  # noqa: BLE001
+            done["errors"].append(f"asset {ref}: {exc}")
+    if done["rooms"] or done["assets"] or done["errors"]:
+        log_.info("trash emptied: %d room(s), %d asset(s)%s",
+                  len(done["rooms"]), len(done["assets"]),
+                  f"; errors: {done['errors']}" if done["errors"] else "")
+    return done
+
+
+async def _trash_sweeper() -> None:
+    """Un giro ogni sei ore, il primo cinque minuti dopo l'avvio."""
+    import asyncio
+    await asyncio.sleep(300)
+    while True:
+        try:
+            await empty_due_trash()
+        except Exception as exc:  # noqa: BLE001
+            import logging
+            logging.getLogger("stratigraph.trash").warning(
+                "trash: the sweep failed: %s", exc)
+        await asyncio.sleep(6 * 3600)
 
 
 
@@ -5976,7 +6210,7 @@ def _asset_sizes() -> tuple:
 def node_assets(request: Request, state: Optional[str] = None, room: Optional[str] = None,
                 by: Optional[str] = None, limit: int = 500) -> AssetsOut:
     """Every file: size, the rooms that cite it, its home and who brought it in.
-    Filters: `state` (in_use · orphan · missing), `room`, `by` (an uploader's iD).
+    Filters: `state` (in_use · orphan · trash · missing), `room`, `by` (an uploader's iD).
     Sorted by size, largest first."""
     from . import asset_homes
     _require_operator(request)
@@ -5993,6 +6227,10 @@ def node_assets(request: Request, state: Optional[str] = None, room: Optional[st
     except Exception:  # noqa: BLE001 — a record that will not read adds nothing
         recorded = set()
     every = set(cited) | set(sizes or {}) | recorded
+    try:
+        in_trash = {f"sha256:{k}" for k in homes_store.trashed()}
+    except Exception:  # noqa: BLE001
+        in_trash = set()
     rows: List[AssetRow] = []
     for ref in every:
         size = (sizes or {}).get(ref)
@@ -6002,6 +6240,8 @@ def node_assets(request: Request, state: Optional[str] = None, room: Optional[st
         stored = (ref in sizes) if sizes is not None else (size is not None)
         if ref in cited and not stored and not truncated:
             row_state = "missing"
+        elif ref not in cited and ref in in_trash and stored:
+            row_state = "trash"           # nel cestino: si riprende o si toglie da lì
         elif ref not in cited:
             row_state = "orphan" if stored or sizes is None else "missing"
         else:
@@ -6037,10 +6277,19 @@ class AssetForgotten(BaseModel):
     #: the operator's record says «nobody was using it» and not only «done»
     rooms: List[str] = Field(default_factory=list)
     corpus: bool = False
+    #: True: i byte sono nel cestino, non tolti — si riprendono con
+    #: `POST /v1/admin/assets/{ref}/restore` fino a `purge_after`
+    in_trash: bool = False
+    purge_after: Optional[str] = None
 
 
-@v1.delete("/admin/assets/{ref}", summary="Remove an asset from the node (operators)", response_model=AssetForgotten, tags=["node"])
-async def forget_asset(ref: str, request: Request) -> AssetForgotten:
+@v1.delete("/admin/assets/{ref}", summary="Put an asset in the trash — or, from the trash, remove it from the node (operators)", response_model=AssetForgotten, tags=["node"])
+async def forget_asset(ref: str, request: Request,
+                       for_good: bool = Query(default=False, description=(
+                           "remove for good bytes already in the trash")),
+                       bulk: bool = Query(default=False, description=(
+                           "the explicit confirmation an operation in bulk "
+                           "needs (over 5 GB in an hour)"))) -> AssetForgotten:
     """**Forget these bytes** — the fourth verb, and the only one that removes.
 
     ════════════════════════════════════════════════════════════════════════════
@@ -6079,7 +6328,7 @@ async def forget_asset(ref: str, request: Request) -> AssetForgotten:
     **Nothing store-specific.** It calls `AssetStore.delete`, which three
     implementations answer and a fourth will.
     """
-    _require_operator(request)
+    operator = _require_operator(request)
     if not asset_ref_valid(ref):
         raise HTTPException(status_code=400,
                             detail=f"not an asset reference: {ref!r} "
@@ -6098,6 +6347,42 @@ async def forget_asset(ref: str, request: Request) -> AssetForgotten:
                       "Detach it where it is used — that is a change to a graph, "
                       "reversible, and it does not touch the bytes — and ask "
                       "again."))
+    # ── IL CESTINO (E.D., 31 ott 2026): il primo gesto mette da parte, il
+    # secondo (`for_good`) toglie; il nodo vuota da sé dopo TRASH_DAYS giorni
+    from . import asset_homes as _homes_module
+    from .rooms import now_iso as _now_iso
+    homes = _homes_module.ASSET_HOMES
+    meta = ASSET_STORE.head(ref)
+    size = int((meta or {}).get("size") or 0)
+    who_key = operator or "dev"
+    in_trash = homes.in_trash(ref)
+    if not for_good:
+        if in_trash:
+            return AssetForgotten(ref=ref, removed=False, in_trash=True,
+                                  purge_after=trash_module.purge_after(
+                                      in_trash.get("trashed_at")))
+        if meta is None:
+            return AssetForgotten(ref=ref, removed=False)
+        over = trash_module.BULK.over(who_key, size=size)
+        if over and not bulk:
+            raise HTTPException(status_code=409, detail=over)
+        at = _now_iso()
+        homes.trash(ref, {"trashed_at": at, "trashed_by": operator,
+                          "media_type": str(meta.get("media_type") or ""),
+                          "size": size})
+        trash_module.BULK.count(who_key, size=size)
+        return AssetForgotten(ref=ref, removed=False, in_trash=True,
+                              purge_after=trash_module.purge_after(at))
+    if in_trash is None and meta is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=("these bytes are not in the trash. Removing them for good is "
+                    "the second of two gestures: put them in the trash first "
+                    "(the same call without for_good)."))
+    over = trash_module.BULK.over(who_key, size=size)
+    if over and not bulk:
+        raise HTTPException(status_code=409, detail=over)
+    trash_module.BULK.count(who_key, size=size)
     done = ASSET_STORE.delete(ref)
     # …and its record goes with the bytes: the home, who uploaded it, and the
     # orphan mark — so a deleted orphan leaves `GET /v1/admin/assets/orphans`
@@ -6109,6 +6394,16 @@ async def forget_asset(ref: str, request: Request) -> AssetForgotten:
         pass
     return AssetForgotten(ref=ref, removed=bool(done.get("removed")),
                           rooms=[], corpus=False)
+
+
+@v1.post("/admin/assets/{ref}/restore", summary="Take an asset back from the trash (operators)", response_model=AssetForgotten, tags=["node"])
+async def restore_asset(ref: str, request: Request) -> AssetForgotten:
+    from . import asset_homes
+    _require_operator(request)
+    if not asset_homes.ASSET_HOMES.untrash(ref):
+        raise HTTPException(status_code=404,
+                            detail=f"no asset {ref!r} in the trash here")
+    return AssetForgotten(ref=ref, removed=False, in_trash=False)
 
 
 class OrphanAsset(BaseModel):
@@ -6165,8 +6460,11 @@ async def list_orphan_assets(
     known = rooms().containers()
     wanted = (kind or "").strip().lower().rstrip("/")
     out: List[OrphanAsset] = []
+    in_trash = asset_homes.ASSET_HOMES.trashed()
     for key, mark in marks.items():
         ref = f"sha256:{key}"
+        if key in in_trash:               # nel cestino: sta nell'elenco del cestino
+            continue
         if ref in cited or ref in corpus:
             continue
         if any(_room_is_there(r, known)

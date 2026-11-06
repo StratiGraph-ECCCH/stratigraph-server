@@ -137,12 +137,22 @@ def _cite(node, room_id, *refs, owner=ANNA):
     node["registry"].forget(room_id)
 
 
-def _delete(client, be, room_id, *, who=ANNA, confirm=None, body=True):
+def _delete(client, be, room_id, *, who=ANNA, confirm=None, body=True,
+            for_good=True):
+    """Cancellare davvero, dal 6 novembre 2026, sono DUE gesti: nel cestino,
+    poi via dal cestino (`test_il_cestino.py`). Queste prove misurano quello
+    che il secondo gesto fa, quindi li fanno tutti e due; se il primo rifiuta,
+    è il suo rifiuto che si misura."""
     be(who)
     kwargs = {"headers": AUTH}
     if body:
         kwargs["json"] = {"confirm": room_id if confirm is None else confirm}
-    return client.request("DELETE", f"/v1/rooms/{room_id}", **kwargs)
+    first = client.request("DELETE", f"/v1/rooms/{room_id}", **kwargs)
+    if not for_good or first.status_code != 200:
+        return first
+    be(who)
+    return client.request("DELETE", f"/v1/rooms/{room_id}", headers=AUTH,
+                          json={"confirm": room_id, "for_good": True})
 
 
 def _orphans(client, be, query=""):
@@ -374,7 +384,11 @@ def test_L_ADMIN_RIFIUTA_UN_ASSET_CITATO_e_TOGLIE_UN_ORFANO(client, be, node, sc
     _delete(client, be, "mostra")
     assert [o["ref"] for o in _orphans(client, be)] == [scavo["glb"]]
     be(OSCAR)
-    done = client.delete(f"/v1/admin/assets/{scavo['glb']}", headers=AUTH)
+    #: due gesti anche qui: nel cestino, poi via
+    first = client.delete(f"/v1/admin/assets/{scavo['glb']}", headers=AUTH)
+    assert first.status_code == 200 and first.json()["in_trash"] is True
+    done = client.delete(f"/v1/admin/assets/{scavo['glb']}?for_good=true",
+                         headers=AUTH)
     assert done.status_code == 200 and done.json()["removed"] is True
     assert node["assets"].head(scavo["glb"]) is None
     assert _orphans(client, be) == []

@@ -104,7 +104,8 @@ Two operations depend on optional libraries: `POST /v1/export-ttl` needs
 | `GET /v1/rooms` | The rooms you have a role in *(rooms)* | yes |
 | `POST /v1/rooms` | Create a room *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}` | One room: its title, its containers, its state *(rooms)* | yes |
-| `DELETE /v1/rooms/{room_id}` | Delete a room (its assets stay, as orphans) *(rooms)* | yes |
+| `DELETE /v1/rooms/{room_id}` | Put a room in the trash — or, from the trash, delete it (its assets stay, as orphans) *(rooms)* | yes |
+| `POST /v1/rooms/{room_id}/restore` | Take a room back from the trash *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/who` | Who is in the room now, and who wrote recently *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/waiting` | What waits for a signature: fields a model composed, not yet validated *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/statistics` | What the room holds: nodes, edges, epochs, gaps *(rooms)* | yes |
@@ -162,7 +163,9 @@ Two operations depend on optional libraries: `POST /v1/export-ttl` needs
 | `GET /v1/admin/whoami` | Am I an operator of this node? *(node)* | yes |
 | `GET /v1/admin/rooms` | Every room on this node (operators) *(node)* | yes |
 | `GET /v1/admin/storage` | What the node holds, and what does not line up (operators) *(node)* | yes |
-| `DELETE /v1/admin/assets/{ref}` | Remove an asset from the node (operators) *(node)* | yes |
+| `DELETE /v1/admin/assets/{ref}` | Put an asset in the trash — or, from the trash, remove it from the node (operators) *(node)* | yes |
+| `POST /v1/admin/assets/{ref}/restore` | Take an asset back from the trash (operators) *(node)* | yes |
+| `GET /v1/admin/trash` | What is in the trash, and until when (operators) *(node)* | yes |
 | `GET, HEAD /v1/admin/assets/{ref}` | Download any asset, through no room (operators) *(node)* | yes |
 | `GET /v1/admin/assets/orphans` | Assets a room's deletion left with no room (operators) *(node)* | yes |
 | `GET /v1/admin/assets` | The files the node holds, one by one (operators) *(node)* | yes |

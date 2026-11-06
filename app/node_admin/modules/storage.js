@@ -97,7 +97,7 @@ async function render(root) {
       batch.innerHTML = `<span><b>${n}</b> ${escapeHtml(L(n === 1 ? "orfano scelto" : "orfani scelti", n === 1 ? "orphan picked" : "orphans picked"))} · ${bytes(total)}</span>`;
       const acts = document.createElement("span");
       acts.className = "k-batch-acts";
-      acts.appendChild(button(L(`Togli (${n})…`, `Remove (${n})…`), () => void removeMany(total), "warn"));
+      acts.appendChild(button(L(`Nel cestino (${n})…`, `Into the trash (${n})…`), () => void removeMany(total), "warn"));
       acts.appendChild(button(L("Togli la scelta", "Clear"), () => { picked.clear(); void drawFiles(); }));
       batch.appendChild(acts);
     };
@@ -120,14 +120,23 @@ async function render(root) {
 
   async function removeMany(total) {
     const refs = [...picked.keys()];
-    if (!confirmTyped(L(`la rimozione di ${refs.length} file orfani (${bytes(total)}): i byte non tornano`,
-                        `removing ${refs.length} orphan files (${bytes(total)}): the bytes do not come back`),
-                      L("TOGLI", "REMOVE"))) return;
+    //: IL CESTINO (6 nov 2026): i file vanno nel cestino per 30 giorni; oltre
+    //: la soglia sul blocco (5 GB) la parola cambia e il nodo riceve `bulk`
+    let limit = 5 * 1024 ** 3;
+    try { limit = (await api.get("/admin/trash")).bulk_bytes || limit; } catch { /* la soglia di sempre */ }
+    const bulk = total > limit;
+    if (!confirmTyped(bulk
+      ? L(`un'operazione in blocco: ${refs.length} file orfani (${bytes(total)}) nel cestino, oltre la soglia di ${bytes(limit)}. Per 30 giorni si riprendono dal «Cestino»`,
+          `an operation in bulk: ${refs.length} orphan files (${bytes(total)}) into the trash, over the threshold of ${bytes(limit)}. For 30 days they can be taken back from «Trash»`)
+      : L(`${refs.length} file orfani (${bytes(total)}) nel cestino. Per 30 giorni si riprendono dal «Cestino», poi il nodo li toglie`,
+          `${refs.length} orphan files (${bytes(total)}) into the trash. For 30 days they can be taken back from «Trash», then the node removes them`),
+      bulk ? L(`IN BLOCCO ${refs.length}`, `IN BULK ${refs.length}`) : L("CESTINO", "TRASH"))) return;
+    const q = bulk ? "?bulk=true" : "";
     const { done, refused } = await inPool(refs.map((ref) => ({ room_id: shortRef(ref), ref })),
-      (x) => api.del(`/admin/assets/${encodeURIComponent(x.ref)}`),
-      (d, n) => L(`Tolgo… ${d} di ${n}`, `Removing… ${d} of ${n}`));
+      (x) => api.del(`/admin/assets/${encodeURIComponent(x.ref)}${q}`),
+      (d, n) => L(`Nel cestino… ${d} di ${n}`, `Into the trash… ${d} of ${n}`));
     picked.clear();
-    toast(L(`${done} file tolti dal bucket.`, `${done} files removed from the bucket.`)
+    toast(L(`${done} file nel cestino.`, `${done} files in the trash.`)
           + (refused.length ? " " + L(`${refused.length} rifiutati: qualcuno li cita.`, `${refused.length} refused: something cites them.`) : ""),
           refused.length ? "bad" : "");
     if (refused.length) console.warn(refused.join("\n"));
@@ -156,17 +165,16 @@ async function render(root) {
         <td>${a.rooms.length ? escapeHtml(a.rooms.join(", ")) : '<span class="k-faint">—</span>'}</td>
         <td>${escapeHtml(a.home || "—")}</td>
         <td class="k-mono">${escapeHtml(a.uploaded_by.join(", ") || "—")}</td>
-        <td>${a.state === "orphan" ? `<span data-forget="${escapeHtml(a.ref)}"></span>` : a.state === "missing" ? tag(L("mancante", "missing"), "warn") : tag(L("in uso", "in use"), "ok")}</td></tr>`).join("")
+        <td>${a.state === "orphan" ? `<span data-forget="${escapeHtml(a.ref)}"></span>` : a.state === "trash" ? tag(L("nel cestino", "in the trash")) : a.state === "missing" ? tag(L("mancante", "missing"), "warn") : tag(L("in uso", "in use"), "ok")}</td></tr>`).join("")
         || `<tr><td colspan="7" class="k-faint">${escapeHtml(L("Nessun file.", "No file."))}</td></tr>`}</tbody></table></div>
-      <p class="k-note">${escapeHtml(L("Un file orfano è nel bucket ma nessuna stanza lo cita. Si toglie uno alla volta scrivendone l'impronta, oppure se ne spuntano molti e si tolgono insieme: per ognuno il nodo ricontrolla chi lo usa e rifiuta se qualcuno lo cita.",
-        "An orphan file is in the bucket but no room cites it. Remove one by typing its digest, or tick many and remove them together: for each the node re-checks who uses it and refuses if anybody does."))}</p>`;
+      <p class="k-note">${escapeHtml(L("Un file orfano è nel bucket ma nessuna stanza lo cita. Se ne spuntano uno o molti e si mettono nel cestino: per ognuno il nodo ricontrolla chi lo usa e rifiuta se qualcuno lo cita. Dal cestino si riprendono per 30 giorni; poi il nodo li toglie dal bucket.",
+        "An orphan file is in the bucket but no room cites it. Tick one or many and put them in the trash: for each the node re-checks who uses it and refuses if anybody does. From the trash they come back for 30 days; then the node removes them from the bucket."))}</p>`;
     wirePicks(list);
-    out.querySelectorAll("[data-forget]").forEach((slot) => slot.appendChild(button(L("Togli…", "Remove…"), async () => {
+    out.querySelectorAll("[data-forget]").forEach((slot) => slot.appendChild(button(L("Nel cestino", "Into the trash"), async () => {
       const ref = slot.dataset.forget;
-      if (!confirmTyped(L("la rimozione di questi byte, che non tornano", "removing these bytes, which do not come back"), ref)) return;
       try {
         const done = await api.del(`/admin/assets/${encodeURIComponent(ref)}`);
-        toast(done.removed ? L("Tolto dal bucket.", "Removed from the bucket.") : L("Non c'era niente da togliere.", "There was nothing to remove."));
+        toast(done.in_trash ? L("Nel cestino: si riprende per 30 giorni.", "In the trash: it can be taken back for 30 days.") : L("Non c'era niente da togliere.", "There was nothing to remove."));
       } catch (error) { toast(error.message, "bad"); }
       await drawFiles();
     }, "warn")));

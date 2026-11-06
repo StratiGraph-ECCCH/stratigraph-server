@@ -21,6 +21,7 @@ import "./modules/groups.js";
 import "./modules/permissions.js";
 import "./modules/transfers.js";
 import "./modules/storage.js";
+import "./modules/trash.js";
 import "./modules/health.js";
 
 // ── the seams, declared and NOT built ────────────────────────────────────────
