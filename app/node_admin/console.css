@@ -256,8 +256,9 @@ details.small button { margin-top: .4rem; }
         background: var(--card); color: var(--ink); }
 
 /* IL LINK DISCRETO — `.more`. Viveva in `rooms.css` e sta qui dal 7 ottobre,
- * perché la console ha ora il suo `#back-door` e questo è il foglio che ogni
- * faccia importa. Il colore è un token e non una scelta: `test_brand_ui`
+ * perché questo è il foglio che ogni faccia importa (la casa dall'11 novembre
+ * non ha più la sua ancora `#back-door`: la usa la pagina degli strumenti).
+ * Il colore è un token e non una scelta: `test_brand_ui`
  * verifica che nessun elemento interattivo erediti il blu del browser, ed è
  * scattato appena l'ancora è comparsa nella console senza una regola che la
  * raggiungesse. */
@@ -342,7 +343,7 @@ details.small button { margin-top: .4rem; }
 .k-progress { font-weight: 600; }
 
 /* ── LA PORTA DEL NODO (31 ott 2026) — prima dell'accesso, una cosa sola ── */
-body.porta #node-bar, body.porta #back-door, body.porta .shell > nav,
+body.porta #node-bar, body.porta .shell > nav,
 body.porta #reload, body.porta #who { display: none; }
 body.porta .shell { justify-content: center; }
 body.porta #panel { display: flex; justify-content: center; align-items: center; flex: 1; }
@@ -363,13 +364,10 @@ body.porta #panel { display: flex; justify-content: center; align-items: center;
 :root[data-sg-theme="dark"] .porta-main { color: var(--sg-text); }
 
 /* ── LA CASA UNICA: niente barra vecchia, le altre facce nella colonna ── */
-body.casa #node-bar, body.casa #back-door, body.porta #casa-out { display: none; }
+body.casa #node-bar, body.porta #casa-out { display: none; }
 .nav-links { margin-top: 18px; display: flex; flex-direction: column; }
 .nav-group { font-size: .72rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--sg-muted); padding: 10px 12px 4px; }
 a.nav-item.nav-out { text-decoration: none; color: var(--sg-muted); }
-.porta-back { margin: 18px 0 0 18px; }
-.porta-tools { padding: 8px 24px 40px; max-width: 1100px; }
-body.porta #panel:has(.porta-tools) { display: block; }
 
 /* ── LA CASA SUL TELEFONO (31 ott 2026): la colonna diventa una riga che
    scorre, la barra va a capo; niente scorrimento orizzontale della pagina ── */

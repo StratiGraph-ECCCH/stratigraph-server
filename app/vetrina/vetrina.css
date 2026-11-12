@@ -1,0 +1,24 @@
+/* LA VETRINA DEL NODO (11 novembre 2026). Solo i token del tema (`--sg-*`),
+   come ogni faccia di questo server: le skin la vestono come il resto. */
+body.vetrina { min-height: 100vh; }
+.v-top { color: var(--sg-muted); text-decoration: none; margin-right: 10px; font-size: .9rem; }
+.v-top:hover { color: var(--sg-text); }
+.v-signin { margin-left: 10px; padding: 6px 14px; border-radius: 8px; border: 1px solid var(--sg-accent);
+  color: var(--sg-info-ink); text-decoration: none; font-size: .9rem; font-weight: 600; }
+.v-main { max-width: 960px; margin: 0 auto; padding: 48px 24px 64px; display: flex; flex-direction: column; gap: 40px; }
+.v-hero h1 { font-family: var(--sg-font-display, inherit); font-size: clamp(1.9rem, 4vw, 2.7rem); margin: 0 0 10px; line-height: 1.15; }
+.v-lead { font-size: 1.08rem; line-height: 1.6; color: var(--sg-muted); max-width: 64ch; margin: 0 0 14px; }
+.v-facts { color: var(--sg-muted); margin: 0; }
+.v-services h2 { margin: 0 0 14px; }
+.v-offers { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.v-offer { background: var(--sg-surface); border: 1px solid var(--sg-line); border-radius: 14px; padding: 16px 18px; }
+.v-offer-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.v-offer-name { font-weight: 600; font-size: 1.05rem; color: var(--sg-text); }
+a.v-offer-name { color: var(--sg-info-ink); }
+.v-offer-what { margin: 6px 0 0; color: var(--sg-muted); line-height: 1.5; }
+.v-state { font-family: var(--sg-font-mono); font-size: .75rem; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--sg-line); color: var(--sg-muted); white-space: nowrap; }
+.v-state[data-state="ok"] { color: var(--sg-info-ink); border-color: var(--sg-info-ink); }
+.v-state[data-state="unreachable"], .v-state[data-state="degraded"] { color: var(--sg-warn, var(--sg-accent)); border-color: currentColor; }
+.v-invite { border-top: 1px solid var(--sg-line); padding-top: 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.v-invite p { margin: 0; color: var(--sg-muted); }

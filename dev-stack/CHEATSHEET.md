@@ -4,21 +4,21 @@ Quick reference. The full explanation is in [`README-DEV.md`](README-DEV.md); th
 is the "what do I type" version, plus the one thing it does not cover: pointing
 **EMtools (Blender)** at the local object store.
 
-> ## Where you start again: **`/em/rooms/`**
+> ## Where you start again: **`/em/`** (since 11 November 2026)
 >
-> — [`https://em.localhost:8443/em/rooms/`](https://em.localhost:8443/em/rooms/)
+> — [`https://em.localhost:8443/em/`](https://em.localhost:8443/em/)
 >
-> That is the node's front door: what it runs, its rooms, its studies, its
-> monuments, and the door of each one. **Sign in and it also draws the «Node
-> map»** — every face of the node with its live state, the internal address each
-> probe asked, and a *copy curl* for putting the same question to a terminal. That
-> zone is operator-only and read-only; it is the part of this file that the page
-> now carries itself.
+> That is the node's showcase: what this node is and what runs on it, composed
+> from `/v1/node`. **Sign in** (top right) and you are in the house,
+> [`/em/home/`](https://em.localhost:8443/em/home/) — your rooms, and for an
+> operator the node's own sections (people, storage, lifecycle). What you install
+> on your computer is [`/em/tools/`](https://em.localhost:8443/em/tools/).
+> `/em/admin/` still leads to the house (301); `/em/rooms/` is gone.
 >
 > On the institutional node `/` belongs to Heriverse
-> (`role/templates/Caddyfile.j2` opens with `redir / /a/heriverse`), so the door
-> is `/em/rooms/` **there too** — worth knowing rather than discovering. Here `/`
-> redirects to it.
+> (`role/templates/Caddyfile.j2` opens with `redir / /a/heriverse`), so the
+> showcase is `/em/` **there too** — worth knowing rather than discovering. Here
+> `/` redirects to it.
 
 ## 1 · Launch every service at once
 

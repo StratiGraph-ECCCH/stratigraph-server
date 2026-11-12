@@ -271,8 +271,13 @@ from a browser needs a **public client** (PKCE, no secret), `em-console`, with a
 valid redirect URI for every page this node serves:
 
 ```
-/em/rooms/*   /em/work/*   /em/tools/*   /em/admin/*   /em/studio/*   /em/read/*
+/em/home/*   /em/tools/*   /em/studio/*   /em/read/*
 ```
+
+(Since 11 November 2026 the house is `/em/home/`; `/em/admin/` and `/em/work/`
+redirect to it and sign nobody in, and `/em/rooms/` is gone. A realm that still
+lists them is not wrong — a spare URI is not a defect — but one WITHOUT
+`/em/home/*` refuses the sign-in with «Invalid parameter: redirect_uri».)
 
 Measured on 7 September 2026, the realm in `docker-heriverse` carries one client,
 `heriverse`, and no `em-console` — so today no StratiGraph page can sign anybody

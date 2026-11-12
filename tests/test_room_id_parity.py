@@ -4,7 +4,8 @@ A person types a NAME; the id is a consequence, because two things that must
 agree are two things that will one day disagree. But the derivation now happens
 in two places:
 
-* this node's front door — `app/rooms_ui/rooms.js::createRoom`;
+* this node's house — `app/node_admin/modules/home.js::createRoom` (until 11
+  November 2026 the front door, `app/rooms_ui/rooms.js::createRoom`);
 * EMStudio's File menu — `frontend/src/rooms.ts::roomIdFromName` (the gesture
   added on 5 September 2026, so a room can be created without going back to the
   door).
@@ -35,8 +36,10 @@ import subprocess
 
 import pytest
 
+#: the house's «New room» (`node_admin/modules/home.js::createRoom`) since 11
+#: November 2026 — `rooms_ui/rooms.js`, where this derivation lived first, is gone
 ROOMS_JS = (pathlib.Path(__file__).resolve().parent.parent
-            / "app" / "rooms_ui" / "rooms.js")
+            / "app" / "node_admin" / "modules" / "home.js")
 
 #: KEEP IN STEP WITH `EMStudio/frontend/scripts/check-rooms.mjs` (`PARITY`).
 PARITY: list[tuple[str, str]] = [
@@ -73,7 +76,7 @@ def _slug_expression() -> str:
     match = re.search(
         r"const room_id = (title\.toLowerCase\(\)[\s\S]{0,240}?);", source)
     assert match, ("the front door's room-id derivation is not where this test "
-                   "looks for it (rooms.js, `const room_id = title.toLowerCase()"
+                   "looks for it (home.js, `const room_id = title.toLowerCase()"
                    "…`). If it moved, move this test with it — do not delete it.")
     expression = match.group(1)
     # the door's `|| \`room-${Date.now()…}\`` fallback is NOT part of the shared

@@ -7,7 +7,8 @@
 #               [--images | --source]
 #
 #   HOST           l'indirizzo con cui gli ALTRI dispositivi raggiungono il nodo.
-#                  Si ricorda in .env.dev (FCN_HOST): le volte dopo basta ./fcn-up.sh
+#                  Vale per QUESTA corsa: senza, l'host è em.localhost. Solo un nodo
+#                  da campo ha un nome che dura (FCN_HOST, scritto da fcn-field-setup.sh)
 #                  Un nome .local (mDNS: Bonjour su macOS, avahi su Linux) o un indirizzo
 #   --offline      niente build e niente EMStudio dev: riparte in 2-3 minuti, senza rete
 #   --demo         popola studi, stanze e immagini dimostrative (si può ripetere)
@@ -27,12 +28,13 @@
 #                                     #   all'indirizzo numerico (vale se il router non
 #                                     #   fa passare i nomi .local, come a casa il 31 ott)
 #   ./fcn-up.sh mio-mac.local         # …oppure al nome .local, dove il router lo permette
-#   ./fcn-up.sh --offline             # riaccendere dopo un riavvio, con l'host già scelto
+#   ./fcn-up.sh --offline             # riaccendere senza rete (il nodo da campo: col suo nome)
 #   ./fcn-up.sh --demo                # la prima volta, per avere qualcosa da guardare
 #
 # DOPO L'AVVIO
-#   https://HOST:8443/em/admin/      la console del nodo: stanze, persone, gruppi, memoria
-#   https://HOST:8443/em/work/       le tue stanze e le porte per gli strumenti
+#   https://HOST:8443/em/            la vetrina: che cos'è il nodo e che cosa ci gira
+#   https://HOST:8443/em/home/       la casa: le tue stanze (e, se sei operatore, il nodo)
+#   https://HOST:8443/em/tools/      gli strumenti da installare
 #   https://HOST:8443/chat/          StratiField
 #   docker ps                        che cosa è acceso
 #   ./fcn-down.sh                    spegne (i dati restano)
@@ -86,6 +88,51 @@ for a in "$@"; do
   esac
 done
 
+# ── 0 · `.env.dev` NON PUÒ CONTRADDIRE LA CORSA (9 novembre 2026) ─────────────
+#
+# Misurato il 9 novembre sul `.env.dev` di E.D.: in coda c'erano quattro righe
+# scritte a mano il 31 ottobre per un telefono in rete locale, fra cui
+#
+#     REALM_FILE=./keycloak/realm-em-dev.192.168.1.214.json
+#
+# e con l'host di default nessuno esportava `REALM_FILE`: compose vedeva quella
+# riga, Keycloak importava il realm di un'altra macchina, tutte le porte
+# rispondevano 200 e il login moriva su `redirect_uri`. La mano più vecchia
+# parlava perché lo script taceva.
+#
+# Le variabili che QUESTO script esporta le decide la corsa, a ogni corsa. Una
+# loro assegnazione in `.env.dev` o è inerte (l'ambiente di shell batte
+# `--env-file`) o, appena un ramo dimentica un export, è il valore di un'altra
+# volta. Quindi ci si ferma e si dice quale riga togliere.
+#
+# ECCEZIONE, misurata e non supposta: `.env.dev.example` stesso porta tre di
+# queste (`EM_DEV_DOMAIN`, `EM_PUBLIC_BASE`, `EM_IIIF_PUBLIC`) come default per
+# chi accende il compose a mano, e ogni `.env.dev` nasce da lì. Rifiutarle
+# fermerebbe ogni clone al primo avvio. Si tollerano SOLO le chiavi che il
+# modello committato dichiara — lette dal modello, non ricopiate qui — e
+# restano inerti perché qui sotto vengono esportate sempre.
+FCN_EXPORTS="EM_SITE EM_DEFAULT_SNI EM_DEV_DOMAIN EM_IIIF_PUBLIC OIDC_ISSUER OIDC_PUBLIC_ORIGIN EM_PUBLIC_BASE REALM_FILE EM_EMSTUDIO_INTERNAL"
+if [ -f .env.dev ]; then
+  contraddizioni=""
+  for v in $FCN_EXPORTS; do
+    if [ -f .env.dev.example ] && grep -qE "^[[:space:]]*(export[[:space:]]+)?${v}=" .env.dev.example; then
+      continue
+    fi
+    righe="$(grep -nE "^[[:space:]]*(export[[:space:]]+)?${v}=" .env.dev | cut -d: -f1 | tr '\n' ' ' || true)"
+    [ -n "$righe" ] && contraddizioni="${contraddizioni}     ${v}  →  .env.dev riga ${righe}
+"
+  done
+  if [ -n "$contraddizioni" ]; then
+    echo "✖ $(pwd)/.env.dev assegna variabili che questo script decide a ogni corsa:" >&2
+    printf '%s' "$contraddizioni" >&2
+    echo >&2
+    echo "  Togli quelle righe. Il loro valore lo calcola fcn-up.sh dall'host" >&2
+    echo "  (./fcn-up.sh HOST); scritto qui è il valore di un'altra volta, e quando un" >&2
+    echo "  ramo non lo esporta è quello che compose vede. Non accendo niente." >&2
+    exit 1
+  fi
+fi
+
 # ── 1 · Docker che risponde ──────────────────────────────────────────────────
 #
 # Era `colima status` SEMPRE, e Colima è di macOS: su Linux il demone è di
@@ -95,22 +142,28 @@ done
 sg_ensure_docker || exit 1
 
 # ── 2 · host primario (browser) + gli indirizzi che Caddy serve ──────────────
-#: …e se non lo si passa, quello che il nodo ha scelto una volta per tutte
-#: (`FCN_HOST` in `.env.dev`, lo scrive `fcn-field-setup.sh`): così l'avvio di
-#: ogni giorno, e quello automatico all'accensione, è `./fcn-up.sh` e basta.
-FCN_HOST_SAVED="$( [ -f .env.dev ] && grep -E '^FCN_HOST=' .env.dev | tail -1 | cut -d= -f2- || true)"
-PRIMARY="${ARG_HOST:-${FCN_HOST_SAVED:-em.localhost}}"   # dove punta il browser (URL pubblici)
-#: UN HOST DATO A MANO SI RICORDA (31 ott 2026): `--help` lo prometteva e non era
-#: vero — la volta dopo, `./fcn-up.sh --offline` ripartiva su em.localhost e il
-#: telefono perdeva il nodo. Si scrive in .env.dev, che resta fuori da git.
-if [ -n "$ARG_HOST" ] && [ "$ARG_HOST" != "$FCN_HOST_SAVED" ] && [ -f .env.dev ]; then
-  if grep -qE '^FCN_HOST=' .env.dev; then
-    sed -i.bak -E "s#^FCN_HOST=.*#FCN_HOST=${ARG_HOST}#" .env.dev && rm -f .env.dev.bak
-  else
-    printf '\nFCN_HOST=%s\n' "$ARG_HOST" >> .env.dev
-  fi
-  echo "· ricordo l'host: FCN_HOST=${ARG_HOST} (in .env.dev)"
+#: UNA CORSA NON LASCIA TRACCE SULLA SUCCESSIVA (9 novembre 2026). Il 31
+#: ottobre un host dato a mano veniva scritto in coda a `.env.dev` (FCN_HOST) e
+#: riletto alla corsa dopo: la regola era provata nella direzione in cui l'host
+#: c'è, e nella direzione in cui non c'è lasciava parlare l'ultima mano. Adesso
+#: `PRIMARY` è l'argomento, oppure em.localhost.
+#:
+#: L'ECCEZIONE È IL NODO DA CAMPO, che si dichiara tale: un Raspberry che si
+#: riaccende da solo (`fcn-autostart.sh` → `./fcn-up.sh --offline`) deve sapere
+#: come si chiama. Il suo nome lo scrive `fcn-field-setup.sh` (field_setup.py),
+#: nello stesso blocco in cui scrive `EM_NODE_KIND=field`, il gestore e
+#: `EM_NODE_NAME`: è lì che il nodo da campo tiene la sua identità, e da lì
+#: lo si legge — SOLO se il nodo è da campo. Questo script non scrive mai `.env.dev`.
+env_dev_val() { [ -f .env.dev ] && grep -E "^$1=" .env.dev | tail -1 | cut -d= -f2- || true; }
+FIELD="no"
+[ "${EM_NODE_KIND:-$(env_dev_val EM_NODE_KIND)}" = "field" ] && FIELD="yes"
+FIELD_HOST=""
+if [ "$FIELD" = "yes" ]; then
+  FIELD_HOST="$(env_dev_val FCN_HOST)"
+elif [ -n "$(env_dev_val FCN_HOST)" ]; then
+  echo "· .env.dev riga $(grep -nE '^FCN_HOST=' .env.dev | tail -1 | cut -d: -f1): FCN_HOST è il nome di un nodo da campo, e questo non lo è — la ignoro (puoi toglierla)."
 fi
+PRIMARY="${ARG_HOST:-${FIELD_HOST:-em.localhost}}"   # dove punta il browser (URL pubblici)
 #: IN MINUSCOLO (31 ottobre 2026): il browser scrive l'host in minuscolo
 #: («macbook-pro-di-emanuel.local») e Keycloak confronta le redirect URI come
 #: stringhe, quindi un realm reso per «MacBook-Pro-di-Emanuel.local» — il nome
@@ -200,9 +253,7 @@ export EM_PUBLIC_BASE="https://${PRIMARY}:${HTTPS_PORT}/em"
 # (`render_realm.py --campo`); Keycloak tiene i suoi dati su un volume e la
 # lista degli accreditati è quella del nodo (`docker-compose.field.yml`);
 # dopo l'avvio il gestore riceve il suo account (`accredit.sh`).
-env_dev_val() { [ -f .env.dev ] && grep -E "^$1=" .env.dev | tail -1 | cut -d= -f2- || true; }
-FIELD="no"
-[ "${EM_NODE_KIND:-$(env_dev_val EM_NODE_KIND)}" = "field" ] && FIELD="yes"
+# (`FIELD` si decide più su, al §2: serve già per sapere come si chiama il nodo.)
 # ── 3-ter · QUALE STRADA (1 novembre 2026) ───────────────────────────────────
 #
 # `source`: build dai repository affiancati, codice montato — il dev-stack.
@@ -223,6 +274,11 @@ if [ "$ROAD" = "images" ]; then
   [ "$STUDIO" = "auto" ] && STUDIO="no"
   echo "· strada delle immagini: i servizi da GHCR (docker-compose.images.yml), niente build"
 fi
+#: IL DEFAULT È UN CASO (9 novembre 2026): `REALM_FILE` si esportava solo nei
+#: due rami qui sotto, e con em.localhost compose vedeva quello che restava in
+#: `.env.dev` — il realm di un'altra macchina. Il realm committato lo si DICE
+#: con un export, non con un'omissione; i rami lo sostituiscono.
+export REALM_FILE="./keycloak/realm-em-dev.json"
 if [ "$FIELD" = "yes" ]; then
   if [ ! -f accredited.field.yaml ]; then
     echo "✖ il nodo è dichiarato «da campo» ma manca accredited.field.yaml." >&2
@@ -384,6 +440,15 @@ elif [ "$STUDIO" = "yes" ] && [ "$studio_pronto" != "yes" ]; then
   echo >&2
   echo "  oppure ./fcn-up.sh --no-studio. Non comincio a scaricare immagini." >&2
   exit 1
+fi
+#: DOVE IL NODO BUSSA PER SAPERE SE LO STUDIO RISPONDE (11 novembre 2026): il
+#: Vite che questa corsa accende, oppure niente. Esportato SEMPRE — vuoto quando
+#: lo studio non è nostro — per la regola del §0: una variabile che lo script
+#: decide non si lascia a `.env.dev`.
+if [ "$STUDIO" = "yes" ]; then
+  export EM_EMSTUDIO_INTERNAL="http://host.docker.internal:5173/em/studio/"
+else
+  export EM_EMSTUDIO_INTERNAL=""
 fi
 
 # ── 4-sexies · LA STRADA DELLE IMMAGINI: PRIMA SI TIRA, POI SI ACCENDE ──────
@@ -553,8 +618,9 @@ cat <<EOF
 
 ✔ FCN acceso$( [ "$LOCAL_S3D" = "yes" ] && echo " (s3Dgraphy locale)" ). Caddy serve: ${EM_SITE}
   Su questo computer:   https://${PRIMARY}:${HTTPS_PORT}/em/v1/health
-  Le mie stanze:        https://${PRIMARY}:${HTTPS_PORT}/em/rooms/
-  Console del nodo:     https://${PRIMARY}:${HTTPS_PORT}/em/admin/
+  Il nodo (vetrina):    https://${PRIMARY}:${HTTPS_PORT}/em/
+  Le mie stanze:        https://${PRIMARY}:${HTTPS_PORT}/em/home/
+  Strumenti:            https://${PRIMARY}:${HTTPS_PORT}/em/tools/
   Catalogo:             https://${PRIMARY}:${HTTPS_PORT}/catalog/ui/
   Assistente di campo:  https://${PRIMARY}:${HTTPS_PORT}/chat/
 $( [ "$studio_attivo" = "yes" ] && echo "  EMStudio (dev):       https://${PRIMARY}:${HTTPS_PORT}/em/studio/" )

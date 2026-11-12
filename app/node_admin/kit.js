@@ -7,29 +7,32 @@
  * draws, so a rule about who may do what can never hide in it.
  */
 import { escapeHtml } from "./console.js";
-import { LOCALE } from "./i18n.js";
+import { t } from "./i18n.js";
 
-/** The console's panels speak Italian or English; the other languages of the
- *  chrome fall back to English here, which is what the modules did before. */
-export const L = (it, en) => (LOCALE === "it" ? it : en);
+// `L(it, en)` LIVED HERE until 11 November 2026: the panels spoke two
+// languages while the chrome spoke six, and `ro` `el` `es` `pl` fell to English
+// in the panels alone. Every panel now asks `t()` with keys, like the chrome —
+// one convention per surface, the rule at the head of `i18n.js`. The four
+// partner languages still carry empty values that fall back to English: the
+// slot is ours, the translation is theirs.
 
 export const ROLE_WORD = () => ({
-  owner: L("proprietario", "owner"), admin: L("amministratore", "admin"),
-  editor: L("editor", "editor"), viewer: L("lettore", "reader"),
+  owner: t("kit.role.owner"), admin: t("kit.role.admin"),
+  editor: t("kit.role.editor"), viewer: t("kit.role.viewer"),
 });
 export const PROFILE_WORD = () => ({
-  super: L("Super-amministratore", "Super-administrator"),
-  creator: L("Editor di nodo", "Node editor"),
-  user: L("Utente", "User"),
+  super: t("kit.profile.super"),
+  creator: t("kit.profile.creator"),
+  user: t("kit.profile.user"),
 });
 export const RANK = { viewer: 0, editor: 1, admin: 2, owner: 3 };
 
 export function roleChip(role, via) {
   if (!role) return `<span class="k-faint">—</span>`;
-  const title = via ? L(`tramite il gruppo ${via}`, `through the group ${via}`)
-                    : L("assegnato direttamente", "given directly");
+  const title = via ? t("kit.role.via", { via })
+                    : t("kit.role.direct");
   return `<span class="k-role ${escapeHtml(role)}${via ? " via" : ""}" title="${escapeHtml(title)}">`
-    + `${escapeHtml(ROLE_WORD()[role] || role)}${via ? " · " + L("gruppo", "group") : ""}</span>`;
+    + `${escapeHtml(ROLE_WORD()[role] || role)}${via ? " · " + t("kit.role.group") : ""}</span>`;
 }
 
 export function profileChip(profile) {
@@ -80,7 +83,7 @@ export function drawer({ title, subtitle = "", chips = "", tabs, onClose }) {
     <div class="k-dh"><div><h2>${escapeHtml(title)}</h2>
       ${subtitle ? `<p class="k-mono k-faint">${escapeHtml(subtitle)}</p>` : ""}
       <div class="k-chips">${chips}</div></div>
-      <button type="button" class="k-x" aria-label="${escapeHtml(L("Chiudi", "Close"))}">×</button></div>
+      <button type="button" class="k-x" aria-label="${escapeHtml(t("kit.drawer.close"))}">×</button></div>
     <div class="k-tabs" role="tablist">${tabs.map(([id, t], i) =>
       `<button role="tab" data-tab="${escapeHtml(id)}" aria-selected="${i === 0}">${escapeHtml(t)}</button>`).join("")}</div>
     <div class="k-db"></div>`;
@@ -93,7 +96,7 @@ export function drawer({ title, subtitle = "", chips = "", tabs, onClose }) {
   box.querySelector(".k-x").addEventListener("click", close);
   const open = async (id) => {
     box.querySelectorAll(".k-tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === id)));
-    body.innerHTML = `<p class="k-faint">${escapeHtml(L("Carico…", "Loading…"))}</p>`;
+    body.innerHTML = `<p class="k-faint">${escapeHtml(t("kit.drawer.loading"))}</p>`;
     try { await tabs.find(([t]) => t === id)[2](body, { reopen: () => open(id), close }); }
     catch (error) { body.innerHTML = `<p class="k-note bad">${escapeHtml(error.message)}</p>`; }
   };

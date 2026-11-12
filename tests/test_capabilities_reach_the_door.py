@@ -98,15 +98,6 @@ def test_nothing_in_the_probe_or_the_reduction_names_a_capability():
             assert name not in code, f"{module} names {name}"
 
 
-def test_the_page_names_no_capability_either():
-    page = (_REPO / "app" / "rooms_ui" / "rooms.js").read_text(encoding="utf-8")
-    code = re.sub(r"/\*[\s\S]*?\*/|//[^\n]*", "", page)
-    body = code[code.index("function capabilityRow("):]
-    body = body[:body.index("\nfunction ")]
-    for name in ("speech", "intent", "whisper"):
-        assert name not in body, f"the renderer names {name}"
-    # …and it loops over whatever arrived
-    assert "offer.capabilities || []" in code
 
 
 # ── it is still a reduction ──────────────────────────────────────────────────

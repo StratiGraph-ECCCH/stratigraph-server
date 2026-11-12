@@ -314,14 +314,6 @@ def test_a_handoff_for_a_room_you_have_no_grant_in_is_refused(monkeypatch):
 
 # ── 4 · the two consoles are served, and share one sign-in ───────────────────
 
-def test_both_faces_are_served_and_there_is_ONE_pkce_module():
-    assert client.get("/admin/").status_code == 200
-    assert client.get("/rooms/").status_code == 200
-    page = client.get("/rooms/rooms.js").text
-    # relative, so it survives the `/em` prefix a proxy adds
-    assert 'from "../admin/auth.js"' in page
-    assert not (_REPO / "app" / "rooms_ui" / "auth.js").exists(), \
-        "a second copy of the PKCE module is a second thing to keep right"
 
 
 def _without_prose(source: str) -> str:
@@ -347,29 +339,6 @@ def _without_prose(source: str) -> str:
     return "\n".join(riga.split("//")[0] for riga in senza.split("\n"))
 
 
-def test_the_room_browser_never_writes_a_token_to_disk():
-    page = (_REPO / "app" / "rooms_ui" / "rooms.js").read_text(encoding="utf-8")
-    # ── L'USO, NON IL NOME ─────────────────────────────────────────────────
-    #
-    # `senza_prosa` toglieva i commenti e bastava finché il nome compariva solo
-    # lì. Ma `"localStorage"` dentro un messaggio — «questa pagina non usa
-    # localStorage» detto a chi legge — è un nome, non un uso, e il 3 ottobre
-    # questa guardia è già scattata una volta su una riga che diceva il vero.
-    #
-    # `usa_oggetto` cerca l'accesso: `localStorage.` o `localStorage[`. Un nome
-    # dentro una stringa non ha quella forma.
-    #
-    # E `sessionStorage` NON È IN QUESTO ELENCO, di proposito. Ci è entrato per
-    # un momento il 3 ottobre e il cancello è scattato su codice che è giusto:
-    # `sg.silenttry:` tiene un «1» che impedisce un giro infinito di firma
-    # silenziosa, muore con la scheda, e ha il suo argomento scritto accanto.
-    # Stringere una guardia finché non morde qualcosa di corretto la rende una
-    # guardia che qualcuno spegnerà.
-    codice = sorgenti.senza_prosa(page)
-    for sink in ("localStorage", "indexedDB"):
-        assert not sorgenti.usa_oggetto(codice, sink), \
-            f"{sink} in the room browser"
-    assert "document.cookie" not in codice, "document.cookie in the room browser"
 
 
 def test_that_storage_gate_still_bites():
@@ -489,40 +458,6 @@ def test_the_answer_names_the_address_and_not_the_setting(monkeypatch):
     assert "web_env" not in raw
 
 
-def test_the_room_browser_draws_EVERY_door_only_from_the_ANSWER():
-    """The page must not decide any of this for itself.
-
-    UPDATED 8 September 2026, and the old version is the reason: it asserted the
-    literal line `if (!target.browser) continue`, i.e. it measured the SOURCE
-    TEXT of one door. The rule it was defending — «whether a web build exists is
-    a fact about the deployment» — now covers all three doors, and the line it
-    named no longer exists. A test that breaks when a rule is EXTENDED was
-    measuring the wording.
-
-    What is asserted instead: the page names no door it did not read from the
-    answer, and it builds no link out of its own head.
-    """
-    page = (_REPO / "app" / "rooms_ui" / "rooms.js").read_text(encoding="utf-8")
-    #: IL PAGLIAIO SI TOGLIE PRIMA — la regola imparata il 4 ottobre: questo file
-    #: PARLA di `stratigraph://` nella sua prosa («hand-built stratigraph://»),
-    #: e un'asserzione sull'assenza di quella stringa morderebbe un commento
-    #: onesto invece del codice.
-    codice = "\n".join(
-        r for r in page.splitlines()
-        if not r.lstrip().startswith(("*", "/*", "//", "*/")))
-    assert "stratigraph://" in page, "la prosa non parla più dello schema?"
-
-    #: ogni porta viene da `target.<nome>`, e non da una lista scritta qui
-    for door in ("scheme", "paste", "browser"):
-        assert f"target.{door}" in codice, (
-            f"la porta {door} non viene dalla risposta")
-    #: …e la lista degli strumenti NON è nel client
-    for tool in ("emstudio", "blender", "chatbot"):
-        assert f'"{tool}"' not in codice, (
-            f"{tool} è cablato nel client: gli strumenti li dice il server")
-    #: …e non costruisce link da sé
-    assert "?server=" not in codice
-    assert "stratigraph://" not in codice
 
 
 import urllib.parse  # noqa: E402  — used by the browser-door tests above

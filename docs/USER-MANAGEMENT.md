@@ -124,7 +124,7 @@ cd stratigraph-server/dev-stack && ./fcn-up.sh   # starts EMStudio's dev server 
 ## HOWTO · d · the OPERATOR's face (the node console)
 
 ```
-open https://em.localhost:8443/em/admin/
+open https://em.localhost:8443/em/home/
 ```
 
 It **signs in against this node's own realm** — Authorization Code + PKCE, the
@@ -159,8 +159,8 @@ replaces the secret). The browser client is `em-console`
 (`EM_CONSOLE_CLIENT_ID`), never the confidential `em-server` one — that client
 has a secret and does not do the standard flow, so pointing a browser at it fails
 at the last step with a message about the client instead of about the
-configuration. The realm must list the console's redirect (`…/admin/` bare and
-`…/em/admin/` behind a proxy); the dev realm lists both, plus an **audience
+configuration. The realm must list the console's redirect (`…/home/` bare and
+`…/em/home/` behind a proxy — `…/admin/` until 11 November 2026); the dev realm lists both, plus an **audience
 mapper** adding `StratiGraph Server` — without it the login works and every API call comes
 back 401.
 

@@ -63,9 +63,14 @@ for a in "$@"; do
     *) ARG_HOST="$a" ;;
   esac
 done
-#: il nome scelto una volta (`FCN_HOST` in .env.dev), come in fcn-up.sh; e su un
-#: nodo da campo, senza niente, il nome di rete della macchina (`<host>.local`)
-FCN_HOST_SAVED="$( [ -f .env.dev ] && grep -E '^FCN_HOST=' .env.dev | tail -1 | cut -d= -f2- || true)"
+#: il nome di un NODO DA CAMPO (`FCN_HOST` in .env.dev, lo scrive
+#: fcn-field-setup.sh), come in fcn-up.sh: solo lui ha un nome che dura (9 nov
+#: 2026). Un nodo qualunque prende l'argomento o em.localhost. E su un nodo da
+#: campo, senza niente, il nome di rete della macchina (`<host>.local`).
+FCN_HOST_SAVED=""
+if [ "$FIELD" = "yes" ] || { [ -f .env.dev ] && grep -qE '^EM_NODE_KIND=field' .env.dev; }; then
+  FCN_HOST_SAVED="$( [ -f .env.dev ] && grep -E '^FCN_HOST=' .env.dev | tail -1 | cut -d= -f2- || true)"
+fi
 if [ -z "$ARG_HOST" ] && [ -z "$FCN_HOST_SAVED" ] && [ "$FIELD" = "yes" ]; then
   _h="$(sg_local_hostname)"; [ -n "$_h" ] && ARG_HOST="${_h}.local"
 fi
@@ -376,13 +381,22 @@ fi
 # `platform.sh` risponde a entrambe, e questo script NON le riscrive.
 say ""
 say "3 · docker"
-if sg_docker_ready; then
+#: L'ESITO, NON IL TENTATIVO (11 novembre 2026). Era
+#:
+#:     sg_ensure_docker || true
+#:     male "docker non risponde (vedi sopra)."
+#:
+#: con il commento «qui non lo si chiama per avviare niente» — ma su macOS
+#: `sg_ensure_docker` AVVIA Colima (`platform.sh`, `colima start`) e torna 0 se
+#: poi Docker risponde. `|| true` buttava via quella risposta e `male` stava
+#: fuori da ogni condizione: misurato sulla corsa di E.D., Colima partiva in 22
+#: secondi, `docker info` rispondeva, e l'installatore chiudeva con «✖ docker
+#: non risponde» rifiutando di proseguire. Riportava lo stato di PRIMA del
+#: rimedio. Adesso si chiede DOPO: il rimedio c'è (è il suo mestiere, e sugli
+#: altri sistemi stampa la frase giusta), e il guaio si conta solo se resta.
+if sg_docker_ready || sg_ensure_docker; then
   ok "docker risponde"
 else
-  #: `sg_ensure_docker` stampa il rimedio giusto per QUESTO sistema. Qui non lo
-  #: si chiama per avviare niente su una macchina di qualcun altro: si chiama
-  #: perché la sua frase è la frase giusta, e si registra il guaio.
-  sg_ensure_docker || true
   male "docker non risponde (vedi sopra)."
 fi
 #: il compose l'ha già trovato il passo 1 — dirlo qui è dove chi legge lo cerca

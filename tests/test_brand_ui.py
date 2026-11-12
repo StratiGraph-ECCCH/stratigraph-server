@@ -29,8 +29,13 @@ BRAND = APP / "brand"
 FACES = {
     "node console": (APP / "node_admin" / "index.html",
                      APP / "node_admin" / "console.css"),
-    "room browser": (APP / "rooms_ui" / "index.html",
-                     APP / "rooms_ui" / "rooms.css"),
+    #: since 11 November 2026 the room browser (`rooms_ui/`) is gone; the two
+    #: pages beside the house are the tools page and the node's showcase
+    #: (it has no sheet of its own: it wears the house's, `console.css` first)
+    "tools page": (APP / "tools_ui" / "index.html",
+                   APP / "node_admin" / "console.css"),
+    "showcase": (APP / "vetrina" / "index.html",
+                 APP / "vetrina" / "vetrina.css"),
 }
 
 #: the WP1 guidebook's palette, plus the derived values the theme declares
@@ -99,11 +104,13 @@ def test_the_theme_is_imported_RELATIVELY_so_it_survives_the_proxy():
     `/brand/…` would be right for one and 404 for the other."""
     console = (APP / "node_admin" / "console.css").read_text(encoding="utf-8")
     assert '@import url("../brand/stratigraph-theme.css")' in console
-    # …and the room browser gets it through that same import, not a second one
-    rooms = (APP / "rooms_ui" / "index.html").read_text(encoding="utf-8")
-    assert '"../admin/console.css"' in rooms
-    assert rooms.index('"../admin/console.css"') < rooms.index('"./rooms.css"'), \
+    # …and the pages beside the house get it through that same import, not a
+    # second one — relative to where EACH page sits (`/tools/`, and `/`)
+    tools = (APP / "tools_ui" / "index.html").read_text(encoding="utf-8")
+    assert tools.index('"../home/console.css"') < tools.index('"../home/kit.css"'), \
         "the console sheet must come first: it is the one that imports the theme"
+    showcase = (APP / "vetrina" / "index.html").read_text(encoding="utf-8")
+    assert showcase.index('"home/console.css"') < showcase.index('"vetrina/vetrina.css"')
 
 
 def test_neither_stylesheet_names_a_colour():

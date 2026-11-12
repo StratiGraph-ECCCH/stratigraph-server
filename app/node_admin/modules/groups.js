@@ -7,26 +7,26 @@
  * access lists, as `/v1/admin/rooms` projects them.
  */
 import { api, confirmNamed, escapeHtml, register } from "../console.js";
-import { L, button, drawer, head, roleChip, toast } from "../kit.js";
+import { button, drawer, head, roleChip, toast } from "../kit.js";
+import { t } from "../i18n.js";
 
 async function render(root) {
   const [groups, rooms, me] = await Promise.all([
     api.get("/groups"), api.get("/admin/rooms"), api.get("/admin/whoami"),
   ]);
   root.innerHTML = "";
-  head(root, L("Gruppi", "Groups"),
-    escapeHtml(L("Un gruppo è una squadra: gli dai un ruolo in una stanza una volta sola, invece di aggiungere ogni persona in ogni stanza. Lo gestisce chi lo ha creato.",
-      "A group is a team: it gets a role in a room once, instead of adding every person to every room. Whoever created it manages it.")),
-    [button(L("Nuovo gruppo", "New group"), () => newGroup(root), "pri")]);
+  head(root, t("groups.title"),
+    escapeHtml(t("groups.lead")),
+    [button(t("groups.new"), () => newGroup(root), "pri")]);
   const grid = document.createElement("div");
   grid.className = "k-grid";
   grid.innerHTML = groups.map((g) => {
     const where = rooms.filter((r) => (r.groups || {})[g.id]);
     return `<div class="k-card k-click" tabindex="0" data-group="${escapeHtml(g.id)}">
-      <span class="k-k">${escapeHtml(L("gestito da ", "managed by ") + (g.owner || "—"))}</span>
+      <span class="k-k">${escapeHtml(t("groups.card.managedBy") + (g.owner || "—"))}</span>
       <b>${escapeHtml(g.name || g.id)}</b>
-      <span class="k-faint">${escapeHtml(L(`${g.members.length} persone · ruolo in ${where.length} stanze`, `${g.members.length} people · a role in ${where.length} rooms`))}</span></div>`;
-  }).join("") || `<p class="k-faint">${escapeHtml(L("Nessun gruppo su questo nodo.", "No group on this node."))}</p>`;
+      <span class="k-faint">${escapeHtml(t("groups.card.count", { people: g.members.length, rooms: where.length }))}</span></div>`;
+  }).join("") || `<p class="k-faint">${escapeHtml(t("groups.none"))}</p>`;
   root.appendChild(grid);
   grid.querySelectorAll("[data-group]").forEach((card) => {
     const open = () => openGroup(groups.find((g) => g.id === card.dataset.group), rooms, me, root);
@@ -36,12 +36,12 @@ async function render(root) {
 }
 
 async function newGroup(root) {
-  const name = window.prompt(L("Il nome del gruppo", "The group's name"));
+  const name = window.prompt(t("groups.new.prompt"));
   if (!name) return;
   const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
   try {
     await api.put(`/groups/${encodeURIComponent(id)}`, { id, name, members: [] });
-    toast(L("Gruppo creato: lo gestisci tu.", "Group created: you manage it."));
+    toast(t("groups.new.done"));
   } catch (error) { toast(error.message, "bad"); }
   await render(root);
 }
@@ -52,39 +52,38 @@ function openGroup(g, rooms, me, root) {
     title: g.name || g.id, subtitle: g.id,
     onClose: () => void render(root),
     tabs: [
-      ["members", L("Persone", "People"), async (body, d) => {
-        body.innerHTML = `${!mine ? `<p class="k-note">${escapeHtml(L("Solo chi ha creato il gruppo cambia chi ne fa parte.", "Only the group's creator changes who is in it."))}</p>` : ""}
+      ["members", t("groups.tab.people"), async (body, d) => {
+        body.innerHTML = `${!mine ? `<p class="k-note">${escapeHtml(t("groups.people.onlyCreator"))}</p>` : ""}
           <div class="k-list">${g.members.map((m) => `<div class="k-li"><div><b>${escapeHtml(m)}</b><small>ORCID</small></div><span data-m="${escapeHtml(m)}"></span></div>`).join("")
-            || `<div class="k-li"><span class="k-faint">${escapeHtml(L("Nessuno ancora.", "Nobody yet."))}</span></div>`}</div>
+            || `<div class="k-li"><span class="k-faint">${escapeHtml(t("groups.people.none"))}</span></div>`}</div>
           ${mine ? `<div class="k-form"><input id="k-g-add" placeholder="ORCID"></div>` : ""}`;
         if (!mine) return;
-        body.querySelectorAll("[data-m]").forEach((slot) => slot.appendChild(button(L("Togli", "Remove"), async () => {
+        body.querySelectorAll("[data-m]").forEach((slot) => slot.appendChild(button(t("groups.people.remove"), async () => {
           try { await api.del(`/groups/${encodeURIComponent(g.id)}/members/${encodeURIComponent(slot.dataset.m)}`);
-                g.members = g.members.filter((x) => x !== slot.dataset.m); toast(L("Tolto dalla squadra.", "Removed from the team.")); }
+                g.members = g.members.filter((x) => x !== slot.dataset.m); toast(t("groups.people.removed")); }
           catch (error) { toast(error.message, "bad"); }
           d.reopen();
         }, "warn")));
-        body.querySelector(".k-form").appendChild(button(L("Aggiungi", "Add"), async () => {
+        body.querySelector(".k-form").appendChild(button(t("groups.people.add"), async () => {
           const who = body.querySelector("#k-g-add").value.trim();
           if (!who) return;
-          try { const out = await api.put(`/groups/${encodeURIComponent(g.id)}/members/${encodeURIComponent(who)}`); g.members = out.members; toast(L("Aggiunto.", "Added.")); }
+          try { const out = await api.put(`/groups/${encodeURIComponent(g.id)}/members/${encodeURIComponent(who)}`); g.members = out.members; toast(t("groups.people.added")); }
           catch (error) { toast(error.message, "bad"); }
           d.reopen();
         }, "pri"));
       }],
-      ["rooms", L("Stanze", "Rooms"), async (body) => {
+      ["rooms", t("groups.tab.rooms"), async (body) => {
         const where = rooms.filter((r) => (r.groups || {})[g.id]);
         body.innerHTML = `<div class="k-list">${where.map((r) => `<div class="k-li"><div><b>${escapeHtml(r.title || r.room_id)}</b><small>${escapeHtml(r.room_id)}</small></div>${roleChip(r.groups[g.id])}</div>`).join("")
-          || `<div class="k-li"><span class="k-faint">${escapeHtml(L("Nessuna stanza ancora.", "No room yet."))}</span></div>`}</div>
-          <p class="k-note">${escapeHtml(L("Il ruolo si dà dalla stanza, in «Persone e ruoli». Togliere qualcuno dal gruppo gli toglie solo i ruoli che aveva tramite il gruppo.",
-            "The role is given from the room, in «People and roles». Removing somebody from the group removes only the roles they held through it."))}</p>`;
+          || `<div class="k-li"><span class="k-faint">${escapeHtml(t("groups.rooms.none"))}</span></div>`}</div>
+          <p class="k-note">${escapeHtml(t("groups.rooms.note"))}</p>`;
       }],
-      ["delete", L("Elimina", "Delete"), async (body, d) => {
-        body.innerHTML = `<div class="k-danger"><h3>${escapeHtml(L("Elimina il gruppo", "Delete the group"))}</h3>
-          <p class="k-faint">${escapeHtml(L("I ruoli dati al gruppo nelle stanze smettono di valere.", "The roles given to the group in rooms stop counting."))}</p><div data-slot></div></div>`;
-        const b = button(L("Elimina", "Delete"), async () => {
-          if (!confirmNamed(L("l'eliminazione del gruppo", "deleting the group"), g.name || g.id)) return;
-          try { await api.del(`/groups/${encodeURIComponent(g.id)}`); toast(L("Gruppo eliminato.", "Group deleted.")); d.close(); }
+      ["delete", t("groups.tab.delete"), async (body, d) => {
+        body.innerHTML = `<div class="k-danger"><h3>${escapeHtml(t("groups.delete.title"))}</h3>
+          <p class="k-faint">${escapeHtml(t("groups.delete.why"))}</p><div data-slot></div></div>`;
+        const b = button(t("groups.tab.delete"), async () => {
+          if (!confirmNamed(t("groups.delete.confirm"), g.name || g.id)) return;
+          try { await api.del(`/groups/${encodeURIComponent(g.id)}`); toast(t("groups.delete.done")); d.close(); }
           catch (error) { toast(error.message, "bad"); }
         }, "warn");
         b.disabled = !mine;
@@ -94,4 +93,4 @@ function openGroup(g, rooms, me, root) {
   });
 }
 
-register({ id: "groups", title: L("Gruppi", "Groups"), render });
+register({ id: "groups", title: () => t("groups.title"), render });

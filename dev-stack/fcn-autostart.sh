@@ -17,8 +17,9 @@
 #   · macOS: un LaunchAgent dell'utente, che parte al login (sul Mac del
 #     cantiere conviene il login automatico: Impostazioni → Utenti e gruppi).
 #
-# Il nome del nodo lo legge fcn-up.sh da `.env.dev` (`FCN_HOST`), quindi qui
-# non c'è niente da ripetere. Il registro dell'ultimo avvio: dev-stack/fcn-boot.log
+# Il nome del nodo lo legge fcn-up.sh da `.env.dev` (`FCN_HOST`, scritto da
+# fcn-field-setup.sh, letto solo se `EM_NODE_KIND=field`), quindi qui non c'è
+# niente da ripetere. Il registro dell'ultimo avvio: dev-stack/fcn-boot.log
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || [ -z "${1:-}" ]; then
   awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next} /^[[:space:]]*$/{next} {exit}' "$0"; exit 0
 fi

@@ -1,0 +1,47 @@
+<!doctype html>
+<!--
+  GLI STRUMENTI DEL NODO — una pagina loro (E.D., 11 novembre 2026).
+
+  Erano una sezione della casa raggiunta da un frammento (`/admin/#tools`), più
+  un ramo di codice per chi non aveva firmato. Adesso hanno un indirizzo,
+  `/tools/`, e sono pubblici: sapere come si installa EMStudio non richiede un
+  account. Il contenuto è quello del modulo `modules/tools.js` del 30 ottobre,
+  promosso e non riscritto: una scheda per strumento, i suoi passi, il suo
+  pulsante. I manuali stanno online (E.D.: «per documentazione si va
+  all'online»), e gli indirizzi da cui scaricare li dice il nodo (`/v1/node` →
+  `tools`), che un nodo senza rete può far puntare al suo specchio.
+
+  Lo stile e il dizionario sono quelli della casa (`../home/`): una convenzione
+  per superficie, e questa pagina è la stessa superficie.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StratiGraph · tools</title>
+  <link rel="icon" href="../brand/logo/favicon-deep-charcoal.svg" type="image/svg+xml">
+  <script src="../brand/skin.js"></script>
+  <link rel="stylesheet" href="../home/console.css">
+  <link rel="stylesheet" href="../home/kit.css">
+</head>
+<body class="tools-page">
+  <header class="bar">
+    <img class="mark" src="../brand/logo/favicon-deep-charcoal.svg" alt=""
+         width="22" height="22">
+    <span class="wordmark">StratiGraph</span>
+    <span class="sub" id="app-sub">tools</span>
+    <span class="spacer"></span>
+    <select id="skin" class="lang"></select>
+    <select id="lang" class="lang"></select>
+  </header>
+  <nav class="node-bar" id="node-bar" aria-label="This node"></nav>
+  <!-- IL PAVIMENTO: un'ancora relativa in HTML statico, che non dipende da
+       niente — la barra è composta da `/v1/node` e può tacere. `../` è la
+       vetrina del nodo (`/em/`). -->
+  <p class="note"><a class="more" href="../" id="back-door">← this node</a></p>
+  <main id="tools" tabindex="-1">
+    <p class="muted">Loading…</p>
+  </main>
+  <script type="module" src="./tools.js"></script>
+</body>
+</html>

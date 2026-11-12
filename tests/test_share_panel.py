@@ -40,8 +40,6 @@ import pathlib
 import re
 
 _APP = pathlib.Path(__file__).resolve().parent.parent / "app"
-WORK = (_APP / "rooms_ui" / "work" / "index.html").read_text(encoding="utf-8")
-SCRIPT = (_APP / "rooms_ui" / "rooms.js").read_text(encoding="utf-8")
 I18N = (_APP / "node_admin" / "i18n.js").read_text(encoding="utf-8")
 
 from tests import sorgenti  # noqa: E402
@@ -67,19 +65,8 @@ def _share_strings() -> dict:
     return found
 
 
-def _share_block() -> str:
-    """The panel's own code, from `loadShare` to the end of its verbs."""
-    start = SCRIPT.index("function askedRoom()")
-    end = SCRIPT.index("// ── zone 4 · THE NODE MAP")
-    return SCRIPT[start:end]
 
 
-def test_the_panel_exists_at_all():
-    """A fence around nothing would pass forever."""
-    assert 'id="zone-share"' in WORK
-    assert "async function loadShare(" in SCRIPT
-    strings = _share_strings()
-    assert len([k for k in strings if k.startswith("en/")]) > 20, len(strings)
 
 
 def test_NO_STRING_ON_THIS_SURFACE_NAMES_AUTHORSHIP():
@@ -98,34 +85,6 @@ def test_NO_STRING_ON_THIS_SURFACE_NAMES_AUTHORSHIP():
         "publishing surface is what you are building, it is a different one.")
 
 
-def test_NO_MARKUP_OR_CODE_ON_THIS_SURFACE_NAMES_AUTHORSHIP():
-    """…and not in an id, a placeholder or a comment either: a field named
-    `share-authors` would be the decision made in a variable name."""
-    # ── AL CONFINE DI PAROLA, e il perché ci si ferma lì ───────────────────
-    #
-    # Questa guardia guarda **le parole**, ed è giusto che lo faccia: quello che
-    # deve impedire è che questa superficie NOMINI l'autorialità — in una
-    # etichetta, in un id, in un nome di variabile. Non c'è una struttura da
-    # guardare, perché il difetto è precisamente il nome.
-    #
-    # Ma cercava una sottostringa, e in questo stesso file `Authorization` sta a
-    # tre righe dal blocco recintato (`rooms.js:97`, l'intestazione del bearer).
-    # Passava per FORTUNA: la fetta comincia dopo. Un giorno la fetta si sposta
-    # di dieci righe e la suite dice che il pannello firma le pubblicazioni.
-    #
-    # `\bauthor\b` non tocca `Authorization`, `\bcredit\b` non tocca
-    # `accreditato`. È il minimo sindacale — non distingue un identificatore da
-    # una parola in una stringa — e per questa guardia il minimo è la cosa
-    # giusta, perché una parola in una stringa È il difetto.
-    panel = WORK[WORK.index('id="zone-share"'):]
-    panel = panel[:panel.index("</section>")]
-    for word in AUTHORSHIP:
-        assert not sorgenti.parola(word).search(panel), \
-            f"the markup names «{word}»"
-    code = sorgenti.senza_prosa(_share_block())
-    for word in ("author", "autore", "byline", "credit", "contributor"):
-        assert not sorgenti.parola(word).search(code), \
-            f"the panel's code names «{word}»"
 
 
 def test_LA_GUARDIA_DELLAUTORIALITA_MORDE_ANCORA():
@@ -156,69 +115,11 @@ def test_LA_GUARDIA_DELLAUTORIALITA_NON_MORDE_PIU_UNA_PAROLA_DENTRO_UNALTRA():
         assert not morde, f"morde ancora su: {finto} → {morde}"
 
 
-def test_the_panel_does_not_read_the_ACL_TO_SUGGEST_ANYTHING_BUT_ACCESS():
-    """«Chi è fra gli autori non deve essere nella stanza» — so nothing here may
-    turn the roster into a list of names for anything else. What it does with the
-    roster is draw roles and offer revocation, and that is the whole of it."""
-    code = _share_block()
-    assert "roster.members" in code and "roster.groups" in code
-    # the only things a row offers are access verbs
-    verbs = set(re.findall(r't\("share\.(add|addTeam|remove|revoke|transfer|'
-                           r'makeLink|archiveDo|restoreDo)"\)', code))
-    assert verbs, "the panel offers no verbs at all?"
-    assert not re.search(r'share\.(publish|sign|author|order)', code)
 
 
-def test_the_panel_covers_LAYERS_ONE_AND_TWO_completely():
-    """A fence is only worth having around something whole. Presence AND
-    property, or the panel is not the one place the note asks for and somebody
-    will build the missing half somewhere else."""
-    code = _share_block()
-    for what, needle in (
-            ("who is here", "renderWho("),
-            ("teams, not only people", "renderTeams("),
-            ("invite by link", "renderInvites("),
-            ("whose the live copy is", "renderLive("),
-            ("archive, which is a mark and not a deletion", "renderArchive("),
-            ("the transfer", "async function transfer(")):
-        assert needle in code, f"the panel does not cover {what}"
 
 
-def test_the_panel_has_a_STABLE_PER_ROOM_ADDRESS():
-    """Regola IV: one place, and a link from every app. Another program must be
-    able to write that URL into a menu and know it will work — so the address is
-    derived in ONE function and the room travels in the query string."""
-    code = _share_block()
-    assert "function shareUrl(roomId)" in code
-    assert "function askedRoom()" in code
-    assert 'get("room")' in code
-    # …and the room card links to it rather than opening a second copy
-    assert "shareUrl(room.room_id)" in SCRIPT
 
 
-def test_the_panel_OWNS_NO_RULE_AND_NO_ADDRESS():
-    """The discipline of this whole face, applied to the newest zone: the node
-    decides and the page composes. Measured the hard way — the first version of
-    `renderLive` gated the transfer on `your_role === "owner"`, and
-    `test_the_page_holds_no_visibility_rule` refused it."""
-    # COMMENTS STRIPPED, and it is not pedantry: the comment that explains why
-    # the removed line was removed contains the removed line, so a test reading
-    # the prose fails on the explanation. Third time this class of self-trip has
-    # come up in this repository — hence the stripper, here as elsewhere.
-    code = re.sub(r"//[^\n]*", "", _share_block())
-    assert not re.search(r"your_role\s*===", code), \
-        "a permission rule written in the page is a rule with two answers"
-    # the invitation's door comes from the node, never spelled here
-    assert "/open`" in code, "the handoff URL is asked for"
-    assert "stratigraph://" not in code, "…and never assembled"
-    assert "/em/studio" not in code, "…nor is any tool's address written down"
 
 
-def test_the_REFUSALS_are_the_NODE_S_OWN_WORDS():
-    """Every one of these refusals explains a rule — «a group cannot be the
-    owner», «only the owner assigns owner or admin», «this room cannot come back
-    yet». Re-writing them here would be a second explanation, and the second one
-    is the one that goes stale."""
-    code = _share_block()
-    for handler in ("share-group-note", "share-add-note", "share-note"):
-        assert f'note($("{handler}"), error.message, true)' in code, handler

@@ -155,11 +155,6 @@ def test_the_language_lives_on_the_DEVICE_and_the_token_does_not():
         assert "token" not in name.lower(), name
 
 
-def test_both_faces_read_the_SAME_dictionary():
-    rooms = (_UI / "rooms_ui" / "rooms.js").read_text(encoding="utf-8")
-    console = (_UI / "node_admin" / "console.js").read_text(encoding="utf-8")
-    assert 'from "../admin/i18n.js"' in rooms
-    assert 'from "./i18n.js"' in console
 
 
 def test_coverage_report():

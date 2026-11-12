@@ -159,9 +159,14 @@ def test_the_pages_are_DERIVED_and_the_asset_mount_is_not_one():
     assert "brand" not in pages, (
         "the asset mount is being treated as a page; nobody signs in from "
         "`/brand/`, and requiring a redirect URI for it would be noise")
-    for expected in ("admin", "rooms"):
+    #: since 11 November 2026: the house (`/home/`) and the tools page. `/admin`
+    #: is still mounted, as FILES (other faces import its modules), and so are
+    #: `/vendor` and `/vetrina` — none of the three is a page anybody signs in from
+    for expected in ("home", "tools"):
         assert expected in pages, f"{expected} is not mounted as a page any more"
-    assert len(pages) >= 3, pages
+    for files in ("admin", "vendor", "vetrina"):
+        assert files not in pages, f"/{files} is treated as a page"
+    assert len(pages) >= 2, pages
 
 
 def test_EVERY_MOUNTED_PAGE_IS_A_REDIRECT_URI_IN_THE_DEV_REALM():

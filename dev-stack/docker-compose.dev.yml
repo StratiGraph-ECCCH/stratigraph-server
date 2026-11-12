@@ -760,6 +760,13 @@ services:
         S3DGRAPHY_VERSION: *s3dgraphy_version
     image: stratigraph-server:dev
     container_name: em-dev-server
+    # LA SONDA DI EMSTUDIO (11 novembre 2026): `/v1/node` dichiara EMStudio fra
+    # gli `offers` con il suo stato, e in sviluppo lo studio è Vite sull'host.
+    # Misurato da questo contenitore su Colima: `host.docker.internal:5173/em/
+    # studio/` → 200 anche senza questa riga; su Linux nativo il nome non esiste
+    # se non lo si dichiara — la stessa ragione della riga gemella in `caddy`.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       keycloak:
         condition: service_healthy
@@ -954,6 +961,13 @@ services:
       # comunque una porta vera, quella desktop, perché il suo bundle registra
       # davvero lo schema (misurato in EMStudio/apps/desktop/src-tauri/).
       EM_EMSTUDIO_WEB_URL: "${EM_EMSTUDIO_WEB_URL:-}"
+      # …e DOVE BUSSARE per sapere se risponde (11 novembre 2026): il recapito
+      # INTERNO della sonda di EMStudio fra gli `offers` (`node_health.py`,
+      # `_probe_studio`). Senza default per la stessa ragione della riga sopra:
+      # un default affermerebbe «c'è uno studio da sorvegliare» dove non c'è.
+      # Lo esporta `fcn-up.sh` a ogni corsa — il Vite che accende lui, oppure
+      # vuoto — quindi `.env.dev` non lo porta.
+      EM_EMSTUDIO_INTERNAL: "${EM_EMSTUDIO_INTERNAL:-}"
       # --- the NODE MAP's browser addresses ------------------------------------
       # HERE they are real and known, which is exactly why they are set here and
       # empty in the production template: on this stack Keycloak's console and

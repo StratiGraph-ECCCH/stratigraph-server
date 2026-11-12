@@ -72,7 +72,11 @@ export function prefixOf(here, mine) {
 /** Which of the node's faces is the page we are on, by its path. "" when none. */
 export function faceHere(here, faces) {
   const path = String(here || "/");
-  const pages = (faces || []).filter((f) => f.page && f.path.endsWith("/"));
+  //  LA RADICE NON SI RICONOSCE DAL PERCORSO (11 novembre 2026): `/` è dentro
+  //  ogni indirizzo, quindi una faccia `/` vincerebbe su `/catalog/ui/` e la
+  //  barra del catalogo comporrebbe `/catalog/ui/home/`. La pagina che È la
+  //  radice (la vetrina) lo dichiara a `mountBar` con `face: "/"`.
+  const pages = (faces || []).filter((f) => f.page && f.path.endsWith("/") && f.path !== "/");
   //  the LONGEST match, so `/rooms/` does not win over a hypothetical
   //  `/rooms/work/` — measured as a rule rather than trusted to list order
   let best = "";
@@ -97,7 +101,7 @@ export function faceHere(here, faces) {
 export function barPlan(state) {
   const faces = state.faces || [];
   const here = state.here || "/";
-  const mine = faceHere(here, faces);
+  const mine = state.face || faceHere(here, faces);
   const prefix = prefixOf(here, mine);
   const rows = [];
 
@@ -155,7 +159,7 @@ export function barPlan(state) {
  * answer leaves the bar with what a page always has, which is nothing, and says
  * so in one line. A visitor must never see a broken bar.
  */
-export async function mountBar(host, { read, operator = false, t = null }) {
+export async function mountBar(host, { read, operator = false, t = null, face = "" }) {
   if (!host) return () => {};
   //: IL DIZIONARIO QUANDO CE L'HA, l'etichetta del nodo altrimenti. `t()` di
   //: questo repo torna LA CHIAVE quando non traduce (`i18n.js`), quindi
@@ -184,7 +188,7 @@ export async function mountBar(host, { read, operator = false, t = null }) {
     }
     const plan = barPlan({
       faces: node.faces, offers: node.offers,
-      here: window.location.pathname, operator: isOperator,
+      here: window.location.pathname, operator: isOperator, face,
     });
     for (const row of plan.rows) {
       const a = document.createElement("a");

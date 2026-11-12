@@ -4,17 +4,18 @@
  *
  * Una riga per stanza, e su ogni riga le sue porte: EMStudio, nel browser, sul
  * telefono (il QR), EMtools. Le porte NON si scrivono qui: le dice il nodo
- * (`GET /v1/rooms/{id}/open`), come in `rooms_ui/rooms.js`. Accanto a ogni
+ * (`GET /v1/rooms/{id}/open`). Accanto a ogni
  * porta che chiede un programma installato, la strada per installarlo.
  *
- * Dove finisce una stanza (persone, inviti, chi vede lo studio) è ancora la
- * pagina della stanza: `../work/?room=…`. Il secondo passo la porta qui dentro.
+ * La stanza si apre qui dentro (persone, inviti, chi vede lo studio): `#room=…`,
+ * o `?room=…` dei link vecchi. Gli strumenti da installare sono una pagina loro,
+ * `../tools/` (11 novembre 2026).
  */
 import { api, escapeHtml, register, show } from "../console.js";
-import { L, ROLE_WORD, button, head, toast } from "../kit.js";
+import { ROLE_WORD, button, head, toast } from "../kit.js";
+import { t } from "../i18n.js";
 import { openRoom } from "./rooms.js";
 
-let tools = null;   // il modulo Strumenti, per i link «installa»
 let home = null;    // questa sezione, per ridisegnarla quando la stanza si chiude
 let operator = false;
 
@@ -24,7 +25,6 @@ let operator = false;
 function openHere(room) {
   openRoom(room, {}, null, { operator, onClose: () => { if (home) void show(home); } });
 }
-export function setToolsModule(m) { tools = m; }
 
 async function render(root) {
   const [rooms, me, op] = await Promise.all([
@@ -42,9 +42,8 @@ async function render(root) {
     try {
       const got = await api.post("/join", { token: join });
       toast(got.already_had
-        ? L(`Eri già nella stanza «${got.title}».`, `You were already in «${got.title}».`)
-        : L(`Sei entrato nella stanza «${got.title}» come ${ROLE_WORD()[got.role] || got.role}.`,
-            `You joined «${got.title}» as ${ROLE_WORD()[got.role] || got.role}.`));
+        ? t("home.join.already", { title: got.title })
+        : t("home.join.done", { title: got.title, role: ROLE_WORD()[got.role] || got.role }));
       return render(root);
     } catch (error) { toast(error.message, "bad"); }
   }
@@ -55,17 +54,15 @@ async function render(root) {
   root.innerHTML = "";
   const actions = [];
   if (me.may_create) {
-    actions.push(button(L("Nuova stanza", "New room"), () => void createRoom(root), "pri"));
+    actions.push(button(t("home.new"), () => void createRoom(root), "pri"));
   }
-  head(root, L("Le tue stanze", "Your rooms"),
-    escapeHtml(L("Dove stai lavorando adesso. Apri una stanza nello strumento che hai davanti.",
-                 "Where you are working now. Open a room in the tool in front of you.")),
+  head(root, t("home.title"),
+    escapeHtml(t("home.lead")),
     actions);
   if (!me.may_create) {
     const p = document.createElement("p");
     p.className = "k-faint";
-    p.textContent = L("Per aprire una stanza nuova chiedi a chi gestisce il nodo.",
-                      "To open a new room, ask whoever runs this node.");
+    p.textContent = t("home.askToCreate");
     root.appendChild(p);
   }
 
@@ -75,9 +72,7 @@ async function render(root) {
   list.className = "h-rooms";
   root.appendChild(list);
   if (!live.length) {
-    list.innerHTML = `<p class="k-faint">${escapeHtml(L(
-      "Non hai ancora un ruolo in nessuna stanza di questo nodo.",
-      "You hold no role in any room of this node yet."))}</p>`;
+    list.innerHTML = `<p class="k-faint">${escapeHtml(t("home.noRooms"))}</p>`;
   }
   for (const room of live) list.appendChild(card(room));
   const wanted = asked && rooms.find((r) => r.room_id === asked);
@@ -87,7 +82,7 @@ async function render(root) {
   if (gone.length) {
     const more = document.createElement("details");
     more.className = "h-archived";
-    more.innerHTML = `<summary>${escapeHtml(L(`Archiviate · ${gone.length}`, `Archived · ${gone.length}`))}</summary>
+    more.innerHTML = `<summary>${escapeHtml(t("home.archived", { n: gone.length }))}</summary>
       <p>${gone.map((r) => escapeHtml(r.title || r.room_id)).join(" — ")}</p>`;
     root.appendChild(more);
   }
@@ -103,10 +98,10 @@ function card(room) {
   const knows = ["owner", "admin"].includes(room.your_role);
   box.innerHTML = `<div class="h-room-head">
       <div><a class="h-room-title" href="#room=${encodeURIComponent(room.room_id)}">${escapeHtml(room.title || room.room_id)}</a>
-      <span class="h-room-line">${knows ? escapeHtml(L(`${people} ${people === 1 ? "persona" : "persone"}`, `${people} ${people === 1 ? "person" : "people"}`)) : ""}${room.implicit ? " · " + escapeHtml(L("ancora senza titolo", "no title yet")) : ""}</span></div>
+      <span class="h-room-line">${knows ? escapeHtml(t(people === 1 ? "home.people.one" : "home.people.many", { n: people })) : ""}${room.implicit ? " · " + escapeHtml(t("home.untitled")) : ""}</span></div>
       <span class="h-role">${escapeHtml(ROLE_WORD()[room.your_role] || room.your_role || "")}</span>
     </div>
-    <div class="h-doors"><span class="h-doors-lab">${escapeHtml(L("Apri in", "Open in"))}</span></div>
+    <div class="h-doors"><span class="h-doors-lab">${escapeHtml(t("home.openIn"))}</span></div>
     <div class="h-said" role="status"></div>`;
   void addDoors(room, box);
   box.querySelector(".h-room-title").addEventListener("click", (e) => { e.preventDefault(); openHere(room); });
@@ -118,15 +113,15 @@ async function addDoors(room, box) {
   const said = box.querySelector(".h-said");
   let doors;
   try { doors = await api.get(`/rooms/${encodeURIComponent(room.room_id)}/open`); }
-  catch { said.textContent = L("Le porte di questa stanza non rispondono.", "This room's doors do not answer."); return; }
+  catch { said.textContent = t("home.doors.silent"); return; }
   const t = doors.tools || {};
   const ems = t.emstudio || {};
   const blend = t.blender || {};
   const field = t.chatbot || {};
   if (ems.scheme) row.appendChild(button("EMStudio", () => openApp(ems.scheme, said)));
-  if (ems.browser) row.appendChild(button(L("Nel browser", "In the browser"),
+  if (ems.browser) row.appendChild(button(t("home.door.browser"),
     () => window.open(new URL(ems.browser, location.href).href, "_blank", "noopener")));
-  if (field.browser) row.appendChild(button(L("Sul telefono", "On the phone"),
+  if (field.browser) row.appendChild(button(t("home.door.phone"),
     () => void showQr(box, new URL(field.browser, location.href).href)));
   if (blend.paste) row.appendChild(button("EMtools", () => void copyForBlender(blend.paste, said)));
   const spacer = document.createElement("span");
@@ -134,7 +129,7 @@ async function addDoors(room, box) {
   row.appendChild(spacer);
   const share = document.createElement("a");
   share.href = `#room=${encodeURIComponent(room.room_id)}`;
-  share.textContent = L("Persone e condivisione", "People and sharing");
+  share.textContent = t("home.share");
   share.addEventListener("click", (e) => { e.preventDefault(); openHere(room); });
   row.appendChild(share);
 }
@@ -151,9 +146,8 @@ function openApp(scheme, said) {
     window.removeEventListener("blur", away);
     if (left) return;
     said.innerHTML = "";
-    said.append(L("Non si è aperto niente? Forse EMStudio non è installato su questo computer. ",
-                  "Nothing opened? EMStudio may not be installed on this computer. "));
-    said.appendChild(installLink(L("Installa EMStudio", "Install EMStudio")));
+    said.append(t("home.app.nothing") + " ");
+    said.appendChild(installLink(t("home.install.emstudio")));
   }, 2000);
 }
 
@@ -161,19 +155,19 @@ async function copyForBlender(link, said) {
   said.innerHTML = "";
   try {
     await navigator.clipboard.writeText(link);
-    said.append(L("Link copiato. In Blender: EMtools › Apri una stanza da un link, e incolla. ",
-                  "Link copied. In Blender: EMtools › Open room from link, and paste. "));
+    said.append(t("home.blender.copied") + " ");
   } catch {
-    said.append(L("Copia questo link e incollalo in Blender: ", "Copy this link and paste it in Blender: "), link, " ");
+    said.append(t("home.blender.copy") + " ", link, " ");
   }
-  said.appendChild(installLink(L("Prima volta? Installa Blender ed EMtools", "First time? Install Blender and EMtools")));
+  said.appendChild(installLink(t("home.install.blender")));
 }
 
+/** La strada per installare: la pagina degli strumenti, per indirizzo. Da
+ *  `/em/home/` è `/em/tools/` — relativo, perché il prefisso è del proxy. */
 function installLink(text) {
   const a = document.createElement("a");
-  a.href = "#tools";
+  a.href = "../tools/";
   a.textContent = text;
-  a.addEventListener("click", (e) => { e.preventDefault(); if (tools) void show(tools); });
   return a;
 }
 
@@ -182,7 +176,9 @@ function loadQr() {
   if (window.qrcode) return Promise.resolve(window.qrcode);
   qrLoading = qrLoading || new Promise((ok, no) => {
     const s = document.createElement("script");
-    s.src = new URL("../../rooms/vendor/qrcode-generator-1.4.4.js", import.meta.url).href;
+    //: `app/vendor/`, montata su `/vendor` (11 novembre 2026): da
+    //: `/em/home/modules/home.js` sono due cartelle in su
+    s.src = new URL("../../vendor/qrcode-generator-1.4.4.js", import.meta.url).href;
     s.onload = () => ok(window.qrcode);
     s.onerror = () => { qrLoading = null; no(new Error("qr")); };
     document.head.append(s);
@@ -201,13 +197,12 @@ async function showQr(box, url) {
     const img = document.createElement("div");
     img.className = "qr";
     img.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 3, scalable: true });
-    img.querySelector("svg")?.setAttribute("aria-label", L("QR che apre StratiField in questa stanza", "QR code that opens StratiField in this room"));
+    img.querySelector("svg")?.setAttribute("aria-label", t("home.qr.label"));
     holder.appendChild(img);
   } catch { /* senza QR resta il link */ }
   const p = document.createElement("p");
   p.className = "k-faint";
-  p.textContent = L("Inquadralo con la fotocamera del telefono: StratiField si apre in questa stanza.",
-                    "Frame it with the phone's camera: StratiField opens in this room.");
+  p.textContent = t("home.qr.how");
   const code = document.createElement("code");
   code.textContent = url;
   holder.append(p, code);
@@ -215,14 +210,14 @@ async function showQr(box, url) {
 }
 
 async function createRoom(root) {
-  const title = (window.prompt(L("Il nome della stanza nuova", "The new room's name")) || "").trim();
+  const title = (window.prompt(t("home.new.prompt")) || "").trim();
   if (!title) return;
   const room_id = title.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || `room-${Date.now().toString(36)}`;
   try { await api.post("/rooms", { room_id, title }); }
   catch (error) { toast(error.message, "bad"); return; }
-  toast(L(`Stanza «${title}» creata: ne sei proprietario.`, `Room «${title}» created: you own it.`));
+  toast(t("home.new.done", { title }));
   await render(root);
 }
 
-home = register({ id: "home", title: L("Le tue stanze", "Your rooms"), render, everyone: true, order: 0 });
+home = register({ id: "home", title: () => t("home.title"), render, everyone: true, order: 0 });

@@ -12,9 +12,9 @@
  */
 import { boot } from "./console.js";
 
-// the order of the nav, as the desk of 30 October 2026 drew it
+// the order of the nav, as the desk of 30 October 2026 drew it. «Strumenti» is
+// not here since 11 November 2026: it is a page of its own, `/tools/`.
 import "./modules/home.js";
-import "./modules/tools.js";
 import "./modules/rooms.js";
 import "./modules/people.js";
 import "./modules/groups.js";

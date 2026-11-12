@@ -129,8 +129,10 @@ def test_si_ricorda_il_nome_di_rete_e_lo_usa_fcn_up(here):
     assert fs.main(["--orcid", ME, "--name", "A B", "--host", "fcn.local", "--no-autostart"],
                    here=here, volume_check=lambda v: False, ask=_silent) == 0
     assert _env(here)["FCN_HOST"] == "fcn.local"
+    #: chi lo legge, e solo su un nodo da campo: la porta stessa lo prova in
+    #: tests/test_l_host_che_si_ricordava.py (9 novembre 2026)
     up = (DEV / "fcn-up.sh").read_text()
-    assert "FCN_HOST=" in up and "${FCN_HOST_SAVED:-em.localhost}" in up
+    assert 'FIELD_HOST="$(env_dev_val FCN_HOST)"' in up
 
 
 def test_chiede_quello_che_manca_e_il_segreto_di_orcid_di_nascosto(here):

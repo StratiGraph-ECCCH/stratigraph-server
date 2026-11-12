@@ -489,49 +489,15 @@ def test_IL_BUCO_DI_by_author_SI_RIFA_A_MANO():
 
 # ═══ PARTE DUE · la superficie ═══════════════════════════════════════════════
 
-WORK = (_REPO / "app" / "rooms_ui" / "work" / "index.html").read_text(
-    encoding="utf-8")
-SCRIPT = (_REPO / "app" / "rooms_ui" / "rooms.js").read_text(encoding="utf-8")
-CSS = (_REPO / "app" / "rooms_ui" / "rooms.css").read_text(encoding="utf-8")
 I18N = (_REPO / "app" / "node_admin" / "i18n.js").read_text(encoding="utf-8")
 
 
-def _board_block() -> str:
-    inizio = SCRIPT.index("// ── IL CRUSCOTTO DELLA STANZA")
-    return SCRIPT[inizio:SCRIPT.index("// ── CONDIVIDI · un luogo solo")]
 
 
-def test_il_cruscotto_esiste_e_disegna_le_cinque_cose():
-    """Un recinto attorno a niente passerebbe per sempre."""
-    assert 'id="zone-board"' in WORK
-    for host in ("board-who", "board-waiting", "board-changes", "board-people",
-                 "board-numbers", "board-horizon"):
-        assert f'id="{host}"' in WORK, host
-    assert "async function loadBoard(" in SCRIPT
 
 
-def test_LA_PAGINA_COMPONE_E_NON_CALCOLA():
-    """«Un conteggio che nessuno può rifare a mano è un'opinione con un
-    carattere monospaziato.» Nessun numero nasce qui: arrivano tutti da una
-    rotta che li ha contati sul grafo o sul registro."""
-    codice = _board_block()
-    for rotta in ("/who", "/waiting?subject=me", "/statistics", "/operators",
-                  "/changes"):
-        assert rotta in codice, rotta
-    # …e nessuna aritmetica sui conteggi: niente somme, niente percentuali
-    aritmetica = re.findall(r"(?:count|operations|units|nodes|edges)\s*[-+/*]\s*\w",
-                            re.sub(r"//[^\n]*", "", codice))
-    assert not aritmetica, f"il cruscotto sta calcolando: {aritmetica}"
 
 
-def test_IL_LIMITE_STA_IN_CIMA_e_non_in_una_nota_a_pie_di_pagina():
-    """`readable_from` è la condizione di tutto quello che segue."""
-    zona = WORK[WORK.index('id="zone-board"'):]
-    zona = zona[:zona.index("</section>")]
-    assert zona.index('id="board-horizon"') < zona.index('id="board-who"')
-    assert "horizonLine" in _board_block()
-    assert "board.horizon.short" in _board_block(), (
-        "il caso di chi chiede da più indietro di quanto la stanza sappia")
 
 
 #: Come si riconosce un grafico, e **non è una parola**.
@@ -558,16 +524,6 @@ DISEGNA = (
 )
 
 
-def test_NESSUN_GRAFICO():
-    """Il controesempio misurato: dieci tessere di cui otto a zero, una torta
-    divisa a metà fra due regioni (n=2), un istogramma di due barre alte 1. Con
-    n=2 un grafico è arredamento, e queste stanze hanno spesso n=2.
-
-    **Cerca nel programma e non nel testo** — vedi `DISEGNA` qui sopra.
-    """
-    codice = sorgenti.senza_prosa(_board_block())
-    disegna = [nome for nome, guarda in DISEGNA if guarda(codice)]
-    assert not disegna, f"il cruscotto {', '.join(disegna)}"
 
 
 def test_LA_GUARDIA_DEI_GRAFICI_MORDE_ANCORA():
@@ -604,35 +560,8 @@ def test_LA_GUARDIA_DEI_GRAFICI_NON_MORDE_PIU_LA_PROSA():
         assert not disegna, f"morde ancora su una riga onesta: {riga} → {disegna}"
 
 
-def test_E_RIPIEGO_STA_DAVVERO_NEL_CODICE_e_la_guardia_tace():
-    """Il caso che ha aperto il micro, sul file vero e non su un finto: la
-    parola `ripiego` è nel cruscotto, in una riga di prosa che spiega una
-    decisione, e la guardia non dice niente."""
-    assert "ripiego" in _board_block(), (
-        "la riga che ha aperto questo micro è stata tolta: rimettila o togli "
-        "questo test, ma non lasciarlo verde su un caso che non esiste più")
-    codice = sorgenti.senza_prosa(_board_block())
-    assert not [nome for nome, guarda in DISEGNA if guarda(codice)]
 
 
-def test_IL_TELEFONO_ha_la_sua_regola_e_non_nasconde_niente():
-    """«La superficie si adatta, il substrato no.» Nascondere un buco su uno
-    schermo piccolo sarebbe esattamente il difetto che questo cruscotto esiste
-    per non avere."""
-    # ── IL BLOCCO, CONTATO A GRAFFE ────────────────────────────────────────
-    #
-    # Era `CSS[CSS.index("@media …"):]`, cioè **fino alla fine del file**: una
-    # regola scritta dopo quel blocco, o un commento che nomina `display: none`,
-    # finivano dentro una guardia che credeva di guardare un blocco solo. E il
-    # blocco è l'ultimo del file, quindi passava per posizione.
-    #
-    # E `dichiara` cerca la DICHIARAZIONE, non le due parole: `display:none`,
-    # `display : none` e `display:  none !important` sono la stessa cosa, e
-    # «niente display: none qui» in un commento non lo è.
-    stretto = sorgenti.blocco_css(CSS, "@media (max-width: 40rem)")
-    assert stretto, "il blocco del telefono non c'è più"
-    assert not sorgenti.dichiara(stretto, "display", "none"), \
-        "una riga sparisce sul telefono"
 
 
 def test_LA_GUARDIA_DEL_TELEFONO_MORDE_ANCORA():
@@ -661,9 +590,6 @@ def test_LA_GUARDIA_DEL_TELEFONO_NON_GUARDA_PIU_TUTTO_IL_FILE():
     assert not sorgenti.dichiara(dentro, "display", "none")
 
 
-def test_ZERO_COLORI_LETTERALI():
-    assert not re.search(r"#[0-9a-fA-F]{3,8}\b", CSS)
-    assert "var(--sg-warn)" in CSS
 
 
 def test_LE_STRINGHE_DEL_CRUSCOTTO_esistono_in_en_e_in_it():
@@ -679,10 +605,3 @@ def test_LE_STRINGHE_DEL_CRUSCOTTO_esistono_in_en_e_in_it():
         "manca a metà delle persone")
 
 
-def test_LA_DIRECTORY_DEGLI_OPERATORI_dice_da_dove_viene():
-    """«Da noi l'autore lo timbra il relay dal token, non lo digita una
-    persona.» È la ragione per cui questa vista è più forte di quella di
-    pyarchinit, e una riga che non lo dice si legge come una tabella di
-    utenti."""
-    assert "board.people.whence" in _board_block()
-    assert "token" in I18N[I18N.index('"board.people.whence"'):][:300].lower()

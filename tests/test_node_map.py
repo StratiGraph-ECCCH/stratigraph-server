@@ -108,8 +108,16 @@ def test_EVERY_MOUNTED_PAGE_IS_ON_THE_MAP():
     and no false positive to construct: `/brand` is excluded because it is
     assets and not a face — the one exemption, named.
     """
+    #: FILES, not faces — each named, with its reason (11 November 2026):
+    #:   /brand    the brand both faces wear
+    #:   /vendor   the QR library the house loads
+    #:   /vetrina  the showcase's script and sheet (the PAGE is `/`, a route)
+    #:   /admin    the house's modules, still imported from there by other
+    #:             faces (stratigraph-catalog: `/admin/bar.js`); its page
+    #:             addresses redirect to `/home/`
+    files = {"/brand", "/vendor", "/vetrina", "/admin"}
     mounted = {route.path.rstrip("/") + "/" for route in main.app.routes
-               if isinstance(route, Mount) and route.path != "/brand"}
+               if isinstance(route, Mount) and route.path not in files}
     listed = {face["path"] for face in ENTRANCES}
     missing = sorted(m for m in mounted if m not in listed)
     assert missing == [], (
@@ -126,13 +134,15 @@ def test_A_FACE_SAYS_WHAT_IT_NEEDS_structurally():
     read it would have been a bar that greps English.
     """
     needs = {face["path"]: face["needs"] for face in ENTRANCES}
-    assert needs["/admin/"] == "operator"
+    #: since 11 November 2026 no PAGE needs the capability: the house is for
+    #: everybody and draws the node's sections for an operator (`whoami`)
+    assert needs["/home/"] == ""
     assert all(v in ("", "operator") for v in needs.values()), needs
     #: …and the four faces a PERSON opens are marked apart from the four a
     #: machine calls: a bar drawn from all eight would offer «OpenAPI» beside
     #: «Work», which is a menu that does not know who is reading it
     pages = {f["path"] for f in ENTRANCES if f["page"]}
-    assert pages == {"/rooms/", "/work/", "/tools/", "/admin/"}, pages
+    assert pages == {"/", "/home/", "/tools/"}, pages
 
 
 def test_THE_FACES_TRAVEL_ON_THE_PUBLIC_ROUTE_TOO():

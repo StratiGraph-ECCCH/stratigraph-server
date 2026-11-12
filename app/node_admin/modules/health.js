@@ -17,7 +17,7 @@
  * console that grows actions before somebody asks grows the wrong ones.
  */
 import { api, escapeHtml, register, say } from "../console.js";
-import { L } from "../kit.js";
+import { LOCALE, t } from "../i18n.js";
 
 /** The four states, and what each one means to somebody looking at it. Colour is
  *  carried by a class so the palette stays in `console.css` (one theme, one
@@ -82,12 +82,12 @@ function kindCard(kind) {
   const box = document.createElement("section");
   box.className = "k-card";
   box.style.marginBottom = "18px";
-  const word = L(kind.word_it, kind.word_en);
+  const word = LOCALE === "it" ? kind.word_it : kind.word_en;
   const lines = (kind.checks || []).map((c) =>
-    `<p class="k-note ${c.level === "info" ? "" : "bad"}">${escapeHtml(L(c.it, c.en))}</p>`).join("");
-  box.innerHTML = `<span class="k-k">${escapeHtml(L("Che nodo è", "What kind of node"))}</span>
+    `<p class="k-note ${c.level === "info" ? "" : "bad"}">${escapeHtml(LOCALE === "it" ? c.it : c.en)}</p>`).join("");
+  box.innerHTML = `<span class="k-k">${escapeHtml(t("health.kind.label"))}</span>
     <b style="font-size:1.1rem">${escapeHtml(word)}</b>
-    ${lines || `<p class="k-note">${escapeHtml(L("Configurato come serve a questo tipo di nodo.", "Configured as this kind of node needs."))}</p>`}`;
+    ${lines || `<p class="k-note">${escapeHtml(t("health.kind.fine"))}</p>`}`;
   return box;
 }
 
@@ -95,8 +95,8 @@ function kindCard(kind) {
  *  this is. `/v1/node` is public, so this needs nobody signed in. */
 api.get("/node").then((node) => {
   const sub = document.getElementById("app-sub");
-  const words = { personal: L("nodo personale", "personal node"), field: L("nodo da campo", "field node"),
-    institutional: L("nodo istituzionale", "institutional node") };
+  const words = { personal: t("health.kind.personal"), field: t("health.kind.field"),
+    institutional: t("health.kind.institutional") };
   if (sub && words[node.kind]) sub.textContent = words[node.kind];
 }).catch(() => {});
 
@@ -156,4 +156,4 @@ function versions(versions) {
   return box;
 }
 
-register({ id: "health", title: L("Salute del nodo", "Node health"), render });
+register({ id: "health", title: () => t("health.title"), render });

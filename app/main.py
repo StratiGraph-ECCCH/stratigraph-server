@@ -726,6 +726,9 @@ class NodeOffer(BaseModel):
     #: that 404s and a claim about where things are that nobody made.
     url: str = ""
     detail: str = ""
+    #: what the service is FOR, in one sentence (English, the source) — the
+    #: showcase draws it beside the label. From `node_health.OFFERED`.
+    what: str = ""
     #: What that face declares it CAN DO — the shape the neighbour publishes,
     #: carried through. `List[Dict]` and NOT a typed model, deliberately: a typed
     #: model would silently DROP a field the neighbour adds, and forwarding what
@@ -7156,16 +7159,28 @@ class _FreshStatic(StaticFiles):
 # *data* is behind the capability, which is where a gate belongs; the shell is
 # just a shell.
 _CONSOLE = pathlib.Path(__file__).resolve().parent / "node_admin"
-if _CONSOLE.is_dir():
-    app.mount("/admin", _FreshStatic(directory=str(_CONSOLE), html=True),
-              name="node-console")
 
-# …and the MEMBER-facing one beside it. A second page rather than a panel in the
-# first, because the scope is different: the console is about the NODE (every
-# room, the storage, the lifecycle) and needs an operator capability; this is
-# about YOUR rooms and needs only that you are somebody. It imports the console's
-# sign-in module relatively (`../admin/auth.js`), so there is ONE PKCE
-# implementation and it survives the prefix a proxy adds.
+# ── LA CASA E IL SUO NOME (9 novembre 2026) ──────────────────────────────────
+#
+# La casa unica del 31 ottobre era riuscita — una pagina d'ingresso per tutti,
+# fuori dall'autenticazione, che chiede `whoami` e disegna le sezioni che
+# spettano a chi la guarda — ma stava su `/admin/`: una casa chiamata «admin»
+# sembra chiusa anche quando è aperta a tutti. Adesso si chiama `/home/`.
+# «home» e non «casa»: gli indirizzi del nodo sono inglesi (`/tools/`,
+# `/v1/…`), la lingua è un fatto della pagina, non dell'URL.
+#
+# La cartella NON si sposta: cambia il nome del montaggio, non la directory.
+if _CONSOLE.is_dir():
+    app.mount("/home", _FreshStatic(directory=str(_CONSOLE), html=True),
+              name="node-home")
+    # `/admin` RESTA MONTATA, ma come cartella di file e non come pagina
+    # (`html=False`): altre facce importano i moduli condivisi da qui —
+    # misurato l'11 novembre, `stratigraph-catalog/app/ui/catalog.js:384` fa
+    # `import(`${nodeUrl}/admin/bar.js`)` — e un 404 lì spegnerebbe la barra del
+    # catalogo. Le PAGINE di quell'indirizzo vanno in casa, qui sotto.
+    app.mount("/admin", _FreshStatic(directory=str(_CONSOLE)),
+              name="node-shared-modules")
+
 # The BRAND both faces wear, served beside them. Vendored from
 # `stratigraph-brand/` by `sync-brand.sh` — same-origin and never a CDN, because
 # a node may be deployed where there is no route out and a console that lost its
@@ -7178,63 +7193,83 @@ _BRAND = pathlib.Path(__file__).resolve().parent / "brand"
 if _BRAND.is_dir():
     app.mount("/brand", _FreshStatic(directory=str(_BRAND)), name="brand")
 
-# ── LA CASA UNICA (31 ottobre 2026, scrivania «casa del nodo») ───────────────
+# ── GLI INDIRIZZI VECCHI (11 novembre 2026) ──────────────────────────────────
 #
-# Il vestibolo, «Lavorare» e «Attrezzarsi» erano tre pagine con tre sessioni, e
-# da una non si tornava nell'altra (E.D.: «da quelle se premo work si va nelle
-# vecchie e non si torna nelle nuove»). Ora la porta e la casa sono `/admin/`:
-# i tre indirizzi vecchi ci portano, con quello che dicevano (`?room=`, `?join=`)
-# — un link già mandato a qualcuno continua ad aprire la sua stanza. RELATIVI,
-# perché il nodo non sa sotto quale prefisso lo serve il proxy (`/em/`).
+# Il 31 ottobre `/rooms/`, `/work/` e `/tools/` portavano in casa con la loro
+# query. E.D., 11 novembre: «non mi servono, non li ho mandati a nessuno». Quindi
+# `/rooms/` non esiste più, e `/tools/` torna una pagina sua (qui sotto).
 #
-# I file restano dove sono: `rooms.js` è ancora il lettore delle porte e la
-# libreria del QR vive in `rooms_ui/vendor/`, che la casa carica da lì.
-_OLD_FACES = {"/rooms/": "../admin/", "/rooms/index.html": "../admin/",
-              "/work/": "../admin/", "/work/index.html": "../admin/",
-              "/tools/": "../admin/#tools", "/tools/index.html": "../admin/#tools"}
+# RESTANO DUE, e ciascuno per una ragione misurata, non per prudenza:
+#
+# * `/admin/` → la casa, PERMANENTE (301): era l'indirizzo della casa fino a
+#   oggi, e lo fabbricano EMStudio (`frontend/src/who-chip.ts:81`,
+#   `${node}/admin/`) e la guida del nodo da campo.
+# * `/work/` → la casa, con la sua query: EMStudio lo fabbrica ancora nel
+#   codice, non in un link mandato a mano — `frontend/src/main.ts:9552` e
+#   `:10292`, `${node}/work/?room=…`, il pulsante «persone della stanza». La
+#   decisione dell'11 novembre partiva dal «nessuno li usa»; per `/work/` la
+#   misura dice il contrario, e il referto lo nomina. Si toglie quando EMStudio
+#   scrive `/home/?room=`.
+#
+# RELATIVI, perché il nodo non sa sotto quale prefisso lo serve il proxy (`/em/`).
+_OLD_FACES = {"/admin": ("home/", 301), "/admin/": ("../home/", 301),
+              "/admin/index.html": ("../home/", 301),
+              "/work/": ("../home/", 302), "/work/index.html": ("../home/", 302)}
 
 
 @app.middleware("http")
 async def _to_the_house(request: Request, call_next):
-    target = _OLD_FACES.get(request.url.path) if request.method == "GET" else None
-    if target is None:
+    found = _OLD_FACES.get(request.url.path) if request.method in ("GET", "HEAD") else None
+    if found is None:
         return await call_next(request)
     from fastapi.responses import RedirectResponse
-    path, _, frag = target.partition("#")
+    target, code = found
     query = request.url.query
-    location = path + (f"?{query}" if query else "") + (f"#{frag}" if frag else "")
-    return RedirectResponse(location, status_code=302)
+    return RedirectResponse(target + (f"?{query}" if query else ""), status_code=code)
 
 
-_ROOMS_UI = pathlib.Path(__file__).resolve().parent / "rooms_ui"
-if _ROOMS_UI.is_dir():
-    app.mount("/rooms", _FreshStatic(directory=str(_ROOMS_UI), html=True),
-              name="rooms-browser")
+# ── LA LIBRERIA DEL QR, dove vive davvero (11 novembre 2026) ─────────────────
+#
+# Era `rooms_ui/vendor/`, e il montaggio `/rooms` esisteva ormai solo per lei:
+# la casa la carica (`modules/home.js`) per disegnare il QR di StratiField. Una
+# cartella chiamata `rooms_ui` che contiene soltanto la libreria del QR della
+# casa è una mappa che mente. File, non pagine.
+_VENDOR = pathlib.Path(__file__).resolve().parent / "vendor"
+if _VENDOR.is_dir():
+    app.mount("/vendor", _FreshStatic(directory=str(_VENDOR)), name="vendor")
 
-# ── THE PAGES SEPARATE BY VERB (design note, 6 September 2026) ────────────────
+# ── GLI STRUMENTI, una pagina loro (E.D., 11 novembre 2026) ──────────────────
 #
-# `/rooms/` used to do four jobs at once, so whoever arrived for one walked
-# through the other three. It is now the VESTIBULE — who you are, how the node
-# is, where to go — and two of the verbs are pages of their own:
+# Erano una sezione della casa raggiunta da un frammento (`/admin/#tools`).
+# Adesso hanno un indirizzo: quello che si installa sul proprio computer, con la
+# sua descrizione di base, pubblico — non serve aver firmato per sapere come si
+# scarica EMStudio. I manuali stanno online; il nodo porta la riga e il pulsante.
+_TOOLS_PAGE = pathlib.Path(__file__).resolve().parent / "tools_ui"
+if _TOOLS_PAGE.is_dir():
+    app.mount("/tools", _FreshStatic(directory=str(_TOOLS_PAGE), html=True),
+              name="node-tools")
+
+# ── LA VETRINA DEL NODO (E.D., 11 novembre 2026) ─────────────────────────────
 #
-#     /work/    lavorare      enter a room, create one, bring a file in
-#     /tools/   attrezzarsi   what runs here, and what you install
-#
-# The other two were already elsewhere: consultare is the CATALOGUE (measured:
-# `/catalog/ui/` already lists the published studies and already has the by-HDT
-# view) and amministrare is `/admin/`.
-#
-# MOUNTED AT THE TOP, not nested under `/rooms/`, and the reason is not
-# cosmetic: the pages share one script, and it derives the API's address by
-# stripping its own door from the path (`/em/work/` → `/em/v1`). Nested at
-# `/em/rooms/work/` that strip yields `/em/rooms/v1` and every call 404s behind a
-# "Loading…" — the exact trap `rooms.js` already carries a comment about, one
-# spelling later. The URL saying the verb is the smaller half of the reason.
-    for _verb in ("work", "tools"):
-        _page = _ROOMS_UI / _verb
-        if _page.is_dir():
-            app.mount(f"/{_verb}", _FreshStatic(directory=str(_page), html=True),
-                      name=f"door-{_verb}")
+# `/` — cioè `/em/` dietro Caddy — è la pagina che un link al nodo apre: che
+# cos'è questo nodo e che cosa ci gira, composto da `/v1/node` (`offers`), non da
+# una lista scritta a mano. L'accesso è un gesto dentro di essa («Accedi» porta in
+# casa); un link mandato a qualcuno MOSTRA il servizio, non una schermata di
+# login. La pagina è un file solo; i suoi script e il suo foglio stanno in
+# `/vetrina/`, file e non pagina.
+_SHOWCASE = pathlib.Path(__file__).resolve().parent / "vetrina"
+if _SHOWCASE.is_dir():
+    app.mount("/vetrina", _FreshStatic(directory=str(_SHOWCASE)), name="showcase-files")
+
+
+@app.get("/", include_in_schema=False)
+def showcase_page():
+    page = _SHOWCASE / "index.html"
+    if not page.is_file():                               # pragma: no cover
+        raise HTTPException(status_code=404, detail="this build carries no showcase page")
+    from fastapi.responses import FileResponse
+    return FileResponse(str(page), media_type="text/html",
+                        headers={"Cache-Control": "no-cache"})
 
 # ── THE NODE'S OWN FACES, listed where they are MOUNTED ──────────────────────
 #
@@ -7261,32 +7296,27 @@ if _ROOMS_UI.is_dir():
 #: `page` separates the four faces a person opens from the four a machine calls
 #: — a bar shows the first kind, `/v1/admin/health` shows all of them.
 ENTRANCES: List[Dict[str, str]] = [
-    {"path": "/rooms/", "key": "door", "needs": "", "page": "yes",
-     "label": "The front door",
-     "what": "rooms, studies and monuments — where somebody who came to work "
-             "starts, and where somebody who came to look around starts too"},
-    # ── THE TWO VERBS THAT WERE MOUNTED AND NOT LISTED ────────────────────────
+    # ── 11 NOVEMBRE 2026: LA VETRINA, LA CASA, GLI STRUMENTI ─────────────────
     #
-    # Added 2026-10-07, and the omission is worth keeping written down: the two
-    # doors were mounted eight lines above this list, the comment on that mount
-    # says the faces are enumerated «three lines under the `mount` calls», and
-    # they were not in here. Meanwhile `rooms_ui/rooms.js` carried `"../work/"`
-    # and `"../tools/"` in its own source — so the list that exists to stop a
-    # fourth copy of «where the node's faces are» had a fourth copy beside it.
-    # `test_node_map.py` could not catch it: it proves every LISTED path is
-    # routed, never that every mounted page is listed.
-    {"path": "/work/", "key": "work", "needs": "", "page": "yes",
-     "label": "Work",
-     "what": "enter a room, create one, bring a file in — and the room's board: "
-             "who is here, what is waiting, what it still owes"},
+    # `/rooms/` («the front door») e `/work/` non sono più facce: la prima non
+    # esiste, la seconda è una redirezione verso la casa che resta per EMStudio
+    # (vedi `_OLD_FACES`). `/admin/` è diventata `/home/`. Cambiano QUI, nello
+    # stesso passo della rimozione, perché `tests/test_node_map.py` risolve ogni
+    # `path` di questa lista contro le rotte vere: è esattamente la ragione per
+    # cui quel test esiste.
+    {"path": "/", "key": "showcase", "needs": "", "page": "yes",
+     "label": "This node",
+     "what": "what this node is and what runs on it — the page a link to the "
+             "node opens, composed from `/v1/node`"},
+    {"path": "/home/", "key": "home", "needs": "", "page": "yes",
+     "label": "Your rooms",
+     "what": "the house: your rooms and their doors for everybody who signed "
+             "in; the node's own sections (people, storage, lifecycle) for an "
+             "operator"},
     {"path": "/tools/", "key": "tools", "needs": "", "page": "yes",
      "label": "Tools",
-     "what": "what runs on this node, and what you install on your own machine "
-             "to talk to it"},
-    {"path": "/admin/", "key": "admin", "needs": "operator", "page": "yes",
-     "label": "Node console",
-     "what": "every room on this node, the storage behind them, the lifecycle "
-             "of the ones nobody claims. Operator capability required"},
+     "what": "what you install on your own machine to work with this node, "
+             "one line and one button each"},
     {"path": "/docs", "key": "docs", "needs": "", "page": "",
      "label": "OpenAPI",
      "what": "every route this build serves, with its shapes — the answer to "

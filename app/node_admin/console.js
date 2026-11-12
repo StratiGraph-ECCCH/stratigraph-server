@@ -16,19 +16,22 @@
  */
 
 import * as oidc from "./auth.js";
-// Six languages, English the source. The dictionary lives HERE and the front
-// door imports it, which is the arrow this codebase already draws: `rooms_ui`
-// imports `../admin/auth.js` and not the reverse. (It briefly pointed the other
-// way and 404'd, because the directory is `rooms_ui` while the mount is
-// `/rooms` — a cross-mount import that knows another mount's URL is a fact
-// waiting to be wrong.)
+// Six languages, English the source. The dictionary lives HERE and the other
+// faces of this server import it (`/tools/`, the showcase at `/`: `../home/
+// i18n.js`) — the arrow points into the house, never out of it.
 //
-// What is localised here is the CHROME. The modules' diagnostics stay in the
-// source language, because a probe's sentence is the NODE talking, not the page.
+// The CHROME and, since 11 November 2026, the PANELS: every module asks `t()`
+// with keys (it used `L(it, en)`, two languages of the six). What stays in the
+// source language is a probe's own sentence — that is the NODE talking.
 import { LOCALE, mountPicker, t } from "./i18n.js";
 
 const MODULES = [];
 let active = null;
+
+/** Il nome di un modulo, nella lingua di ADESSO. Un modulo lo dichiara come
+ *  funzione (`title: () => t("people.title")`), perché una stringa calcolata
+ *  alla registrazione resterebbe nella lingua in cui la pagina è nata. */
+export const titleOf = (m) => (typeof m.title === "function" ? m.title() : m.title);
 
 /** Register a module. Order of registration is the order in the nav. */
 export function register(module) {
@@ -55,7 +58,9 @@ export function register(module) {
 import { mountBar } from "./bar.js";
 import { makeConfirm } from "./confirm.js";
 
-const BASE = window.location.pathname.replace(/\/admin(\/.*)?$/, "") + "/v1";
+//: `/home` dal 9 novembre 2026; `/admin` resta riconosciuta perché la stessa
+//: cartella è ancora montata lì (come file, per chi ne importa i moduli).
+const BASE = window.location.pathname.replace(/\/(home|admin)(\/.*)?$/, "") + "/v1";
 
 let token = "";
 //: the node's answer to "how does a browser sign in here" (`/v1/auth-config`)
@@ -182,7 +187,7 @@ function drawNav() {
   for (const module of visible()) {
     const button = document.createElement("button");
     button.className = "nav-item" + (active === module ? " on" : "");
-    button.textContent = module.title;
+    button.textContent = titleOf(module);
     button.addEventListener("click", () => show(module));
     nav.appendChild(button);
   }  // SU QUESTO NODO: le altre facce, dalla descrizione pubblica del nodo, e la
@@ -197,10 +202,22 @@ function drawNav() {
     links.appendChild(a);
   };
   nav.appendChild(links);
+  //: GLI STRUMENTI hanno una pagina loro (11 novembre 2026): dalla casa ci si
+  //: arriva per indirizzo, nella stessa scheda, come a una stanza del nodo.
+  const tools = document.createElement("a");
+  tools.className = "nav-item nav-out"; tools.href = "../tools/"; tools.id = "casa-tools";
+  tools.textContent = t("casa.tools");
+  links.appendChild(tools);
   void nodeOffers().then((offers) => {
     const find = (re) => offers.find((o) => re.test(o.name || "") && o.url && o.state !== "off by choice");
     const cat = find(/catalog/i), chat = find(/chatbot|stratifield/i);
+    //: EMSTUDIO È UNA FACCIA DI QUESTO NODO quanto il catalogo (11 novembre
+    //: 2026): la colonna era scritta a mano in tre voci e lui non c'era. Il suo
+    //: indirizzo lo dice il nodo (`offers` → `EM_EMSTUDIO_WEB_URL`), e la voce
+    //: compare solo dove il nodo lo dichiara.
+    const studio = find(/^emstudio$/i);
     if (cat) add(cat.url, t("casa.catalog"));
+    if (studio) add(studio.url.replace(/\/?$/, "/"), t("casa.studio"));
     if (chat) add(chat.url.replace(/\/?$/, "/"), t("casa.field"));
     add(DOCS, t("casa.guide"));
   });
@@ -215,7 +232,7 @@ function nodeOffers() {
 export async function show(module) {
   active = module;
   drawNav();
-  panel.innerHTML = `<p class="muted">Loading ${escapeHtml(module.title)}…</p>`;
+  panel.innerHTML = `<p class="muted">${escapeHtml(t("console.loadingModule", { what: titleOf(module) }))}</p>`;
   try {
     await module.render(panel, api);
   } catch (error) {
@@ -380,11 +397,9 @@ async function enter(me) {
   document.body.classList.remove("porta");
   document.body.classList.add("casa");
   showSignOut();
-  // `#tools` (l'indirizzo vecchio «Attrezzarsi») apre gli Strumenti
-  const asked = location.hash === "#tools" ? visible().find((m) => m.id === "tools") : null;
   if (!me.operator && visible().length) {
     drawNav();
-    await show(asked || visible()[0]);
+    await show(visible()[0]);
     return;
   }
   if (!me.operator) {
@@ -411,7 +426,7 @@ async function enter(me) {
     return;
   }
   drawNav();
-  if (visible().length) await show(asked || visible()[0]);
+  if (visible().length) await show(visible()[0]);
 }
 
 /** The signed-out screen: one button, and the fallback under it. */
@@ -473,18 +488,15 @@ function showSignIn() {
     a.href = href; a.textContent = text;
     quiet.appendChild(a);
   };
+  //: gli strumenti sono una PAGINA (11 novembre 2026): un'ancora, non un ramo
+  //: di codice per chi non ha firmato — una pagina pubblica non ne ha bisogno
+  link("../tools/", t("porta.tools"));
   void api.get("/node").then((node) => {
     const catalogue = (node?.offers || []).find((o) => /catalog/i.test(o.id || o.name || ""));
-    if (catalogue?.url) link(catalogue.url, t("porta.catalog"));
-    toolsLink();
+    if (catalogue?.url) quiet.prepend(Object.assign(document.createElement("a"),
+      { href: catalogue.url, textContent: t("porta.catalog") }));
     if (DOCS) link(DOCS, t("porta.guide"));
-  }).catch(() => { toolsLink(); });
-  function toolsLink() {
-    const a = document.createElement("a");
-    a.href = "#tools"; a.textContent = t("porta.tools");
-    a.addEventListener("click", (e) => { e.preventDefault(); void showToolsUnsigned(); });
-    quiet.appendChild(a);
-  }
+  }).catch(() => {});
   box.appendChild(quiet);
 
   const advanced = document.createElement("details");
@@ -498,7 +510,6 @@ function showSignIn() {
   advanced.append(summary, paste);
   box.appendChild(advanced);
   panel.appendChild(box);
-  if (location.hash === "#tools") void showToolsUnsigned();
 }
 
 /** «Esci»: chiude la sessione del realm, non solo questa scheda. */
@@ -515,25 +526,6 @@ function showSignOut() {
     else window.location.reload();
   });
   whoEl.after(out);
-}
-
-/** Gli strumenti anche SENZA accesso: dalla porta, gli stessi passi della casa.
- *  Il modulo legge solo `/v1/node`, che è pubblico. */
-async function showToolsUnsigned() {
-  const tools = MODULES.find((m) => m.id === "tools");
-  if (!tools) return;
-  panel.innerHTML = "";
-  const back = document.createElement("button");
-  back.className = "ghost porta-back";
-  back.textContent = t("casa.back");
-  back.addEventListener("click", () => {
-    history.replaceState(null, "", location.pathname + location.search);
-    showSignIn();
-  });
-  const holder = document.createElement("div");
-  holder.className = "porta-tools";
-  panel.append(back, holder);
-  await tools.render(holder, api);
 }
 
 /** Dove sta la guida del nodo: la documentazione pubblicata del server. */
@@ -555,8 +547,7 @@ async function askForToken() {
   await enter(me);
 }
 
-/** The chrome, repainted in the active language. The modules redraw themselves
- *  from the node, in the source language: see the note on the import above. */
+/** The chrome, repainted in the active language. */
 function paintStrings() {
   const set = (id, text) => {
     const n = document.getElementById(id); if (n) n.textContent = text;
@@ -564,7 +555,6 @@ function paintStrings() {
   document.documentElement.lang = LOCALE;
   document.title = t("console.title");
   set("app-sub", t("console.sub"));
-  set("back-door", t("go.back"));
   set("token-title", t("console.token.title"));
   set("token-why", t("console.token.why"));
   set("token-ok", t("console.token.use"));
@@ -574,8 +564,25 @@ function paintStrings() {
   if (input) input.placeholder = t("console.token.paste");
 }
 
+/** CAMBIARE LINGUA RIDISEGNA ANCHE IL PANNELLO APERTO (9 novembre 2026).
+ *
+ *  Era `mountPicker(…, paintStrings)`, e la nota sopra lo diceva da sé: il
+ *  guscio passava all'inglese e il pannello che stavi guardando restava nella
+ *  lingua in cui era stato disegnato, finché non uscivi e rientravi. Adesso il
+ *  modulo attivo si ridisegna — dal nodo, come ogni volta che lo si apre — e
+ *  la porta, se è la porta che si sta guardando. */
+function repaint() {
+  paintStrings();
+  if (active) {
+    drawNav();
+    void show(active);
+  } else if (document.body.classList.contains("porta")) {
+    showSignIn();
+  }
+}
+
 document.documentElement.lang = LOCALE;
-mountPicker(document.getElementById("lang"), paintStrings);
+mountPicker(document.getElementById("lang"), repaint);
 paintStrings();
 
 document.getElementById("reload").addEventListener("click", () => {

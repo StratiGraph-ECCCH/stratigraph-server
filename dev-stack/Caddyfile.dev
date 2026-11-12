@@ -273,9 +273,11 @@
 		# measured, and it looks exactly like a working root until you read the
 		# content-length. Inside `handle /` the path is already decided, so the
 		# matcher is `*`.
-		# LA PORTA DEL NODO (31 ott 2026): la radice porta alla casa, che prima
-		# dell'accesso è la porta e dopo è «Le tue stanze».
-		redir * /em/admin/ 302
+		# LA VETRINA DEL NODO (11 novembre 2026): la radice porta a `/em/`, la
+		# pagina che mostra che cos'è questo nodo e che cosa ci gira. La casa
+		# (`/em/home/`, era `/em/admin/`) è dietro, a un «Accedi» di distanza:
+		# un link mandato a qualcuno mostra il servizio, non una schermata di login.
+		redir * /em/ 302
 	}
 
 	# WHAT AN UPSTREAM THAT IS NOT THERE SAYS. One block, because `handle_errors`

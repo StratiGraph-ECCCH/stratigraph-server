@@ -20,6 +20,10 @@ COSA SCRIVE, e solo questo:
       script non rompe un nodo che funziona;
     · il TIPO e il GESTORE: `EM_NODE_KIND=field`, `EM_ALLOW_TEST_PEOPLE=0`,
       `DEV_OPERATOR_ORCID` e `DEV_CURATOR_ORCID` = l'iD dato, `EM_NODE_NAME`;
+    · il NOME DI RETE del nodo, `FCN_HOST`: è l'unico posto da cui
+      `fcn-up.sh` impara un host che dura, e lo legge solo accanto a
+      `EM_NODE_KIND=field` (9 novembre 2026: un host dato a `fcn-up.sh` vale
+      per quella corsa e basta, e lo script non scrive più `.env.dev`);
     · `ORCID_ISSUER=https://orcid.org` se nessuno l'ha scelto (il default del
       dev-stack è la sandbox).
 * `accredited.field.yaml` — la lista del nodo, con il gestore. Se c'è già, il

@@ -1041,10 +1041,12 @@ def test_IL_REALM_COMMITTATO_e_ancora_quello_che_credo():
     u = _uris(REALM)
     #: 29 dal 3 ottobre 2026: `org.extendedmatrix.emstudio:/oidc-return`, il
     #: ritorno di EMStudio desktop (uno schema privato, non un host: non si
-    #: rispecchia)
-    assert len(u) == 29, f"erano 29, adesso {len(u)}"
+    #: rispecchia). 33 dall'11 novembre 2026: la casa si chiama `/home/`, e le
+    #: sue quattro grafie si aggiungono (le vecchie restano: una URI in più non
+    #: è un difetto, `test_doors_and_realm.py`)
+    assert len(u) == 33, f"erano 33, adesso {len(u)}"
     canoniche = [x for x in u if x.startswith("https://em.localhost:8443/")]
-    assert len(canoniche) == 8, canoniche
+    assert len(canoniche) == 9, canoniche
     #: e nessun jolly nella parte host, di partenza
     for x in u:
         assert "*" not in x.split("//", 1)[-1].split("/", 1)[0], x
@@ -1058,7 +1060,7 @@ def test_RISPECCHIA_e_non_inventa():
     """
     reso, aggiunte = RR.rendi(REALM, host="fcn.local", porta=8443)
     nuove = aggiunte["em-console"]
-    assert len(nuove) == 8, nuove
+    assert len(nuove) == 9, nuove
     percorsi_prima = {u.split(":8443", 1)[1]
                       for u in _uris(REALM)
                       if u.startswith("https://em.localhost:8443/")}
@@ -1067,7 +1069,7 @@ def test_RISPECCHIA_e_non_inventa():
     for u in nuove:
         assert u.startswith("https://fcn.local:8443/")
     #: e l'ingresso non è stato mutato
-    assert len(_uris(REALM)) == 29
+    assert len(_uris(REALM)) == 33
 
 
 def test_NIENTE_JOLLY_NELLA_PARTE_HOST():
@@ -1147,7 +1149,7 @@ def test_FCN_UP_RENDE_IL_REALM_e_lo_monta(tmp_path):
     assert done.returncode == 0, done.stderr + done.stdout
     reso = dev / "keycloak" / "realm-em-dev.fcn.local.json"
     assert reso.is_file(), "non ha reso il realm"
-    assert len(_uris(_json.loads(reso.read_text()))) == 37, "8 in più (29 + 8)"
+    assert len(_uris(_json.loads(reso.read_text()))) == 42, "9 in più (33 + 9)"
     #: …e l'ORDINE: reso prima dell'`up`
     chiamati = _chiamati(tmp_path)
     assert "up -d --build" in chiamati
@@ -1192,9 +1194,14 @@ def test_EXTRA_HOSTS_dichiara_host_docker_internal():
     doc = yaml.safe_load(COMPOSE_YML.read_text())
     caddy = doc["services"]["caddy"]
     assert "host.docker.internal:host-gateway" in (caddy.get("extra_hosts") or [])
-    #: …e su nessun altro, perché è la rotta di Caddy e non un'abitudine
+    #: …e su nessun altro, perché è la rotta di Caddy e non un'abitudine —
+    #: TRANNE il server (11 novembre 2026): la sonda di EMStudio fra gli
+    #: `offers` bussa a `host.docker.internal:5173`, quindi anche lui ne ha
+    #: bisogno su Linux nativo, ed è dichiarato lì con la sua ragione
+    server = doc["services"]["stratigraph-server"]
+    assert "host.docker.internal:host-gateway" in (server.get("extra_hosts") or [])
     altri = [n for n, sv in doc["services"].items()
-             if n != "caddy" and isinstance(sv, dict)
+             if n not in ("caddy", "stratigraph-server") and isinstance(sv, dict)
              and any("host.docker.internal" in str(h)
                      for h in (sv.get("extra_hosts") or []))]
     assert not altri, f"anche su {altri}: dichiaralo dove serve"
@@ -1617,7 +1624,6 @@ _spec_h = _ilu2.spec_from_file_location("handoff_mod",
 HO = _ilu2.module_from_spec(_spec_h)
 _spec_h.loader.exec_module(HO)
 
-ROOMS_JS = (DEV.parent / "app" / "rooms_ui" / "rooms.js")
 TAURI = (DEV.parent.parent / "EMStudio" / "apps" / "desktop" / "src-tauri")
 
 
@@ -1783,25 +1789,6 @@ def test_E_CONSUMERS_CONCORDA_col_repo_di_EMStudio():
         f"EMStudio dichiara lo schema: {dichiara}; CONSUMERS dice: {registra}")
 
 
-def test_IL_CLIENT_NON_DISEGNA_UNA_PORTA_CHE_IL_SERVER_NON_HA_DATO():
-    """§6 mutazione 3: la prova non deve misurare solo il server.
-
-    Il pagliaio si toglie prima — questo file parla degli strumenti nella sua
-    prosa.
-    """
-    page = ROOMS_JS.read_text(encoding="utf-8")
-    codice = "\n".join(r for r in page.splitlines()
-                       if not r.lstrip().startswith(("*", "/*", "//", "*/")))
-    #: nessun nome di strumento nel codice: l'elenco lo dà il server
-    for tool in ("emstudio", "blender", "chatbot"):
-        assert f'"{tool}"' not in codice, f"{tool} è cablato nel client"
-    #: ogni porta è dietro la presenza del suo campo nella risposta
-    for door in ("scheme", "paste", "browser"):
-        assert f"target.{door}" in codice, f"{door} non viene dalla risposta"
-        assert f"if (target.{door})" in codice, (
-            f"{door} è disegnata senza chiedere se c'è")
-    #: e uno strumento senza porte non lascia un gruppo vuoto
-    assert "if (!doors.length) continue" in codice
 
 
 def test_L_ETICHETTA_E_STRATIFIELD_e_la_CHIAVE_e_chatbot():

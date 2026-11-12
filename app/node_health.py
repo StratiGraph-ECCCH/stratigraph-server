@@ -451,6 +451,46 @@ def _probe_field_assistant(base: Optional[str]) -> Check:
                  facts=facts)
 
 
+def _probe_studio(web: Optional[str], internal: Optional[str]) -> Check:
+    """EMStudio IN THE BROWSER, served by this node (E.D., 11 novembre 2026:
+    «EMStudio entra anche come servizio, non solo come desktop»).
+
+    Different from its three siblings in one measured way: nobody ELSE runs it
+    as a service with a health route. In development `/em/studio/` is Vite on
+    the developer's machine (`Caddyfile.dev`, `host.docker.internal:5173`); in
+    production it is a directory of built files Caddy serves itself
+    (`heriverse-ansible/role/templates/Caddyfile.j2`, `em_studio_dist`). There is
+    no internal address valid in both, so the address to knock on is its OWN
+    variable, `EM_EMSTUDIO_INTERNAL` — and, like `EM_EMSTUDIO_WEB_URL`, it has NO
+    default: a default would say «there is a studio here» on nodes that have none.
+
+    Two variables, two facts: `EM_EMSTUDIO_WEB_URL` says the node SERVES a
+    studio (empty → absent, and no row is drawn); `EM_EMSTUDIO_INTERNAL` says
+    where this process can check that it answers. Any status under 500 means
+    it is there — the page is HTML, not a health JSON.
+    """
+    if not (web or "").strip():
+        return Check(name="emstudio", state=ABSENT,
+                     detail="this node serves no EMStudio in the browser "
+                            "(EM_EMSTUDIO_WEB_URL is empty)")
+    if not (internal or "").strip():
+        return Check(name="emstudio", state=ABSENT,
+                     detail="EMStudio is served here, but nobody named where "
+                            "this node can check it answers (set "
+                            "EM_EMSTUDIO_INTERNAL to watch it)")
+    asked = internal.strip()
+    status, _, error = _fetch(asked)
+    target = _host_of(asked)
+    if error:
+        return Check(name="emstudio", state=UNREACHABLE, target=target, probe=asked,
+                     detail=f"EMStudio did not answer — {error}")
+    if status >= 500:
+        return Check(name="emstudio", state=DEGRADED, target=target, probe=asked,
+                     detail=f"EMStudio answered {status}")
+    return Check(name="emstudio", state=OK, target=target, probe=asked,
+                 detail=f"EMStudio answered {status}")
+
+
 def _enabled(value: Optional[str]) -> Optional[bool]:
     """Tri-state, from a variable that may not be there at all.
 
@@ -654,15 +694,30 @@ def _reduce_capabilities(facts: Dict[str, Any]) -> List[Dict[str, Any]]:
 #: `EM_IIIF_PUBLIC`: one is a machine we dial, the other is a name we hand out.
 #: The console and the room browser are NOT here — this process serves them, so a
 #: page it also serves reaches them relatively and nobody has to configure that.
+#:
+#: The fifth column (11 November 2026) is WHAT IT DOES, in one sentence: the
+#: node's showcase (`/`) composes itself from this answer, one row per service,
+#: so a service appears there the day the node announces it and nobody edits the
+#: page. English is the source; the page translates by key (`offer.<name>`) and
+#: falls back to this sentence.
 OFFERED = (
-    ("stratigraph-catalog", "Catalogue", "EM_CATALOG_INTERNAL", "EM_CATALOG_PUBLIC"),
-    ("iiif", "Images (IIIF)", "EM_IIIF_INTERNAL", "EM_IIIF_PUBLIC"),
+    ("stratigraph-catalog", "Catalogue", "EM_CATALOG_INTERNAL", "EM_CATALOG_PUBLIC",
+     "the published studies, searchable, each one a link to read it"),
+    ("iiif", "Images (IIIF)", "EM_IIIF_INTERNAL", "EM_IIIF_PUBLIC",
+     "the images of the studies, at any size, through the IIIF Image API"),
     #: StratiField. The KEY stays `stratigraph-chatbot` — it is the service's
     #: technical name and the repository's; only the label a person reads
     #: changed (8 September 2026).
     ("stratigraph-chatbot", "StratiField", "EM_CHATBOT_INTERNAL",
-     "EM_FIELD_ASSISTANT_URL"),
-    ("nodeodm", "Photogrammetric engine", "NODEODM_URL", ""),
+     "EM_FIELD_ASSISTANT_URL",
+     "the field assistant: dictate and record on the excavation, from a phone"),
+    #: EMStudio IN THE BROWSER (11 November 2026). Also among `tools`, and the two
+    #: say different things: there it is what you INSTALL on your machine, here
+    #: it is what THIS NODE SERVES you at its web address.
+    ("emstudio", "EMStudio", "EM_EMSTUDIO_INTERNAL", "EM_EMSTUDIO_WEB_URL",
+     "the Extended Matrix editor, in the browser, opening the rooms of this node"),
+    ("nodeodm", "Photogrammetric engine", "NODEODM_URL", "",
+     "turns photographs into 3D models, for the rooms of this node"),
 )
 
 def engine_check(env: Dict[str, str]) -> Check:
@@ -692,6 +747,8 @@ _PROBES: Dict[str, Callable[[Dict[str, str]], Check]] = {
                                     or env.get("EM_IIIF_INTERNAL_BASE")),
     "stratigraph-chatbot": lambda env: _probe_field_assistant(
         env.get("EM_CHATBOT_INTERNAL")),
+    "emstudio": lambda env: _probe_studio(env.get("EM_EMSTUDIO_WEB_URL"),
+                                          env.get("EM_EMSTUDIO_INTERNAL")),
     "nodeodm": engine_check,
 }
 
@@ -712,7 +769,7 @@ def node_services(*, environ: Optional[Dict[str, str]] = None
     # facts in without this loop learning that one service is different. The
     # column stays in `OFFERED` because it documents which variable configures
     # each face, and that is worth reading next to the label.
-    for name, label, _internal_var, public_var in OFFERED:
+    for name, label, _internal_var, public_var, what in OFFERED:
         check = _timed(lambda p=_PROBES[name]: p(env), name)
         offered.append({
             "name": name,
@@ -720,6 +777,7 @@ def node_services(*, environ: Optional[Dict[str, str]] = None
             "state": check.state,
             "url": (env.get(public_var) or "").strip().rstrip("/") if public_var else "",
             "detail": check.detail,
+            "what": what,
             # …and what that face declares it CAN DO. Empty for a service that
             # declares nothing, which is most of them: this route publishes what
             # neighbours say about themselves and never a guess about them.

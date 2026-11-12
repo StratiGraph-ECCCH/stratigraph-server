@@ -158,6 +158,6 @@ By hand, the measure that matters — a stopped service must not read `ok`:
 
 ```bash
 docker-compose --env-file .env.dev -f dev-stack/docker-compose.dev.yml stop rustfs
-# reload https://em.localhost:8443/em/admin/ → Node Health → s3: unreachable
+# reload https://em.localhost:8443/em/home/ → Node Health → s3: unreachable
 docker-compose --env-file .env.dev -f dev-stack/docker-compose.dev.yml start rustfs
 ```

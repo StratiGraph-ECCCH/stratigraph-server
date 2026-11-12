@@ -1,0 +1,62 @@
+<!doctype html>
+<!--
+  LA VETRINA DEL NODO — `/` del server, `/em/` dietro Caddy (E.D., 11 novembre 2026).
+
+  Il ragionamento è di E.D. e decide la forma: «se accedo tramite la pagina del
+  sito di progetto di fatto mi sto loggando come prima cosa», quindi nell'uso
+  vero questa pagina non serve a ENTRARE, serve a MOSTRARE — «adesso che mostro
+  StratiGraph Server, è bene ci sia e si veda». E deve crescere: «da aggiungere
+  anche gli altri servizi mano a mano che appaiono».
+
+  Quindi non porta NESSUNA lista: si compone da `/v1/node` (`offers`, `kind`,
+  `version`, `speaks`). Un servizio nuovo appare il giorno che il nodo lo
+  annuncia, senza che nessuno tocchi questo file — che è l'unica forma in cui
+  «mano a mano che appaiono» è una promessa mantenibile. La colonna delle facce
+  della casa, scritta a mano in tre voci, si era dimenticata EMStudio.
+
+  L'accesso è un gesto discreto dentro la pagina, in due posti: «Accedi» nella
+  barra e l'invito in fondo. Tutti e due portano in casa (`home/`), che è dove
+  si firma. Criterio di collaudo: un link mandato a qualcuno MOSTRA il servizio,
+  non una schermata di login.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StratiGraph Server</title>
+  <link rel="icon" href="brand/logo/favicon-deep-charcoal.svg" type="image/svg+xml">
+  <script src="brand/skin.js"></script>
+  <link rel="stylesheet" href="home/console.css">
+  <link rel="stylesheet" href="home/kit.css">
+  <link rel="stylesheet" href="vetrina/vetrina.css">
+</head>
+<body class="vetrina">
+  <header class="bar">
+    <img class="mark" src="brand/logo/favicon-deep-charcoal.svg" alt=""
+         width="22" height="22">
+    <span class="wordmark">StratiGraph</span>
+    <span class="sub" id="app-sub">server</span>
+    <span class="spacer"></span>
+    <a class="v-top" id="v-tools" href="tools/">Tools</a>
+    <select id="skin" class="lang"></select>
+    <select id="lang" class="lang"></select>
+    <a class="v-signin" id="v-signin" href="home/">Sign in</a>
+  </header>
+  <main id="vetrina" class="v-main" tabindex="-1">
+    <section class="v-hero">
+      <h1 id="v-title">StratiGraph Server</h1>
+      <p class="v-lead" id="v-lead"></p>
+      <p class="v-facts k-mono" id="v-facts"></p>
+    </section>
+    <section class="v-services" aria-labelledby="v-services-title">
+      <h2 id="v-services-title">What runs here</h2>
+      <ul id="v-offers" class="v-offers"><li class="k-faint">…</li></ul>
+    </section>
+    <section class="v-invite">
+      <p id="v-invite-text">Do you work on this node? Sign in, and you will find your rooms.</p>
+      <a class="k-btn pri" id="v-invite" href="home/">Sign in</a>
+    </section>
+  </main>
+  <script type="module" src="vetrina/vetrina.js"></script>
+</body>
+</html>
