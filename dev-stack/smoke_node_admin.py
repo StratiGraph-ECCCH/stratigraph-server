@@ -21,7 +21,7 @@ What it measures:
 5. …and there is **no delete**;
 6. an owner who is NOT an operator gets **403 with the remedy** — fail-closed, and
    the refusal says who grants the capability.
-7. the console itself is **served** (`GET /admin/`), shell + two modules.
+7. the console itself is **served** (`GET /home/`), shell + two modules.
 """
 
 from __future__ import annotations
@@ -163,18 +163,18 @@ def main() -> int:
     # ── 5 · the console is served ───────────────────────────────────────────
     print("\n5 · the console itself")
     root = base.rsplit("/v1", 1)[0]
-    status, headers, raw = call("GET", f"{root}/admin/")
-    tally.ok(status == 200, f"GET /admin/ serves the shell ({status})")
+    status, headers, raw = call("GET", f"{root}/home/")
+    tally.ok(status == 200, f"GET /home/ serves the shell ({status})")
     page = raw.decode("utf-8", "replace")
     tally.ok("node console" in page and "boot.js" in page,
              "…the shell, loaded through the file that orders the modules")
     for module in ("users-rooms.js", "storage.js"):
-        status, _, _ = call("GET", f"{root}/admin/modules/{module}")
+        status, _, _ = call("GET", f"{root}/home/modules/{module}")
         tally.ok(status == 200, f"module served: {module} ({status})")
     # the dependency points ONE way. Asserted here too because the alternative
     # was measured in a browser and it is silent: a circular import where the
     # shell awaits a module deadlocks, and the page just says "Loading…".
-    status, _, shell = call("GET", f"{root}/admin/console.js")
+    status, _, shell = call("GET", f"{root}/home/console.js")
     tally.ok(status == 200 and "./modules/" not in shell.decode("utf-8", "replace"),
              "…and the shell does not import its modules (no cycle)")
 

@@ -7173,13 +7173,12 @@ _CONSOLE = pathlib.Path(__file__).resolve().parent / "node_admin"
 if _CONSOLE.is_dir():
     app.mount("/home", _FreshStatic(directory=str(_CONSOLE), html=True),
               name="node-home")
-    # `/admin` RESTA MONTATA, ma come cartella di file e non come pagina
-    # (`html=False`): altre facce importano i moduli condivisi da qui —
-    # misurato l'11 novembre, `stratigraph-catalog/app/ui/catalog.js:384` fa
-    # `import(`${nodeUrl}/admin/bar.js`)` — e un 404 lì spegnerebbe la barra del
-    # catalogo. Le PAGINE di quell'indirizzo vanno in casa, qui sotto.
-    app.mount("/admin", _FreshStatic(directory=str(_CONSOLE)),
-              name="node-shared-modules")
+    # `/admin` NON è più montata, nemmeno come cartella di file (12 novembre
+    # 2026). Lo era per il catalogo, che importava `${nodeUrl}/admin/bar.js`; dal
+    # commit `6155bcd` di stratigraph-catalog chiede al nodo dove sta la casa
+    # (`/v1/node` → `faces`, `home`) e importa `/home/bar.js` — misurato in
+    # Chromium sul catalogo servito. Le PAGINE di quell'indirizzo vanno in casa,
+    # qui sotto; i file, da oggi, solo da `/home/`.
 
 # The BRAND both faces wear, served beside them. Vendored from
 # `stratigraph-brand/` by `sync-brand.sh` — same-origin and never a CDN, because
@@ -7199,22 +7198,20 @@ if _BRAND.is_dir():
 # query. E.D., 11 novembre: «non mi servono, non li ho mandati a nessuno». Quindi
 # `/rooms/` non esiste più, e `/tools/` torna una pagina sua (qui sotto).
 #
-# RESTANO DUE, e ciascuno per una ragione misurata, non per prudenza:
+# NE RESTA UNO, per una ragione misurata e non per prudenza:
 #
-# * `/admin/` → la casa, PERMANENTE (301): era l'indirizzo della casa fino a
-#   oggi, e lo fabbricano EMStudio (`frontend/src/who-chip.ts:81`,
-#   `${node}/admin/`) e la guida del nodo da campo.
-# * `/work/` → la casa, con la sua query: EMStudio lo fabbrica ancora nel
-#   codice, non in un link mandato a mano — `frontend/src/main.ts:9552` e
-#   `:10292`, `${node}/work/?room=…`, il pulsante «persone della stanza». La
-#   decisione dell'11 novembre partiva dal «nessuno li usa»; per `/work/` la
-#   misura dice il contrario, e il referto lo nomina. Si toglie quando EMStudio
-#   scrive `/home/?room=`.
+# * `/admin/` → la casa, PERMANENTE (301): era l'indirizzo della casa fino
+#   all'11 novembre, e la guida del nodo da campo ci punta ancora.
+#
+# `/work/` se n'è andato il 12 novembre: portava in casa (302) perché EMStudio
+# fabbricava `${node}/work/?room=…`. Dal commit `a9c6bf5` («Ask the node where
+# its house is», dentro la desktop v1.6.0-dev.115) EMStudio chiede al nodo dove
+# sta la casa, e in `frontend/src` non c'è più un `/work/` fabbricato. Adesso
+# `/work/` è un 404 come ogni indirizzo che non esiste.
 #
 # RELATIVI, perché il nodo non sa sotto quale prefisso lo serve il proxy (`/em/`).
 _OLD_FACES = {"/admin": ("home/", 301), "/admin/": ("../home/", 301),
-              "/admin/index.html": ("../home/", 301),
-              "/work/": ("../home/", 302), "/work/index.html": ("../home/", 302)}
+              "/admin/index.html": ("../home/", 301)}
 
 
 @app.middleware("http")
@@ -7298,9 +7295,9 @@ def showcase_page():
 ENTRANCES: List[Dict[str, str]] = [
     # ── 11 NOVEMBRE 2026: LA VETRINA, LA CASA, GLI STRUMENTI ─────────────────
     #
-    # `/rooms/` («the front door») e `/work/` non sono più facce: la prima non
-    # esiste, la seconda è una redirezione verso la casa che resta per EMStudio
-    # (vedi `_OLD_FACES`). `/admin/` è diventata `/home/`. Cambiano QUI, nello
+    # `/rooms/` («the front door») e `/work/` non sono più facce: non esistono
+    # (`/work/` portava in casa per EMStudio fino al 12 novembre, vedi
+    # `_OLD_FACES`). `/admin/` è diventata `/home/`. Cambiano QUI, nello
     # stesso passo della rimozione, perché `tests/test_node_map.py` risolve ogni
     # `path` di questa lista contro le rotte vere: è esattamente la ragione per
     # cui quel test esiste.

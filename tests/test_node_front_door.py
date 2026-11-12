@@ -195,8 +195,8 @@ def test_all_three_doors_are_actually_SERVED(client):
     La vetrina a `/`, la casa a `/home/`, gli strumenti a `/tools/` — ciascuna
     con la SUA pagina (due montaggi sulla stessa cartella risponderebbero 200
     entrambi e mostrerebbero la stessa cosa). `/admin/` porta in casa per
-    sempre (301) con la sua query; `/work/` anche, perché EMStudio lo fabbrica
-    ancora; `/rooms/` non c'è più.
+    sempre (301) con la sua query; `/work/` (dal 12 novembre) e `/rooms/` non
+    ci sono più, né i file sotto `/admin/`.
     """
     pages = {"/": "vetrina/vetrina.js", "/home/": "./boot.js", "/tools/": "./tools.js"}
     for path, script in pages.items():
@@ -206,17 +206,20 @@ def test_all_three_doors_are_actually_SERVED(client):
     for path, target, code in (
             ("/admin/?room=scavo&join=t0k", "../home/?room=scavo&join=t0k", 301),
             ("/admin/", "../home/", 301),
-            ("/admin", "home/", 301),
-            ("/work/?room=scavo&join=t0k", "../home/?room=scavo&join=t0k", 302)):
+            ("/admin", "home/", 301)):
         answer = client.get(path, follow_redirects=False)
         assert answer.status_code == code, (path, answer.status_code)
         assert answer.headers["location"] == target, path
-    for gone in ("/rooms/", "/rooms/rooms.js", "/work/rooms.css"):
+    # `/work/` (12 novembre: EMStudio chiede al nodo dove sta la casa) e i file
+    # sotto `/admin/` (il catalogo importa `/home/bar.js`) non esistono più
+    for gone in ("/rooms/", "/rooms/rooms.js", "/work/rooms.css",
+                 "/work/", "/work/?room=scavo&join=t0k", "/work/index.html",
+                 "/admin/bar.js", "/admin/i18n.js"):
         assert client.get(gone, follow_redirects=False).status_code == 404, gone
-    # …e i file restano serviti: la libreria del QR, i fogli della casa, e i
-    # moduli che altre facce importano da `/admin/` (il catalogo: `bar.js`)
+    # …e i file restano serviti: la libreria del QR, i fogli e i moduli della
+    # casa, che le altre facce importano da `/home/` (il catalogo: `bar.js`)
     for asset in ("/vendor/qrcode-generator-1.4.4.js", "/home/console.css",
-                  "/admin/bar.js", "/admin/i18n.js", "/vetrina/vetrina.css"):
+                  "/home/bar.js", "/home/i18n.js", "/vetrina/vetrina.css"):
         assert client.get(asset).status_code == 200, asset
 
 

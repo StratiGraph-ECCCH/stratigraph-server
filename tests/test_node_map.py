@@ -112,10 +112,9 @@ def test_EVERY_MOUNTED_PAGE_IS_ON_THE_MAP():
     #:   /brand    the brand both faces wear
     #:   /vendor   the QR library the house loads
     #:   /vetrina  the showcase's script and sheet (the PAGE is `/`, a route)
-    #:   /admin    the house's modules, still imported from there by other
-    #:             faces (stratigraph-catalog: `/admin/bar.js`); its page
-    #:             addresses redirect to `/home/`
-    files = {"/brand", "/vendor", "/vetrina", "/admin"}
+    #: (`/admin` was a fourth until 12 November: the catalogue imported
+    #: `/admin/bar.js`; it now asks `/v1/node` and imports `/home/bar.js`)
+    files = {"/brand", "/vendor", "/vetrina"}
     mounted = {route.path.rstrip("/") + "/" for route in main.app.routes
                if isinstance(route, Mount) and route.path not in files}
     listed = {face["path"] for face in ENTRANCES}

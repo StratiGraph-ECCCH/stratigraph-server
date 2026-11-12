@@ -266,15 +266,15 @@ def test_the_console_is_served_and_is_a_shell_with_modules(client):
     assert page.status_code == 200
     assert "node console" in page.text
     assert "boot.js" in page.text, "the page loads the ordering file"
-    boot = client.get("/admin/boot.js")
+    boot = client.get("/home/boot.js")
     assert boot.status_code == 200
     # the dependency points ONE way: modules import the shell, the shell does not
     # import them (a circular import with a top-level await deadlocks — measured
     # in a browser: the page said "Loading…" for ever and logged nothing)
-    shell = client.get("/admin/console.js").text
+    shell = client.get("/home/console.js").text
     assert "./modules/" not in shell
     for module in ("rooms.js", "people.js", "groups.js", "permissions.js", "storage.js"):
-        answer = client.get(f"/admin/modules/{module}")
+        answer = client.get(f"/home/modules/{module}")
         assert answer.status_code == 200, module
         assert 'from "../console.js"' in answer.text
         assert "register({" in answer.text, "a module registers itself"
@@ -425,13 +425,13 @@ def test_the_console_carries_no_secret_and_no_framework(client):
     and the console stays vanilla — a console that needed a build step to change
     a label is a console nobody changes."""
     for name in ("console.js", "auth.js", "boot.js"):
-        source = client.get(f"/admin/{name}")
+        source = client.get(f"/home/{name}")
         assert source.status_code == 200, name
         text = source.text
         assert "client_secret" not in text, name
         for framework in ("react", "vue", "angular", "import(\"http"):
             assert framework not in text.lower(), f"{name} pulled in {framework}"
-    page = client.get("/admin/").text
+    page = client.get("/home/").text
     assert "<script" in page and "cdn" not in page.lower()
 
 
@@ -439,12 +439,12 @@ def test_the_pkce_verifier_never_outlives_its_exchange(client):
     """Read from the source, because it is the property that matters and it is
     one line: the verifier has to survive the redirect (sessionStorage, which
     dies with the tab) and is REMOVED the moment it is read."""
-    source = client.get("/admin/auth.js").text
+    source = client.get("/home/auth.js").text
     assert "sessionStorage" in source
     assert "sessionStorage.removeItem(VERIFIER_KEY)" in source
     assert "localStorage" not in source, "a verifier in localStorage outlives the tab"
     # …and the token itself is never stored, in either file
-    assert "localStorage" not in client.get("/admin/console.js").text
+    assert "localStorage" not in client.get("/home/console.js").text
 
 
 # ── THE KNOT THE OPERATOR SHOULD SEE BEFORE IT BITES ─────────────────────────
