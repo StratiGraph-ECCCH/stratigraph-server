@@ -26,6 +26,33 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
 
 ### Aggiunto
 
+- **Il nodo serve i vocabolari che ha** (MICRO-PL02 «gestore dei vocabolari»,
+  residuo (1) di MICRO-U, E.D. 18 nov 2026). La cartella è quella di s3Dgraphy,
+  `vocab_dir()` (`EM_VOCABULARIES_DIR`, ora in `docs/DEPLOYMENT.md`).
+  - **I pacchetti, per il gestore di un'altra macchina:**
+    `GET /v1/vocabularies/catalog.json` nel formato di `vocab_catalog`
+    (`{packages: [{id, version, snapshot_date, title, languages, license, tier,
+    attribution, serves, sha256, url}]}`, `url` relativo: `<id>.emvocab.zip`,
+    `?version=` se non è la più nuova) e `GET /v1/vocabularies/<id>.emvocab.zip`
+    ricostruito dalla cartella (`s3dgraphy.vocabularies.vocab_package_bytes`;
+    con uno s3Dgraphy che non l'ha, come il dev121 del pin, lo stesso zip fatto
+    qui, leggendo sia `<id>/manifest.json` sia `<id>/<versione>/manifest.json`).
+  - **Le letture del ponte di EMStudio** (`tools/em_vocab.py`) sul nodo, stesse
+    forme: `GET /v1/vocab/installed`, `search`, `concepts`, `catalog`, `updates`
+    — la pagina web funziona senza il ponte. `catalog`/`updates` vanno solo al
+    catalogo centrale (un altro `url` è 400: una rotta pubblica non fa da proxy);
+    `installed` non dice percorsi del disco del nodo.
+  - **La fascia C non esce mai:** né lo stub né la copia scaricata sul nodo
+    compaiono nel catalogo, in `installed`, in `search`, in `concepts`; lo zip
+    risponde 403 con la ragione. Le letture sono pubbliche (un pacchetto A/B è
+    fatto per viaggiare).
+  - **Le scritture** del ponte (`POST /v1/vocab/install`, `remove`,
+    `fetch-local`) stanno in `v1` (token) e chiedono la capacità di OPERATORE,
+    lo stesso controllo di `/v1/admin/*`.
+  - `app/vocabularies.py` (rotte dichiarate lì e montate da `main` su `v1_public`
+    e `v1`, così `/docs` e la tabella del README le vedono), 7 test
+    (`tests/test_vocabularies.py`).
+
 - **Chi tiene un `.blend`: la prenotazione nella stanza** (MICRO-BLEND-OFFICINA-2,
   decisioni di E.D. D7/D8, 31 ott 2026). Verbo `hold` (`take` / `renew` /
   `release`, `force` per owner e admin) su una chiave = il percorso del `.blend`

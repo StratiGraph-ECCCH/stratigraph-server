@@ -81,6 +81,7 @@ from . import conversation as chat
 from . import roomview
 from .rooms import RoomDescriptor, RoomGraphTaken, RoomInTrash
 from . import trash as trash_module
+from . import vocabularies as vocabularies_module
 from .store import describe as snapshot_describe
 from .store import describe_rooms as room_describe
 from . import ws as _ws
@@ -268,6 +269,9 @@ OPENAPI_TAGS = [
      "manifests, and the check an image server asks before serving."},
     {"name": "photogrammetry", "description": "Turn a set of photographs into a "
      "3D model placed in the study, as a job you can follow."},
+    {"name": "vocabularies", "description": "The controlled vocabularies this "
+     "node has: their packages for another machine's manager (tiers A and B "
+     "only), and the reads EMStudio's page asks (installed, search, concepts)."},
     {"name": "node", "description": "For the people who run the node "
      "(operators): every room, storage, orphan files, the health of the "
      "services around the server."},
@@ -7346,6 +7350,10 @@ def entrances(public_base: str) -> List[Dict[str, str]]:
             for face in ENTRANCES]
 
 
+#: The vocabularies this node has (MICRO-PL02): reads public — a tier A/B package
+#: is made to travel, tier C never leaves —, the bridge's writes inside `v1` and
+#: behind the operator capability. `app/vocabularies.py`.
+vocabularies_module.mount(v1_public, v1)
 app.include_router(v1_public)
 app.include_router(v1)
 

@@ -86,6 +86,15 @@ sockets.
 disagree, in either direction. (Until 17 October 2026 the table listed the P0
 read subset — 8 operations of 77 — and the sentence under it said 49.)
 
+The **vocabularies** are the node's copy of the machine-wide vocabulary folder
+of s3Dgraphy (`s3dgraphy.authorities.packages.vocab_dir()`; on a node set
+`EM_VOCABULARIES_DIR` to a persistent path). Their reads are public because a
+tier A or B package is made to travel; **tier C** (a stub, a local copy) is
+never listed, searched nor served — the package route answers 403. The
+`/v1/vocab/*` routes mirror EMStudio's desktop bridge (`tools/em_vocab.py`),
+so its page works on the node; the three writes need the operator capability,
+as `/v1/admin/*`.
+
 Two operations depend on optional libraries: `POST /v1/export-ttl` needs
 `rdflib`, `POST /v1/reproject` needs `pyproj`. `GET /v1/health` says in
 `capabilities` whether this build has them, so a client never has to discover a
@@ -156,6 +165,16 @@ Two operations depend on optional libraries: `POST /v1/export-ttl` needs
 | `POST /v1/reproject` | Move coordinates from one reference system to another *(geo)* | yes |
 | `GET /v1/resolve-authority` | Look a term up in an authority (a thesaurus, a gazetteer) *(authority)* | yes |
 | `POST /v1/resolve-authority` | Look several terms up in an authority at once *(authority)* | yes |
+| `GET /v1/vocabularies/catalog.json` | The vocabulary packages this node serves (tiers A and B) *(vocabularies)* | — |
+| `GET /v1/vocabularies/{vocab_id}.emvocab.zip` | One vocabulary package, rebuilt from the node's folder *(vocabularies)* | — |
+| `GET /v1/vocab/installed` | The vocabularies installed on this node (tiers A and B) *(vocabularies)* | — |
+| `GET /v1/vocab/search` | Candidates for a word in this node's vocabularies *(vocabularies)* | — |
+| `GET /v1/vocab/concepts` | The concepts of some URIs, from this node's vocabularies *(vocabularies)* | — |
+| `GET /v1/vocab/catalog` | The packages the central vocabulary repository offers *(vocabularies)* | — |
+| `GET /v1/vocab/updates` | What the central repository has newer than this node *(vocabularies)* | — |
+| `POST /v1/vocab/install` | Install a vocabulary package on this node (operators) *(vocabularies)* | yes |
+| `POST /v1/vocab/remove` | Remove a vocabulary from this node (operators) *(vocabularies)* | yes |
+| `POST /v1/vocab/fetch-local` | Download a tier C source onto this node only (operators) *(vocabularies)* | yes |
 | `GET /v1/iiif-authz` | May the caller of this image request have it? (asked by the image proxy) *(iiif)* | — |
 | `GET /v1/rooms/{room_id}/iiif/{target_id}/manifest` | The IIIF manifest of one item of a room *(iiif)* | — |
 | `POST /v1/photogrammetry` | Reconstruct a set of photographs into a placed 3D model *(photogrammetry)* | yes |
