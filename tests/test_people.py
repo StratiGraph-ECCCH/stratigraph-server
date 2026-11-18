@@ -153,6 +153,18 @@ def test_TEST_iDs_only_where_the_node_allows_test_people(be, client, monkeypatch
     assert answer.status_code == 200 and answer.json()["test"] is True
 
 
+def test_a_test_SHAPED_iD_with_a_wrong_check_digit_blames_the_digit(be, client):
+    """The two refusals do not get confused: 0000-0000-… with a broken digit is
+    a wrong iD, not a node without test people."""
+    be(BRUNO)
+    good = people_module.test_orcid(7)
+    broken = good[:-1] + ("0" if good[-1] != "0" else "1")
+    answer = client.put(f"/v1/admin/people/{broken}", json={}, headers=AUTH)
+    assert answer.status_code == 400
+    detail = answer.json()["detail"]
+    assert "check digit" in detail and "EM_ALLOW_TEST_PEOPLE" not in detail
+
+
 def test_the_test_iD_generator_writes_valid_check_digits():
     from app.accredited import check_digit_ok
     assert all(check_digit_ok(people_module.test_orcid(n)) for n in range(1, 60))

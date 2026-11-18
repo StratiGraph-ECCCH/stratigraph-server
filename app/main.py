@@ -5623,9 +5623,15 @@ def node_put_person(orcid: str, body: PersonIn, request: Request) -> PersonOut:
     caller = _require_operator(request)
     key = people_module.valid_orcid(orcid)
     if not key:
+        # the check digit comes first: an iD shaped like a test one but with a
+        # wrong digit is a wrong iD, and saying "turn on test people" would send
+        # the reader to fix the node instead of the iD.
+        normalised = accredited_module.normalize(orcid)
+        shaped_like_a_test_iD = bool(normalised) and people_module.is_test_orcid(
+            normalised) and accredited_module.check_digit_ok(normalised)
         detail = ("test iDs (0000-0000-…) are accepted only on a node with test people "
-                  "(EM_ALLOW_TEST_PEOPLE)") if people_module.is_test_orcid(
-                      accredited_module.normalize(orcid)) else f"{orcid!r} is not an ORCID iD (check digit)"
+                  "(EM_ALLOW_TEST_PEOPLE)") if shaped_like_a_test_iD else (
+                      f"{orcid!r} is not an ORCID iD (check digit)")
         raise HTTPException(status_code=400, detail=detail)
     if body.profile is not None and body.profile not in people_module.PROFILES:
         raise HTTPException(status_code=400, detail="profile is one of: super, creator, user")
