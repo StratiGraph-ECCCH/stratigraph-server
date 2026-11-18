@@ -1,0 +1,49 @@
+# «Ve lo diamo noi» — the identity service, ours. FOR TRIALS ONLY.
+#
+# Keycloak 24.0.4 in `start-dev`, exactly as the dev stack runs it: in-memory
+# H2 database inside the pod, so every account made through it is lost when the
+# pod restarts. That is acceptable on a laptop and on OpenShift Local, and it is
+# NOT an institutional identity service: a real node uses the house's Keycloak
+# (`overlays/casa`), or a production Keycloak that is a project of its own.
+#
+# Measured on 18 Nov 2026 (`docker run --user 54321:0`): it starts and imports
+# the dev realm with a uid absent from its /etc/passwd; it does NOT start with a
+# read-only root filesystem (`start-dev` rebuilds into /opt/keycloak/lib), and
+# it refuses the realm unless ORCID_ISSUER / _CLIENT_ID / _CLIENT_SECRET are set
+# (the realm interpolates them).
+#
+# The realm is NOT copied here — one realm file lives in `dev-stack/keycloak/`.
+# Create the ConfigMap it is read from, before applying:
+#
+#   oc create configmap stratigraph-realm \
+#     --from-file=realm-em-dev.json=dev-stack/keycloak/realm-em-dev.json
+#
+# NOT DONE (said, not hidden): the dev realm's redirect URIs name
+# `em.localhost:8443`, and `dev-stack/render_realm.py --host` mirrors them for
+# another host on port 8443. A Route host on 443 has not been rendered nor
+# measured; until it is, browser sign-in on OpenShift will answer «Invalid
+# parameter: redirect_uri», while tokens by password grant (what the smoke
+# scripts use) work.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - keycloak.yaml
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: stratigraph-server-config
+    patch: |-
+      - op: replace
+        path: /data/OIDC_JWKS_URI
+        value: http://stratigraph-keycloak:8080/auth/realms/em-dev/protocol/openid-connect/certs
+      - op: replace
+        path: /data/OIDC_AUDIENCE
+        value: em-server
+      - op: replace
+        path: /data/EM_KC_ADMIN_URL
+        value: http://stratigraph-keycloak:8080/auth
+      - op: replace
+        path: /data/EM_KC_REALM
+        value: em-dev

@@ -1,0 +1,30 @@
+# Where the node writes — MEASURED on 18 Nov 2026, not read off the Dockerfile
+# (whose header still says «no volume»: that stopped being true when rooms,
+# people and the node's key got a home on disk).
+#
+# With S3 and Postgres configured, a run that creates a room, stores a file,
+# archives a .blend, makes a group, an invitation, a person, a people package
+# and starts an upload left, under EM_SNAPSHOT_DIR and nowhere else:
+#
+#   node-key.pem            the node's SIGNING key — lose it and every other node
+#                           that trusts this one stops recognising its packages
+#   people.json groups.json <room>.room.json <room>.acl.json <room>.invites.json
+#   node-log.jsonl
+#   asset-homes/  blend-backup-register/  uploads-in-progress/ (parts of big uploads)
+#
+# and nothing in /tmp or $HOME. Without Postgres the room documents and their
+# revisions land here too; without S3, so would the files (EM_ASSET_DIR).
+#
+# ReadWriteOnce, one replica: the stores on this volume are directories written
+# by one process (`blend_backups.describe` says «local only — not for replicas»).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: stratigraph-server-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      # an ESTIMATE, not a measurement: small JSON plus the parts of uploads in
+      # flight — size it to a few times the largest file you expect at once
+      storage: 20Gi

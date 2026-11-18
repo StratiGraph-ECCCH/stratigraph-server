@@ -1,0 +1,28 @@
+# «Ve lo diamo noi» — the object store, ours.
+#
+# RustFS, the image and version the dev stack runs (`rustfs/rustfs:1.0.2`).
+# Sets EM_ASSET_S3_ENDPOINT / EM_ASSET_S3_BUCKET; the key pair is the SAME two
+# Secret keys the server reads (EM_ASSET_S3_ACCESS_KEY / _SECRET_KEY), handed to
+# RustFS as its root credentials.
+#
+# No bucket-creating job: the server creates its bucket when it is missing
+# (`assets.S3AssetStore._ensure_bucket`) — measured, the bucket `em-assets` did
+# not exist before the first start and the server came up on it.
+# Measured on 18 Nov 2026: RustFS starts as `--user 54321:0` with a writable /data.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - rustfs.yaml
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: stratigraph-server-config
+    patch: |-
+      - op: replace
+        path: /data/EM_ASSET_S3_ENDPOINT
+        value: http://stratigraph-s3:9000
+      - op: replace
+        path: /data/EM_ASSET_S3_BUCKET
+        value: em-assets

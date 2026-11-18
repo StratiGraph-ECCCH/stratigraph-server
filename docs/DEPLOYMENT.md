@@ -315,6 +315,9 @@ look.
 
 ## What this page does not cover
 
+* **OpenShift.** The node alone, as an image in an institution's cluster, is
+  [`deploy/openshift/`](../deploy/openshift/README.md) — manifests, the
+  variables classified, and the page for the cluster's administrators.
 * **Turning the host on** — provisioning the machine, the DNS record, the
   firewall. That is ops, and it is deliberately outside the playbook.
 * **The production Catalog's own features** — PID/DOI minting, FAIR publication,

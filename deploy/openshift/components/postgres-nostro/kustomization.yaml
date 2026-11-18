@@ -1,0 +1,28 @@
+# «Ve lo diamo noi» — the documents' database, ours.
+#
+# For a node whose house has no PostgreSQL to give (a laptop, OpenShift Local,
+# a first trial). It runs the image the dev stack runs (`postgres:16-alpine`) and
+# sets the server's EM_DOCUMENTS_HOST / EM_DOCUMENTS_DB to it. The user and the
+# password are the SAME two Secret keys the server reads (EM_DOCUMENTS_USER,
+# EM_DOCUMENTS_PASSWORD): one place, so the two sides cannot disagree.
+#
+# Measured on 18 Nov 2026: this image starts as `--user 54321:0` (a uid absent
+# from its /etc/passwd) with PGDATA in a SUBDIRECTORY of the mount and a
+# writable /var/run/postgresql — which is why both are below.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - postgres.yaml
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: stratigraph-server-config
+    patch: |-
+      - op: replace
+        path: /data/EM_DOCUMENTS_HOST
+        value: stratigraph-postgres
+      - op: replace
+        path: /data/EM_DOCUMENTS_DB
+        value: em_documents

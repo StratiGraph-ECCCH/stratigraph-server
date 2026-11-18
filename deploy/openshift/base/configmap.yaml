@@ -1,0 +1,58 @@
+# The node's configuration that is NOT secret. Every key is read by the code
+# (enumerated from `app/`, not from a compose file: see `../README.md`, where
+# each one is classified obligatory / optional-with-default / secret).
+#
+# An EMPTY value is read by the server exactly as an absent one (every reader
+# strips and falls back), so the obligatory keys are here, empty, and the
+# preflight init container refuses to start the pod until they are filled.
+#
+# Keys that have a default in the code and that the deployment does not need to
+# change are deliberately NOT listed: some of them (`EM_TRASH_DAYS`,
+# `EM_CONSOLE_CLIENT_ID`, …) take their default only when the variable is
+# ABSENT, and an empty one would replace the default with "".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stratigraph-server-config
+data:
+  # ── obligatory ────────────────────────────────────────────────────────────
+  # personal | field | institutional — `app/node_kind.py`
+  EM_NODE_KIND: "institutional"
+  # the Route's public URL INCLUDING the /em path: https://<host>/em
+  EM_PUBLIC_BASE: ""
+  # the realm that signs the tokens: https://<keycloak>/realms/<realm>
+  # (`TOKEN_ENDPOINT` = <issuer>/protocol/openid-connect/token is accepted instead)
+  OIDC_ISSUER: ""
+  # the client id the tokens must name in `aud` (`CLIENT_ID_em` accepted instead)
+  OIDC_AUDIENCE: ""
+  # the node's own state — rooms, ACL, people, the node's signing key: the volume
+  EM_SNAPSHOT_DIR: "/srv/em-data/snapshots"
+  # the object store: endpoint and bucket here, the two keys in the Secret
+  EM_ASSET_S3_ENDPOINT: ""
+  EM_ASSET_S3_BUCKET: ""
+
+  # ── optional, set because the platform needs a value other than the default ──
+  # default: $HOME/.local/share/extendedmatrix/vocabularies, i.e. the container's
+  # own filesystem — gone with the pod. On the volume instead.
+  EM_VOCABULARIES_DIR: "/srv/em-data/vocabularies"
+  # the realm's certificates at an INTERNAL address, when the issuer's public
+  # name does not resolve from inside the cluster. Empty: the server derives
+  # <issuer>/protocol/openid-connect/certs and VERIFIES tokens correctly — but
+  # the operator health page (`/v1/admin/health`) then reports «no OIDC
+  # configured, every route open», because `node_health._probe_keycloak` reads
+  # only this variable (measured 18 Nov 2026). Set it, even to the public URL.
+  OIDC_JWKS_URI: ""
+  # the documents' database. Empty host: revisions live in EM_SNAPSHOT_DIR.
+  # Set the host, and DB + the two credentials in the Secret become obligatory.
+  EM_DOCUMENTS_HOST: ""
+  EM_DOCUMENTS_PORT: "5432"
+  EM_DOCUMENTS_DB: ""
+  # who administers the node: ORCID iDs, comma-separated. Empty: only holders of
+  # the realm role `em-operator` (EM_OPERATOR_ROLE) are operators.
+  EM_OPERATORS: ""
+  # a name for the node, shown to other nodes; empty: derived from EM_PUBLIC_BASE
+  EM_NODE_NAME: ""
+  # Keycloak's admin API, so the node can manage local passwords; empty: off
+  # (the node says so in its console). The credentials are in the Secret.
+  EM_KC_ADMIN_URL: ""
+  EM_KC_REALM: ""

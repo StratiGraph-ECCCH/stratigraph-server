@@ -1,0 +1,77 @@
+# «Ve lo diamo noi» — everything ours: a node that stands up on OpenShift Local
+# (or any cluster) with nobody's services but its own. For trials, not for an
+# institution: the identity service is Keycloak in dev mode (see
+# `components/keycloak-nostro`), and the secrets below are WORTHLESS on purpose,
+# like `dev-stack/.env.dev.example`.
+#
+#   oc create configmap stratigraph-realm \
+#     --from-file=realm-em-dev.json=dev-stack/keycloak/realm-em-dev.json
+#   oc apply -k deploy/openshift/overlays/portatile
+#
+# The host is OpenShift Local's default apps domain; change all four lines that
+# name it if your cluster has another.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+components:
+  - ../../components/postgres-nostro
+  - ../../components/s3-nostro
+  - ../../components/keycloak-nostro
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: stratigraph-server-config
+    patch: |-
+      - op: replace
+        path: /data/EM_NODE_KIND
+        value: field
+      - op: replace
+        path: /data/EM_PUBLIC_BASE
+        value: https://stratigraph.apps-crc.testing/em
+      - op: replace
+        path: /data/OIDC_ISSUER
+        value: https://stratigraph.apps-crc.testing/auth/realms/em-dev
+      # the dev realm's `dev` user — the same default the dev compose gives
+      # (DEV_OPERATOR_ORCID): without an operator nobody can make an editor
+      - op: replace
+        path: /data/EM_OPERATORS
+        value: 0000-0002-1825-0097
+  - target:
+      kind: Route
+    patch: |-
+      - op: add
+        path: /spec/host
+        value: stratigraph.apps-crc.testing
+  - target:
+      kind: Deployment
+      name: stratigraph-keycloak
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/4/value
+        value: https://stratigraph.apps-crc.testing/auth
+  - target:
+      kind: Secret
+      name: stratigraph-server-secrets
+    patch: |-
+      - op: replace
+        path: /stringData/EM_ASSET_S3_ACCESS_KEY
+        value: em-dev-access
+      - op: replace
+        path: /stringData/EM_ASSET_S3_SECRET_KEY
+        value: em-dev-secret-worthless
+      - op: replace
+        path: /stringData/EM_DOCUMENTS_USER
+        value: em
+      - op: replace
+        path: /stringData/EM_DOCUMENTS_PASSWORD
+        value: em-dev-worthless
+      - op: replace
+        path: /stringData/EM_KC_ADMIN_USER
+        value: admin
+      - op: replace
+        path: /stringData/EM_KC_ADMIN_PASSWORD
+        value: admin-dev-worthless

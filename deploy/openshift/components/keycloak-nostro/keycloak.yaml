@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stratigraph-keycloak
+  labels:
+    app.kubernetes.io/name: stratigraph-keycloak
+    app.kubernetes.io/part-of: stratigraph
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stratigraph-keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stratigraph-keycloak
+        app.kubernetes.io/part-of: stratigraph
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:24.0.4
+          args: ["start-dev", "--import-realm", "--http-port=8080"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: KEYCLOAK_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: stratigraph-server-secrets
+                  key: EM_KC_ADMIN_USER
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stratigraph-server-secrets
+                  key: EM_KC_ADMIN_PASSWORD
+            - name: KC_HTTP_RELATIVE_PATH
+              value: /auth
+            - name: KC_PROXY
+              value: edge
+            # the public URL tokens are stamped with — set in the overlay to
+            # https://<route host>/auth, and OIDC_ISSUER to …/auth/realms/em-dev
+            - name: KC_HOSTNAME_URL
+              value: https://CHANGE-ME/auth
+            - name: KC_HOSTNAME_STRICT_BACKCHANNEL
+              value: "false"
+            - name: ORCID_ISSUER
+              value: https://sandbox.orcid.org
+            - name: ORCID_CLIENT_ID
+              value: orcid-client-not-registered
+            - name: ORCID_CLIENT_SECRET
+              value: orcid-secret-not-set
+          readinessProbe:
+            httpGet:
+              path: /auth/realms/em-dev
+              port: http
+            periodSeconds: 5
+            failureThreshold: 40
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1536Mi
+      volumes:
+        - name: realm
+          configMap:
+            name: stratigraph-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stratigraph-keycloak
+  labels:
+    app.kubernetes.io/name: stratigraph-keycloak
+spec:
+  selector:
+    app.kubernetes.io/name: stratigraph-keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# same host as the node, under /auth — the dev stack's shape (Caddy: /auth/*)
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: stratigraph-keycloak
+spec:
+  path: /auth
+  to:
+    kind: Service
+    name: stratigraph-keycloak
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

@@ -1,0 +1,48 @@
+# «Ce lo dite voi» — the institutional node: identity, object store and (if
+# any) database are the HOUSE's. Only the node itself runs here.
+#
+# Fill, in this order:
+#   1. `host` below — the name the house gives the node;
+#   2. the values in `config.env` (committed EMPTY on purpose): the realm, the
+#      object store's endpoint and bucket, and the database if there is one;
+#   3. the secrets, OUT of version control:
+#        oc create secret generic stratigraph-server-secrets \
+#          --from-env-file=secrets.env --dry-run=client -o yaml | oc apply -f -
+#      (`secrets.env.example` lists the keys). The base's empty Secret is
+#      removed below so that `oc apply -k` never blanks them.
+#
+# Then `oc apply -k deploy/openshift/overlays/casa`. A value left empty stops
+# the pod in Init:Error, and `oc logs deploy/stratigraph-server -c preflight`
+# names it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: stratigraph-server-config
+    behavior: merge
+    envs:
+      - config.env
+
+patches:
+  # the secrets are the house's business, not this file's
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: stratigraph-server-secrets
+  - target:
+      kind: Route
+      name: stratigraph-server
+    patch: |-
+      - op: add
+        path: /spec/host
+        value: em.example.org
+
+# images:
+#   - name: ghcr.io/stratigraph-eccch/stratigraph-server
+#     newName: <the house's mirror>/stratigraph-server
+#     newTag: <version>

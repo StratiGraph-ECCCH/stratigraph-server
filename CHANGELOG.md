@@ -26,6 +26,24 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
 
 ### Aggiunto
 
+- **Il nodo dentro OpenShift** (E.D. 19 nov 2026, notte). `deploy/openshift/`:
+  kustomize con `base/` (Deployment con init container di preflight, Service,
+  Route sotto `/em` con `rewrite-target: /` come `handle_path` di Caddy,
+  ConfigMap, Secret vuoto coi nomi delle chiavi, PVC), tre componenti «ve lo
+  diamo noi» (`postgres-nostro`, `s3-nostro`, `keycloak-nostro` solo per prove)
+  e due overlay (`casa`: tutto della casa; `portatile`: tutto nostro).
+  `deploy/openshift/README.md` classifica le 101 variabili lette da `app/` più
+  le due di s3Dgraphy in obbligatorie / facoltative col default / segrete;
+  `ASKING-THE-HOUSE.md` è la pagina per gli amministratori.
+  - **`app/preflight.py`** (`python -m app.preflight`): rifiuta con una frase
+    per variabile un ambiente senza tipo di nodo, indirizzo pubblico https,
+    OIDC, `EM_SNAPSHOT_DIR` scrivibile e store degli asset. Lo chiama solo il
+    manifesto: il server, altrove, parte ancora senza configurazione.
+  - **Le sonde chiedono tutte `/health`**: misurato, `/v1/node` risponde 200
+    anche lui ma interroga i vicini (6 s se non rispondono).
+  - `tests/test_preflight.py` 28: ogni obbligatoria tolta da sola è rifiutata
+    per nome; ogni variabile letta dal codice è classificata nel README.
+
 - **Il nodo serve i vocabolari che ha** (MICRO-PL02 «gestore dei vocabolari»,
   residuo (1) di MICRO-U, E.D. 18 nov 2026). La cartella è quella di s3Dgraphy,
   `vocab_dir()` (`EM_VOCABULARIES_DIR`, ora in `docs/DEPLOYMENT.md`).

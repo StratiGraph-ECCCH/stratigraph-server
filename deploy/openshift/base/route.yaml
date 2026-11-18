@@ -1,0 +1,35 @@
+# The node's public face — what Caddy does on every other node, said to
+# OpenShift's router.
+#
+# Under `/em`, prefix stripped: `dev-stack/Caddyfile.dev` serves the server with
+# `handle_path /em/* { reverse_proxy stratigraph-server:8000 }`, so every node
+# has the same address shape (`https://<host>/em/v1/…`), the realm's redirect
+# URIs (`…/em/admin/*`, `…/em/rooms/*`) stay valid, and the other faces of the
+# node (`/auth`, `/catalog`, `/chat`) can share the host. `rewrite-target: /` is
+# `handle_path`: `/em/v1/health` reaches the pod as `/v1/health`.
+#
+# EM_PUBLIC_BASE must then be `https://<this host>/em`.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: stratigraph-server
+  annotations:
+    haproxy.router.openshift.io/rewrite-target: /
+    # The router's default idle timeout is 30 s. Rooms are WebSockets, kept
+    # alive by 20 s pings from uvicorn (the image's CMD), so 30 s would hold —
+    # by 10 s. Large uploads and a slow export are not pinged at all.
+    haproxy.router.openshift.io/timeout: 5m
+spec:
+  # host: em.example.org   ← set in the overlay, or leave empty for the
+  #                           router's generated name
+  path: /em
+  to:
+    kind: Service
+    name: stratigraph-server
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

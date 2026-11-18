@@ -1,0 +1,30 @@
+# StratiGraph Server on OpenShift — the base: the node alone.
+#
+# Every external dependency (identity, object store, database) is a VALUE in
+# `configmap.yaml` / `secret.yaml`, never a hostname written into a manifest.
+# The base assumes nothing about who runs them: `overlays/casa` fills the values
+# with the institution's services, `overlays/portatile` adds our own through the
+# components in `../components/*-nostro`. See `../README.md`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: stratigraph-server
+      app.kubernetes.io/part-of: stratigraph
+    includeSelectors: false
+
+resources:
+  - configmap.yaml
+  - secret.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - route.yaml
+
+# The image the CI publishes (`.github/workflows/immagine.yml`). Pin a version
+# in the overlay — or point at the institution's mirror — with `images:`.
+images:
+  - name: stratigraph-server
+    newName: ghcr.io/stratigraph-eccch/stratigraph-server
+    newTag: latest

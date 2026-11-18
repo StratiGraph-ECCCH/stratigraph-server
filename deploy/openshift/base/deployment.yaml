@@ -1,0 +1,136 @@
+# The node. One replica, Recreate: the directory stores on the volume are
+# written by one process, and a room's live state (the WebSocket session) is in
+# that process's memory — two pods would be two rooms with the same name.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stratigraph-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: stratigraph-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: stratigraph-server
+        app.kubernetes.io/part-of: stratigraph
+    spec:
+      # No runAsUser and no fsGroup: OpenShift assigns both from the project's
+      # range (restricted-v2). The image is built for exactly that — group-0
+      # ownership, `g=u`, a numeric USER, HOME named (`Dockerfile`, the block
+      # before `USER`) — and measured with `docker run --user 54321:0`.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      enableServiceLinks: false
+      initContainers:
+        # PREFLIGHT: the same image and the same environment, `python -m
+        # app.preflight`. A missing obligatory value leaves the pod in
+        # Init:Error with one sentence per value in `oc logs -c preflight`,
+        # instead of a node that comes up open and forgets everything.
+        - name: preflight
+          image: stratigraph-server
+          command: ["python", "-m", "app.preflight"]
+          envFrom:
+            - configMapRef:
+                name: stratigraph-server-config
+            - secretRef:
+                name: stratigraph-server-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /srv/em-data
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      containers:
+        - name: server
+          image: stratigraph-server
+          # the image's own CMD (uvicorn on 0.0.0.0:8000, WebSocket pings 20 s)
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: stratigraph-server-config
+            - secretRef:
+                name: stratigraph-server-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /srv/em-data
+            # measured: nothing is written to /tmp when EM_SNAPSHOT_DIR is set
+            # (uploads are staged beside the snapshots). Mounted anyway because
+            # the root filesystem is read-only and Python's tempfile wants one.
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # MEASURED, 18 Nov 2026 — and the measurement is why all three probes
+          # ask /health and none asks /v1/node:
+          #
+          #   /health    200 in ~2 ms from the moment uvicorn listens; in-process
+          #              (versions, which stores, counts). Listening comes AFTER
+          #              the stores are built and the start-up knock: ~0.5 s with
+          #              nothing to knock on, ~4 s with an unreachable realm.
+          #   /v1/node   ALSO 200 from the same moment — it cannot say «not
+          #              ready» — but it probes the NEIGHBOURS (catalogue, IIIF,
+          #              field assistant): 6 s when they do not answer. As a probe
+          #              it would kill this pod because another service is down.
+          #
+          # And «not ready» does not exist as a running state: a store that does
+          # not answer makes the PROCESS exit (S3 after ~21 s, Postgres after
+          # ~37 s, measured), which the kubelet sees as a crash, not a probe.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # the image's HEALTHCHECK, translated: every 30 s, 3 s, 3 retries
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            # measured idle with S3 + Postgres: ~116 MiB. Requests are that,
+            # limits leave room for graph operations on large documents.
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: stratigraph-server-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
