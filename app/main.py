@@ -1568,7 +1568,12 @@ async def start_upload(room_id: str, body: UploadIn, request: Request) -> Upload
     return _upload_out(record)
 
 
-@v1.api_route("/rooms/{room_id}/uploads/{upload_id}", summary="How far a resumable upload has got", methods=["GET", "HEAD"],
+# GET and HEAD registered apart, each with its own operationId: one
+# `api_route` for both gave FastAPI one id for two operations (it warned
+# «Duplicate Operation ID», 18 Nov 2026), and a generated client trips on it.
+@v1.api_route("/rooms/{room_id}/uploads/{upload_id}", summary="How far a resumable upload has got", methods=["GET"], operation_id="upload_status_v1_rooms__room_id__uploads__upload_id__get",
+              tags=["assets"], response_model=UploadOut)
+@v1.api_route("/rooms/{room_id}/uploads/{upload_id}", summary="How far a resumable upload has got", methods=["HEAD"], operation_id="upload_status_v1_rooms__room_id__uploads__upload_id__head",
               tags=["assets"], response_model=UploadOut)
 async def upload_status(room_id: str, upload_id: str, request: Request):
     """Where an upload is: `Upload-Offset` (and `Upload-Length`) in the headers
@@ -1725,8 +1730,14 @@ def _byte_range(header: Optional[str], size: int):
     return (start, size - 1 if end is None else min(end, size - 1))
 
 
+# GET and HEAD registered apart, each with its own operationId: one
+# `api_route` for both gave FastAPI one id for two operations (it warned
+# «Duplicate Operation ID», 18 Nov 2026), and a generated client trips on it.
 @v1.api_route("/rooms/{room_id}/asset/{ref:path}", summary="Download an asset of a room (Range requests welcome)",
-        responses={200: {"description": "the bytes, with license and author in the headers"}, 206: {"description": "a byte range"}, 403: {"description": "the graph does not let you have it (yet)"}}, methods=["GET", "HEAD"],
+        responses={200: {"description": "the bytes, with license and author in the headers"}, 206: {"description": "a byte range"}, 403: {"description": "the graph does not let you have it (yet)"}}, methods=["GET"], operation_id="get_asset_v1_rooms__room_id__asset__ref__get",
+              tags=["assets"])
+@v1.api_route("/rooms/{room_id}/asset/{ref:path}", summary="Download an asset of a room (Range requests welcome)",
+        responses={200: {"description": "the bytes, with license and author in the headers"}, 206: {"description": "a byte range"}, 403: {"description": "the graph does not let you have it (yet)"}}, methods=["HEAD"], operation_id="get_asset_v1_rooms__room_id__asset__ref__head",
               tags=["assets"])
 async def get_asset(room_id: str, ref: str, request: Request) -> Response:
     """Fetch an asset by reference — if the graph says you may have it yet.
@@ -6532,7 +6543,14 @@ def _download_name(ref: str, media_type: str) -> str:
     return f"{ref.split(':', 1)[1]}{ext}"
 
 
-@v1.api_route("/admin/assets/{ref}", summary="Download any asset, through no room (operators)", methods=["GET", "HEAD"], tags=["node"],
+# GET and HEAD registered apart, each with its own operationId: one
+# `api_route` for both gave FastAPI one id for two operations (it warned
+# «Duplicate Operation ID», 18 Nov 2026), and a generated client trips on it.
+@v1.api_route("/admin/assets/{ref}", summary="Download any asset, through no room (operators)", methods=["GET"], operation_id="download_asset_v1_admin_assets__ref__get", tags=["node"],
+              responses={400: {"description": "not an asset reference"},
+                         403: {"description": "not an operator"},
+                         404: {"description": "the store does not hold it"}})
+@v1.api_route("/admin/assets/{ref}", summary="Download any asset, through no room (operators)", methods=["HEAD"], operation_id="download_asset_v1_admin_assets__ref__head", tags=["node"],
               responses={400: {"description": "not an asset reference"},
                          403: {"description": "not an operator"},
                          404: {"description": "the store does not hold it"}})

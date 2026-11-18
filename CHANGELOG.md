@@ -26,6 +26,31 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
 
 ### Aggiunto
 
+- **Quello che il nodo fa, scritto** (E.D. 19 nov 2026, notte). Delle 84 rotte
+  `/v1` dello schema OpenAPI, 23 non comparivano in nessun documento.
+  - **`docs/NODE-ADMIN-API.md`**: l'API della console — chi può bussare
+    (`whoami` che non rifiuta, il `403` con la sua frase), persone per ORCID,
+    password da campo, togliere una persona, la stanza che nessuno può più
+    gestire, il registro, la chiave del nodo e la lista di fiducia, il
+    pacchetto di persone firmato (export, preview che non cambia niente,
+    import), il cestino. **`docs/VOCABULARIES-API.md`**: i due lati del
+    gestore dei vocabolari, con la fascia C che non esce mai. Il `restore` di
+    una stanza in `docs/REST-API.md`, accanto al cestino. Ogni esempio eseguito
+    sullo stack di sviluppo il 18 novembre; le abbreviazioni dichiarate.
+  - **`tests/test_docs_cover_routes.py`**: una rotta `/v1` che non compare in
+    `docs/` (né nella prosa del README: la sua tabella non conta, è già tenuta
+    uguale al codice) fa rosso. Eccezioni dichiarate nel test, oggi nessuna.
+  - **Tre operationId doppi tolti**: `upload_status`, `get_asset` e
+    `download_asset` erano un solo `api_route` per GET e HEAD; ora due
+    registrazioni con `operation_id` espliciti, uguali a quelli che lo schema
+    già pubblicava. FastAPI non avvisa più; il test lo controlla.
+  - **Sphinx e Read the Docs** come in s3Dgraphy e stratigraph-templates:
+    `docs/conf.py` (MyST, i documenti non riscritti; i link a file fuori da
+    `docs/` mandati su GitHub da una trasformazione), `docs/requirements.txt`,
+    `.readthedocs.yaml` (con `fail_on_warning: true`), `docs/index.md` come
+    porta per tre lettori — il terzo, chi lavora in una stanza, dichiarato
+    ancora senza manuale. `sphinx-build -W docs docs/_build` passa.
+
 - **Il nodo dentro OpenShift** (E.D. 19 nov 2026, notte). `deploy/openshift/`:
   kustomize con `base/` (Deployment con init container di preflight, Service,
   Route sotto `/em` con `rewrite-target: /` come `handle_path` di Caddy,

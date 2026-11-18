@@ -345,11 +345,60 @@ client never sits), is `GET …/who?since=<instant>`:
 }
 ```
 
+## A room in the trash
+
+*Run on 18 November 2026, on the same dev stack, in the room
+`scavo-orfano-2026-11-18`.*
+
+Deleting a room does not delete it at once. `DELETE /v1/rooms/{room_id}`, by
+the room's owner or the node's operator and with the id repeated in the body,
+puts the room in the **trash**, where it stays thirty days before the node
+empties it by itself:
+
+```bash
+curl -s -X DELETE -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"confirm": "scavo-orfano-2026-11-18"}' \
+  https://em.localhost:8443/em/v1/rooms/scavo-orfano-2026-11-18
+```
+
+```json
+{"room_id": "scavo-orfano-2026-11-18", "deleted_at": "2026-11-18T20:36:19Z",
+ "deleted_by": "0000-0002-1825-0097", "deleted_as": "owner", "complete": true,
+ "errors": [], "removed": {}, "containers_kept": [], "assets": [], "orphaned": [],
+ "blend_blobs_kept": [], "in_trash": true, "purge_after": "2026-12-18T20:36:19Z"}
+```
+
+Until `purge_after`, **`POST /v1/rooms/{room_id}/restore`** takes it back as it
+was — members, invitations, history, container. The same people who could
+delete it may restore it: the owner, or the operator.
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  https://em.localhost:8443/em/v1/rooms/scavo-orfano-2026-11-18/restore
+```
+
+```json
+{"room_id": "scavo-orfano-2026-11-18", "title": "Scavo rimasto senza nessuno",
+ "container_refs": ["scavo-orfano-2026-11-18"], "created_by": "0000-0000-0000-0423",
+ "created_at": "2026-11-18T20:36:05Z", "archived_at": null, "trashed_at": null,
+ "trashed_by": null, "purge_after": null, "implicit": false,
+ "owner": "0000-0002-1825-0097", "members": [], "groups": {}, "your_role": "owner",
+ "missing_refs": ["scavo-orfano-2026-11-18"], "born_with": []}
+```
+
+Asked a second time, the room is no longer in the trash: `404`,
+`{"detail": "no room 'scavo-orfano-2026-11-18' in the trash here"}`. Anybody
+else is `403`; and if, while the room was in the trash, another room took its
+graph, the answer is `409` (not run here). The node's view of the whole trash,
+rooms and files, is `GET /v1/admin/trash`, in `docs/NODE-ADMIN-API.md`.
+
 ## Every route
 
 Grouped as `/docs` groups them; `token` says whether a bearer token is needed.
-The same table is in the README, and a test fails if either disagrees with the
-code.
+This table was copied from the README on 17 October 2026 and is not held to the
+code; the README's is (`tests/test_la_documentazione_dice_il_vero.py`), and it
+is the complete one. The node console's own routes are told in
+`docs/NODE-ADMIN-API.md`, the vocabularies in `docs/VOCABULARIES-API.md`.
 
 | endpoint | what it does | token |
 |---|---|---|
@@ -364,7 +413,8 @@ code.
 | `GET /v1/rooms` | The rooms you have a role in *(rooms)* | yes |
 | `POST /v1/rooms` | Create a room *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}` | One room: its title, its containers, its state *(rooms)* | yes |
-| `DELETE /v1/rooms/{room_id}` | Delete a room (its assets stay, as orphans) *(rooms)* | yes |
+| `DELETE /v1/rooms/{room_id}` | Put a room in the trash — or, from the trash, delete it (its assets stay, as orphans) *(rooms)* | yes |
+| `POST /v1/rooms/{room_id}/restore` | Take a room back from the trash *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/who` | Who is in the room now, and who wrote recently *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/waiting` | What waits for a signature: fields a model composed, not yet validated *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/statistics` | What the room holds: nodes, edges, epochs, gaps *(rooms)* | yes |

@@ -1,0 +1,33 @@
+# .readthedocs.yaml — stratigraph-server
+# Stessa forma di s3Dgraphy e stratigraph-templates (v2, ubuntu-22.04,
+# python 3.11, pdf ed epub).
+# https://docs.readthedocs.io/en/stable/config-file/v2.html
+#
+# Differenza voluta rispetto agli altri due: il progetto NON si installa. La
+# documentazione del server è markdown letto da MyST, senza autodoc: installare
+# il server (FastAPI, boto3, psycopg, s3dgraphy…) servirebbe solo a rallentare
+# il build e a farlo dipendere da un indice di pacchetti che non c'entra.
+# La versione la legge docs/conf.py da pyproject.toml.
+#
+# `fail_on_warning: true`, a differenza degli altri due: il cancello locale è
+# `sphinx-build -W docs docs/_build`, e un sito che pubblica comunque con un
+# avviso è un sito che smette di dire quando qualcosa si è rotto.
+
+version: 2
+
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "3.11"
+
+python:
+  install:
+    - requirements: docs/requirements.txt
+
+sphinx:
+  configuration: docs/conf.py
+  fail_on_warning: true
+
+formats:
+  - pdf
+  - epub
