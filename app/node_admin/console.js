@@ -529,7 +529,7 @@ function showSignOut() {
 }
 
 /** Dove sta la guida del nodo: la documentazione pubblicata del server. */
-const DOCS = "https://docs.extendedmatrix.org/projects/stratigraph-server-doc/";
+const DOCS = "https://docs.stratigraph-eccch.eu/projects/node/";
 
 /** The old way, kept: one dialog, memory only, and a re-check of `whoami`. */
 async function askForToken() {
