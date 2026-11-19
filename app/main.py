@@ -1392,7 +1392,7 @@ async def _asset_home_view(room_id: str, ref: str, request: Request
                        f"it lives")
 
     citing: List[Dict[str, Any]] = []
-    for candidate in _rooms_holding(digest):
+    for candidate in await _rooms_holding(digest):
         try:
             said = await _asset_rights(candidate, ref)
         except Exception:  # noqa: BLE001 — listed as unreadable, not dropped
@@ -2089,7 +2089,7 @@ async def _asset_rights(room_id: str, ref: str) -> Optional[Dict[str, Any]]:
     room = await rooms().find(room_id)     # may raise: the store is not here
     if room is None:
         return None
-    known, rights = DIGEST_INDEX.rights(room_id, room, _digest_of(ref))
+    known, rights = await DIGEST_INDEX.rights_async(room_id, room, _digest_of(ref))
     if known:
         # …from the index, which is rebuilt the moment the room's document
         # changes (`Room.revision`) rather than on a timer. What is cached is
@@ -2142,7 +2142,7 @@ async def _rights_seen_anywhere(room_id: str, ref: str, request: Request,
     """
     first: Optional[Dict[str, Any]] = None
     checked: List[str] = []
-    for candidate in [room_id] + [r for r in _rooms_holding(_digest_of(ref))
+    for candidate in [room_id] + [r for r in await _rooms_holding(_digest_of(ref))
                                   if r != room_id]:
         try:
             rights = await _asset_rights(candidate, ref)
@@ -2237,7 +2237,7 @@ async def _corpus_gate(ref: str, request: Request, *, door: Optional[str],
             # no ACL and its empty document names no owner, so it grants nothing,
             # while a real editor of a room that was never saved still gets in.
             candidates = ([door] if door else []) \
-                + [r for r in _rooms_holding(_digest_of(ref)) if r != door]
+                + [r for r in await _rooms_holding(_digest_of(ref)) if r != door]
             for candidate in [c for c in candidates if c and not allowed]:
                 role = await _role_without_bootstrap(candidate, me, request)
                 if role is not None and role.can_write:
@@ -2739,7 +2739,7 @@ async def iiif_authz(request: Request, response: Response,
         await _rights_seen_anywhere(room_id, digest, request)
         checked = 1
     else:
-        rooms_to_ask = _rooms_holding(digest)
+        rooms_to_ask = await _rooms_holding(digest)
         checked = len(rooms_to_ask)
         for candidate in rooms_to_ask:
             await _rights_seen_anywhere(candidate, digest, request)
@@ -2814,7 +2814,7 @@ async def _role_without_bootstrap(room_id: str, orcid: Optional[str],
                           groups_of=groups().expander())
 
 
-def _rooms_holding(digest: str) -> List[str]:
+async def _rooms_holding(digest: str) -> List[str]:
     """Which rooms might have something to say about this digest.
 
     A IIIF request carries no room — the identifier is the content itself — so
@@ -2839,8 +2839,10 @@ def _rooms_holding(digest: str) -> List[str]:
     # worth reading; the rest cannot have anything to say about it. A room the
     # index has not read is kept in the list — "not read" must never pass for
     # "says nothing", which is the difference between an index and a hole.
+    # Off the event loop: a stale room is rebuilt by walking its document, and
+    # a walk held here used to stop the whole node (see `digest_index`).
     registry = rooms()
-    return DIGEST_INDEX.rooms_for(
+    return await DIGEST_INDEX.rooms_for_async(
         digest, [(room_id, registry.peek(room_id)) for room_id in candidates])
 
 
