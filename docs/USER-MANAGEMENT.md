@@ -36,6 +36,12 @@ it is older than this document (`app/corpus.py`, `s3dgraphy.rights`).
    node **operator** is named by the deployment (realm role or `EM_OPERATORS`) and
    **cannot be self-granted** — there is no endpoint that grants it.
 
+How these five sentences meet on the day a node opens — the first operator's
+account, who may create a room, what an invited colleague is told before they
+have a room, how somebody is taken out, and which of those steps are still done
+by hand in Keycloak — is in **[FIRST-DAY.md](FIRST-DAY.md)**, run step by step
+on the dev stack as an institutional node.
+
 ---
 
 ## HOWTO · a · bring the stack up

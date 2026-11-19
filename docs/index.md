@@ -14,7 +14,11 @@ third does not yet, and this door says so rather than pretending otherwise.
 
 You install it, decide who may use it, keep its storage in order, and are the
 one people ask when something does not open. Start from the map of the pieces,
-then the deployment; the console is where you will spend your days.
+then the deployment; the console is where you will spend your days. For the
+day a new node opens — who the first operator is, who may create rooms, what
+an invited colleague sees before they have one — read
+[the first day of an institutional node](FIRST-DAY.md), which follows three
+people through it and says which steps are still done by hand.
 
 ```{toctree}
 :maxdepth: 1
@@ -24,6 +28,7 @@ ARCHITECTURE-SYSTEM
 DEPLOYMENT
 URL-TOPOLOGY
 NODE-CONSOLE
+FIRST-DAY
 USER-MANAGEMENT
 SYNC-FIELD-TO-CLOUD
 HERIVERSE-IMMAGINI

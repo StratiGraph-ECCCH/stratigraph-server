@@ -26,6 +26,21 @@ Le voci nuove in cima. Il numero di versione lo mette il bump, non questo file.
 
 ### Aggiunto
 
+- **Il primo giorno di un nodo istituzionale** (19 nov 2026, mattina; punto 4
+  dell'audit del 18). `docs/FIRST-DAY.md`, in inglese, con tre persone —
+  l'archeologa che dirige lo scavo ed è la prima operatrice, il dottorando, la
+  collega di un altro istituto invitata a leggere — e ogni passo eseguito
+  sullo stack riavviato come nodo `institutional`: il primo operatore nominato
+  da `EM_OPERATORS`, chi può creare una stanza il primo giorno, la stanza,
+  l'invito, che cosa risponde il nodo all'invitata **prima** che abbia una
+  stanza (nove porte, con le frasi del nodo), come si toglie qualcuno da una
+  stanza e dal nodo. I passi che oggi si fanno a mano sono scritti come tali:
+  l'utente Keycloak del primo operatore (il flusso di primo accesso collega e
+  non crea), l'operatore su OpenShift (`EM_OPERATORS: ""` e nessun ruolo
+  `em-operator` nel realm), i cinque account di sviluppo che il realm importato
+  si porta dietro, la collega esterna che va aggiunta in People prima che il
+  link serva, l'account non disabilitato su un realm i cui username non sono
+  iD. Collegato da `docs/index.md` e da `docs/USER-MANAGEMENT.md`.
 - **Quello che il nodo fa, scritto** (E.D. 19 nov 2026, notte). Delle 84 rotte
   `/v1` dello schema OpenAPI, 23 non comparivano in nessun documento.
   - **`docs/NODE-ADMIN-API.md`**: l'API della console — chi può bussare
