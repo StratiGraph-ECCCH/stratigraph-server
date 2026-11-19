@@ -104,23 +104,19 @@ latex_show_urls = 'footnote'
 
 # -- Links that leave docs/ -------------------------------------------------
 # The documents were written to be read in the repository, so they link to
-# files beside them as files: `../dev-stack/README-DEV.md`, `../../s3Dgraphy`.
+# files of this repository beside them as files: `../dev-stack/README-DEV.md`.
 # On the site those are not pages. Rather than rewriting the documents, this
 # pass reads each such link against the FILE that contains it and sends it to
-# GitHub: a file of this repository to its blob, a sibling repository to its
-# home. Siblings are matched by NAME, not on disk — on Read the Docs only this
-# repository is checked out. A link this pass does not understand is left to
-# MyST, which warns, and `-W` makes the warning an error.
+# its blob on GitHub. A link this pass does not understand is left to MyST,
+# which warns, and `-W` makes the warning an error.
+#
+# Another repository is NOT resolved here (19 November 2026): a document of a
+# sibling repository is written with its whole address, because a relative
+# `../../s3Dgraphy` works only on a disk where the repositories are sibling
+# folders, and on GitHub it is a 404. `tests/test_docs_link_veri.py` keeps every
+# relative link inside the repository; one that slipped past it would reach
+# MyST here, and `-W` would stop the build.
 _THIS = 'https://github.com/StratiGraph-ECCCH/stratigraph-server'
-_SIBLINGS = {
-    's3Dgraphy': 'https://github.com/ExtendedMatrix/s3Dgraphy',
-    'EMStudio': 'https://github.com/ExtendedMatrix/EMStudio',
-    'EM-blender-tools': 'https://github.com/zalmoxes-laran/EM-blender-tools',
-    'stratigraph-catalog': 'https://github.com/StratiGraph-ECCCH/stratigraph-catalog',
-    'stratigraph-templates': 'https://github.com/StratiGraph-ECCCH/stratigraph-templates',
-    'stratigraph-stratifield': 'https://github.com/StratiGraph-ECCCH/stratigraph-stratifield',
-    'heriverse-ansible': 'https://github.com/StratiGraph-ECCCH/heriverse-ansible',
-}
 
 from sphinx.transforms.post_transforms import SphinxPostTransform  # noqa: E402
 
@@ -132,7 +128,6 @@ def _outside_uri(raw, source_file):
     path, _, anchor = raw.partition('#')
     here = os.path.dirname(source_file)
     full = os.path.normpath(path if os.path.isabs(path) else os.path.join(here, path))
-    parent = os.path.dirname(ROOT)
     if full == ROOT or full.startswith(ROOT + os.sep):
         rel = os.path.relpath(full, ROOT).replace(os.sep, '/')
         if rel == 'docs' or rel.startswith('docs/'):
@@ -144,24 +139,6 @@ def _outside_uri(raw, source_file):
         if os.path.isdir(full):
             return _THIS if rel == '.' else f'{_THIS}/tree/HEAD/{rel}'
         return None
-    if full.startswith(parent + os.sep):
-        name, _, rest = os.path.relpath(full, parent).replace(os.sep, '/').partition('/')
-        home = _SIBLINGS.get(name)
-        if home is None:
-            return None
-        if not rest:
-            return home
-        if not os.path.splitext(rest)[1]:
-            rest += '.md'                     # MyST dropped the suffix
-        # Where the sibling IS checked out beside this one (a local build, not
-        # Read the Docs), a link to a file it does not have is a broken link:
-        # left to MyST, which warns, and `-W` stops. The manual's two parts
-        # point into StratiField's docs, and a page moved there must not leave
-        # a link behind that only GitHub would find broken.
-        sibling = os.path.join(parent, name)
-        if os.path.isdir(sibling) and not os.path.exists(os.path.join(sibling, rest)):
-            return None
-        return f'{home}/blob/HEAD/{rest}' + (f'#{anchor}' if anchor else '')
     return None
 
 

@@ -84,7 +84,7 @@ without any of them re-deriving it.
 The rule the other repos inherit: *if an endpoint needs to compute something,
 that something belongs here.*
 
-**Repo:** [`s3Dgraphy`](../../s3Dgraphy) · installable as `pip install s3dgraphy`
+**Repo:** [`s3Dgraphy`](https://github.com/ExtendedMatrix/s3Dgraphy) · installable as `pip install s3dgraphy`
 
 ### StratiGraph Server — the ROOM
 
@@ -141,7 +141,7 @@ Sarmizegetusa in 1978, in 2013, in 2026, three containers, one digital twin.
 > publication, the browse UI, the institutional deployment — is 3DR's, on the WP6
 > infrastructure. What we provide is the contract, running.
 
-**Repo:** [`StratiGraph Catalog`](../../StratiGraph Catalog) · API under `/catalog`
+**Repo:** [`StratiGraph Catalog`](https://github.com/StratiGraph-ECCCH/stratigraph-catalog) · API under `/catalog`
 
 ### EMStudio — the editor
 
@@ -151,7 +151,7 @@ Where the graph is authored. Two views on the same data: the **EM matrix**
 desktop app from one codebase, opens and saves `.em.json` containers, and can
 connect **live** to a Blender session or to a room.
 
-**Repo:** [`EMStudio`](../../EMStudio)
+**Repo:** [`EMStudio`](https://github.com/ExtendedMatrix/EMStudio)
 
 ### EM-blender-tools (EMtools) — the 3D end
 
@@ -160,7 +160,7 @@ for stratigraphic units, reconstruction models, orthophotos, georeferencing. It
 reads and writes the same graphs, and publishes models into a room's asset store
 so that a `.blend` stops being both the workshop and the archive.
 
-**Repo:** [`EM-blender-tools`](../../EM-blender-tools)
+**Repo:** [`EM-blender-tools`](https://github.com/zalmoxes-laran/EM-blender-tools)
 
 ### Reading a study — the two renderings
 
@@ -268,7 +268,7 @@ stack where both forms were the same string would prove nothing.
 | deploy it on a real host | [`DEPLOYMENT.md`](DEPLOYMENT.md) |
 | know which URL is which | [`URL-TOPOLOGY.md`](URL-TOPOLOGY.md) |
 | understand the merge / real-time model | `EMStudio/docs/adr-003-offline-vs-realtime-versioning.md` |
-| use the library | [`s3Dgraphy/README.md`](../../s3Dgraphy/README.md) |
-| use the API | [`StratiGraph Server/README.md`](../README.md) · [`stratigraph-catalog/README.md`](../../stratigraph-catalog/README.md) |
-| edit a graph | [`EMStudio/README.md`](../../EMStudio/README.md) |
-| work in 3D | [`EM-blender-tools/README.md`](../../EM-blender-tools/README.md) |
+| use the library | [`s3Dgraphy/README.md`](https://github.com/ExtendedMatrix/s3Dgraphy/blob/main/README.md) |
+| use the API | [`StratiGraph Server/README.md`](../README.md) · [`stratigraph-catalog/README.md`](https://github.com/StratiGraph-ECCCH/stratigraph-catalog/blob/main/README.md) |
+| edit a graph | [`EMStudio/README.md`](https://github.com/ExtendedMatrix/EMStudio/blob/main/README.md) |
+| work in 3D | [`EM-blender-tools/README.md`](https://github.com/zalmoxes-laran/EM-blender-tools/blob/master/README.md) |

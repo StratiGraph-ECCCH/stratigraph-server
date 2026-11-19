@@ -159,4 +159,4 @@ when its administrators publish it. Publishing does not close the room.
 
 How the catalogue is built — a study *is* its em.json, the index is rebuilt
 from the files, the contract a production catalogue is held to — is in the
-[catalogue's own repository](../../stratigraph-catalog/README.md).
+[catalogue's own repository](https://github.com/StratiGraph-ECCCH/stratigraph-catalog/blob/main/README.md).

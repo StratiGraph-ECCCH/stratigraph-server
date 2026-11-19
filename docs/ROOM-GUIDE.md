@@ -39,6 +39,25 @@ one sentence on what is done here and one button.
   field password the node manager gave you. The first time, the node asks you to
   choose your own.
 
+Inside the house, the bar at the top calls this page *This node*: it is the way
+back to the door from any page. The door is composed by the node itself, from
+what it declares at `/v1/node`, so it shows what runs on *this* node and
+nothing else. Under *What runs here* there is one row for each service the node
+has, with one sentence on what it does and, when it is not answering, a word
+that says so:
+
+- **Catalogue** — the published studies, searchable, each one a link to read
+  it (see [What is on the node](CATALOGUE.md));
+- **Images (IIIF)** — the images of the studies, at any size;
+- **StratiField** — the field assistant, to dictate and record on the
+  excavation from a phone;
+- **EMStudio** — the editor, in the browser, opening the rooms of this node;
+- **Photogrammetric engine** — it turns photographs into 3D models, for the
+  rooms of this node.
+
+A service the node does not have is not drawn: a node on a laptop may show only
+EMStudio, as in the picture above.
+
 Below the button, without signing in, are the published studies, the tools to
 install and this guide. What the published studies look like, and how to look
 through them, is in [What is on the node](CATALOGUE.md).
@@ -70,7 +89,17 @@ profile on the node allows it (*node editor*); otherwise the page says whom to
 ask. Whoever creates a room is its **owner**.
 
 **Tools**, in the column on the left, explains step by step how to install
-EMStudio, and Blender (4.4 or later) with EMtools.
+EMStudio, and Blender (4.4 or later) with EMtools. The node declares two tools,
+and for each one where to download it and where its own manual lives — those
+manuals are written by the tools' authors, not on this node:
+
+- **EMStudio** — the guide is at <https://docs.extendedmatrix.org>;
+- **EMtools (Blender)** — the installation guide is at
+  <https://docs.extendedmatrix.org/projects/EM-tools/en/1.5/installation.html>.
+
+A node can point both addresses elsewhere — a field node with no route out
+points them at a copy on its own disk — and the page then shows the node's
+addresses, not these.
 
 ## One room, opened
 
@@ -183,7 +212,7 @@ If the room may ever be needed again, archive it instead.
 The complete rules — profiles on the node, roles, groups, invitations, deleting
 — are in [People, profiles and roles](ROLES-AND-USERS.md). The node itself, and
 how the field node is prepared, are in
-[the field node](../../stratigraph-stratifield/docs/FIELD-NODE.md), in
+[the field node](https://github.com/StratiGraph-ECCCH/stratigraph-stratifield/blob/main/docs/FIELD-NODE.md), in
 StratiField's manual.
 
 The same room, reached by a program instead of a person — a phone in the

@@ -13,7 +13,7 @@ node on and not to the place it runs.
 StratiGraph Server · the development node, for whoever runs a node on a laptop
 to work, to test tools against it, or to show it. The field node on a Raspberry
 Pi is the same software set up for the excavation: see
-[the field node](../../stratigraph-stratifield/docs/FIELD-NODE.md), in
+[the field node](https://github.com/StratiGraph-ECCCH/stratigraph-stratifield/blob/main/docs/FIELD-NODE.md), in
 StratiField's manual. Everything about the stack beyond switching it on — the
 prerequisites per platform, the trust of the certificate, the history of each
 choice — is in [`dev-stack/README-DEV.md`](../dev-stack/README-DEV.md).
@@ -193,7 +193,7 @@ before you start, what the single command does, and what to check afterwards.*
 
 The map of the pieces is [`ARCHITECTURE-SYSTEM.md`](ARCHITECTURE-SYSTEM.md);
 this is the operational half. The playbook itself lives in the
-[`heriverse-ansible`](../../heriverse-ansible) repository.
+[`heriverse-ansible`](https://github.com/StratiGraph-ECCCH/heriverse-ansible) repository.
 
 > **The object store is RustFS** (`rustfs/rustfs:1.0.2`, pinned with its
 > digest), in this role as on the dev stack. StratiGraph Server and the two

@@ -30,7 +30,7 @@ CATALOGUE
 
 The field node — the node that travels to the excavation, and how it is
 prepared before leaving — is in
-[StratiField's manual](../../stratigraph-stratifield/docs/index.md).
+[StratiField's manual](https://github.com/StratiGraph-ECCCH/stratigraph-stratifield/blob/main/docs/index.md).
 
 ## Building and running a node
 
