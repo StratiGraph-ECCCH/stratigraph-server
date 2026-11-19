@@ -53,7 +53,7 @@
 # DATI: studi, stanze, bucket, realm e CA di Caddy stanno su volumi e restano fra
 # un riavvio e l'altro. Solo ./fcn-down.sh --wipe li cancella.
 #
-# Il manuale: stratigraph-server-doc, «Running the node on your computer».
+# Il manuale: docs/DEPLOYMENT.md, «On your computer — the development node».
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   awk 'NR==1{next} /^#/{sub(/^# ?/,"");print;next} /^[[:space:]]*$/{next} {exit}' "$0"; exit 0
 fi

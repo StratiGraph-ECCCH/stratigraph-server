@@ -1,6 +1,194 @@
-# Deploying the whole system
+# Running a node
 
-*One playbook, one host, everything behind TLS. This page says what you need
+A node is switched on in one of two places, and this page tells both: **on your
+computer**, from the `dev-stack` folder of this repository — the development
+node, and the same scripts that prepare a field node — and **on a host**, the
+whole system behind one name, with the playbook. The two roads a node's
+services come by (built from the code, or downloaded as published images) are
+told once, in the first half, because they belong to the scripts that switch a
+node on and not to the place it runs.
+
+## On your computer — the development node
+
+StratiGraph Server · the development node, for whoever runs a node on a laptop
+to work, to test tools against it, or to show it. The field node on a Raspberry
+Pi is the same software set up for the excavation: see
+[the field node](../../stratigraph-stratifield/docs/FIELD-NODE.md), in
+StratiField's manual. Everything about the stack beyond switching it on — the
+prerequisites per platform, the trust of the certificate, the history of each
+choice — is in [`dev-stack/README-DEV.md`](../dev-stack/README-DEV.md).
+
+### What is running
+
+The node is a set of programs, each in its own Docker container, started
+together by one script. On a Mac they run inside Colima, the small virtual
+machine that gives macOS a Docker. One node, one set of containers:
+
+| Container | What it is |
+|----|----|
+| `em-dev-caddy` | The front door: https on port 8443, with the node's own certificate. |
+| `em-dev-keycloak` | Who you are: sign-in with ORCID or with the node's password. |
+| `em-dev-server` | The rooms: the live graphs, the relay of every change, the console. |
+| `em-dev-chatbot` | StratiField, the field assistant for the phone. |
+| `em-dev-catalog` | The catalogue of published studies. |
+| `em-dev-cantaloupe`, `em-dev-rustfs`, `em-dev-postgres` | Images (IIIF), the file store (the bucket), the database. |
+
+Once started, the containers come back by themselves until you switch them off.
+To see what is on:
+
+    docker ps
+
+The same node answers at three addresses, and they are not three nodes:
+
+- `https://em.localhost:8443` — from this computer only;
+- `https://<host>:8443` — from the other devices on the same network (see
+  below);
+- `http://localhost:8000` — the rooms server reached directly, without the front
+  door; tools use it when they run on the same computer.
+
+### Switching it on and off
+
+All the commands are run from the `dev-stack` folder of the server:
+
+    cd ~/Documents/GitHub/stratigraph-server/dev-stack
+
+| Command | What it does |
+|----|----|
+| `./fcn-up.sh` | Switches the node on. The first time it builds the images (some minutes); after that it reuses them. |
+| `./fcn-up.sh --offline` | Switches it on without building and without the EMStudio development server: two or three minutes, no network needed. The usual way after a restart. |
+| `./fcn-up.sh 192.168.1.214` | Switches it on for the other devices of the network, at that address. The address is remembered: the next times `./fcn-up.sh --offline` is enough. |
+| `./fcn-up.sh --demo` | Also fills it with demonstration studies, rooms and images. |
+| `./fcn-down.sh` | Switches it off. Studies, rooms, files and accounts stay. |
+| `./fcn-down.sh --colima` | Switches it off and frees the Mac's memory too. |
+| `./fcn-down.sh --wipe` | Switches it off and **deletes everything**: studies, rooms, files, accounts and the certificate. Only for a fresh start. |
+
+Every script explains itself, with examples:
+
+    ./fcn-up.sh --help
+    ./fcn-down.sh --help
+
+```{warning}
+**After every restart, sign in again.** On the development node the sign-in
+service keeps its sessions inside its container, so they do not survive a
+restart. A browser shows the sign-in page again; EMStudio shows *connection
+lost* and retries forever — in its panel of the node, choose *Sign in as
+another user*. StratiField on the phone asks for the signature again. The
+field node keeps the sessions on disk and does not have this problem.
+```
+
+### From the code, or from the published images
+
+The node can be started by two roads, and both are kept:
+
+|  | **source** — for whoever writes the code | **images** — for a node that only has to run |
+|----|----|----|
+| Where the services come from | Built on this computer from the repositories side by side (`stratigraph-chatbot`, `stratigraph-catalog`, `EMStudio`…); a change to the code shows without rebuilding. | Downloaded ready-made from `ghcr.io/stratigraph-eccch`, for Intel and ARM machines alike (a Raspberry Pi 5 included). Nothing is built, and only `stratigraph-server` needs to be on the computer. |
+| Compose files | `docker-compose.dev.yml` | `docker-compose.dev.yml` + `docker-compose.images.yml` |
+| Forms (schede), EMStudio reader | From the checkouts beside it: `stratigraph-templates/templates` mounted as a development override, `EMStudio/frontend/dist` mounted. | Inside the images: the compiled schede vendored in the StratiField image, the reader built into the catalogue image (`/srv/em-reader-dist`). |
+| s3Dgraphy | The version pinned once in `docker-compose.dev.yml` (the anchor `x-s3dgraphy-version`), or your own checkout with `--local-s3d`. | The wheel inside each image, the same version as the anchor. |
+| EMStudio dev server (`/em/studio/`) | Started on the host if the checkout has `node_modules`. | Off (`--studio` still forces it if a checkout is there). |
+| Docker Compose | Any version 2. | 2.24.4 or newer (`!override`): the scripts check it and say so. |
+
+**Use `source`** when you are changing code in any of the repositories — the
+whole point is that an edit shows without rebuilding an image. **Use `images`**
+for a node that only has to *run*: the field node (`EM_NODE_KIND=field`, first
+target a Raspberry Pi 5 8 GB on Raspberry Pi OS 64-bit), a demo machine, and
+tomorrow the institutional node. The overlay knows nothing about hardware or
+node kind.
+
+The field node goes by images; every other node by source. To choose by hand,
+add `--images` or `--source` to `./fcn-install.sh` and `./fcn-up.sh`, or write
+`EM_NODE_ROAD=images` (or `source`) in `dev-stack/.env.dev`.
+
+On the images road, `./fcn-install.sh` downloads the images as its last step —
+do it at home, with the network — and `./fcn-up.sh` downloads them again (only
+what changed) before switching on; `./fcn-up.sh --offline` starts with what the
+computer already has. If the download fails the script says the likely reason:
+no network, a version not yet published, or an image not made for this kind of
+processor. The versions are written in one place,
+`dev-stack/docker-compose.images.yml`: its three `image:` lines, never `latest`.
+Raising one is editing that line. Each tag exists on GHCR only after the
+`immagine` workflow of its repository has run (it publishes `1.6.0-dev.N` from
+`version = "1.6.0.devN"` in `pyproject.toml`).
+
+`tests/test_la_strada_delle_immagini.py` holds the road to its promise: no
+service with `build:`, no `../` mount, every data volume still in place, every
+tag explicit. *Decided by E.D. on 1 November 2026: both roads stay alive.*
+
+### Reaching it from the phone
+
+The phone must be on the same Wi-Fi as the computer, and it must trust the
+node's certificate once (the certificate file is created by `fcn-up.sh`; on an
+iPhone, open it, install the profile, then enable it in *Settings → General →
+About → Certificate Trust Settings*).
+
+The computer is reached by **name** (`my-mac.local`) or by **address**
+(`192.168.1.214`). The name is nicer and survives a change of address, but many
+home and office routers do not let these names through: Safari then says it
+*cannot find the server* even though the computer answers. In that case use the
+address:
+
+    ./fcn-up.sh 192.168.1.214
+
+and ask the router to always give the computer the same address (usually called
+*DHCP reservation* or *static lease*). Find the address with
+`ipconfig getifaddr en0` on a Mac, `hostname -I` on Linux.
+
+The quickest way onto the phone is the **QR code** of a room: in *Your rooms*,
+the *On the phone* button of each room shows it. Frame it with the phone's
+camera and StratiField opens in that room.
+
+On the Mac itself, keep using `em.localhost` in EMStudio. Recent versions of
+macOS ask an app for permission before it contacts an address of the local
+network (*System Settings → Privacy & Security → Local Network*), and EMStudio
+may not have it yet; `em.localhost` stays inside the computer and does not need
+it.
+
+### Cleaning up rooms
+
+The node's address opens its door and, after signing in, its house. For an
+operator the house has, under *Your rooms* and *Tools*, the sections of the
+node: *Rooms*, *People*, *Groups*, *Permissions*, *Transfers*, *Memory and
+bucket*, *Trash*, *Node health*. Rooms are cleaned up in *Rooms*.
+
+- The chips on top filter the list: *Active*, *Archived*, *Implicit*. Implicit
+  rooms are those nobody declared — usually the automatic tests made them. A
+  banner offers to delete them all at once.
+- Tick the rooms on the left (the box in the header ticks all the listed ones).
+  A bar appears with what can be done to all of them together: *Archive*,
+  *Restore*, *Into the trash…*. The choice survives a change of filter.
+- Removing puts the rooms in the **trash** for 30 days. A room in the trash no
+  longer opens and leaves every list, but nothing of it is touched: its owner or
+  the operator takes it back, as it was, from *Trash*. After 30 days the node
+  deletes it with its em.json, its revisions, its members and its invitations;
+  its files stay in the bucket and become orphans if no other room cites them.
+  *Delete now…* in *Trash* does the same at once, after you type the room's
+  name.
+- Orphan files go through the same trash, from *Memory and bucket*.
+- **Operations in bulk.** Over 20 rooms, or 5 GB of files, removed by the same
+  person within an hour, the node asks for one more confirmation: the console
+  makes you type *IN BULK* and the number. The node counts, not the page, so the
+  threshold holds for a script too.
+- Archiving deletes nothing: the room stays readable and can be restored.
+
+Clicking a row opens the room on the right, with its people, invitations,
+visibility, memory and lifecycle.
+
+### When something does not answer
+
+| What you see | What to do |
+|----|----|
+| The phone says *node absent*, Safari *cannot find the server* | The name `.local` does not get through the router: switch the node on at the address (above). |
+| EMStudio: *connection lost — retry* | The node was restarted: *Sign in as another user* on that node. |
+| EMStudio: *does not answer* for an address like `192.168.…` | Probably the *Local Network* permission of macOS. On the same Mac, use `em.localhost:8443`. |
+| Sign-in fails with *Invalid parameter: redirect_uri* | The page was opened at an address the node was not started for. Use the address shown at the end of `./fcn-up.sh`, or restart it with yours. |
+| Nothing answers at all | `docker ps`: if the list is empty, `./fcn-up.sh --offline`. |
+
+---
+
+## On a host — the whole system
+
+*One playbook, one host, everything behind TLS. This half says what you need
 before you start, what the single command does, and what to check afterwards.*
 
 The map of the pieces is [`ARCHITECTURE-SYSTEM.md`](ARCHITECTURE-SYSTEM.md);
@@ -13,7 +201,7 @@ this is the operational half. The playbook itself lives in the
 
 ---
 
-## What comes up
+### What comes up
 
 Nine containers behind one Caddy, which terminates TLS and routes by path:
 
@@ -34,7 +222,7 @@ in a query string defensible for a viewer that cannot set a header.
 
 ---
 
-## Prerequisites — the part that is ops, and is yours
+### Prerequisites — the part that is ops, and is yours
 
 1. **A host.** Linux, Docker installed (the role does not install it), enough
    disk for the object store. This is where the studies will live.
@@ -57,14 +245,14 @@ in a query string defensible for a viewer that cannot set a header.
 
 ---
 
-## Two shapes, and the certificate tells them apart
+### Two shapes, and the certificate tells them apart
 
 Everything above describes one host with a public name. There are two deployments
 in front of us and only one of them looks like that. The difference is not the
 services — those are the same — it is how the origin gets a certificate, and that
 decides what has to be true about the network.
 
-### The node says which kind it is — `EM_NODE_KIND`
+#### The node says which kind it is — `EM_NODE_KIND`
 
 Same server everywhere; the node **declares** its kind and is held to that
 kind's safe defaults (`app/node_kind.py`):
@@ -80,7 +268,7 @@ The kind shows in `/v1/node`, `/v1/health`, the console's bar and its *Node
 health* panel (`GET /v1/admin/node-kind` lists what is missing, in sentences).
 The dev stack declares itself `field`.
 
-### The institutional node — a public name
+#### The institutional node — a public name
 
 The templates already assume this shape: `Caddyfile.j2` opens with
 `{{ server_name }} {` and carries **no `tls` directive**, so Caddy obtains and
@@ -106,7 +294,7 @@ link names the host it was asked from — so a study opened from one node points
 that node. That is correct behaviour, and not something to paper over with a
 shared name.
 
-### The Field Computing Node — a local network, no public reachability
+#### The Field Computing Node — a local network, no public reachability
 
 The prerequisite above says that without a real name everything still works "but
 only over an internal CA nobody trusts". On an FCN that sentence understates the
@@ -167,7 +355,7 @@ certificate.
 
 ---
 
-## The command
+### The command
 
 ```bash
 ansible-playbook -i <inventory> playbook/heriverse.yml
@@ -186,7 +374,7 @@ Two notes for whoever runs it:
 * the role uses `community.docker.docker_compose_v2`, so that collection must be
   installed (`ansible-galaxy collection install community.docker`).
 
-### Variables worth knowing
+#### Variables worth knowing
 
 | variable | default | what it decides |
 |---|---|---|
@@ -213,7 +401,7 @@ by service name. Nothing about it has to be assembled by hand — see
 
 ---
 
-## Checking it without deploying
+### Checking it without deploying
 
 Everything below was **executed** while writing this page, against the templates
 as they stand. None of it needs a host.
@@ -258,7 +446,7 @@ Measured: **green**.
 
 ---
 
-## After a deploy
+### After a deploy
 
 ```bash
 curl -s https://<server_name>/em/v1/health | jq
@@ -287,7 +475,7 @@ index is derivable; the studies are not.
 
 ---
 
-## Changing the realm after the first deploy
+### Changing the realm after the first deploy
 
 **Editing the realm JSON does not change a realm that already exists.** Keycloak's
 `--import-realm` imports only when the realm is *absent*; on every later boot it
@@ -313,7 +501,7 @@ look.
 
 ---
 
-## What this page does not cover
+### What this page does not cover
 
 * **OpenShift.** The node alone, as an image in an institution's cluster, is
   [`deploy/openshift/`](../deploy/openshift/README.md) — manifests, the

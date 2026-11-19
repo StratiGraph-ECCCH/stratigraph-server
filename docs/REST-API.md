@@ -484,3 +484,9 @@ The long description of each route, on `/docs`, is the reference for what it
 does and why. The design of the two reading routes, with the decisions and what
 was measured, is `docs/SPEC-REST-LETTURA-STANZA.md`; synchronisation between the
 field and the node is `docs/SYNC-FIELD-TO-CLOUD.md`.
+
+The same room, seen by the person in it rather than by the program — the roles
+as a team meets them, signing in, sharing, inviting, archiving — is
+[Working in a room](ROOM-GUIDE.md); who may do what, and why, is
+[People, profiles and roles](ROLES-AND-USERS.md). When a request on this page
+is refused, the rule behind the refusal is written there.

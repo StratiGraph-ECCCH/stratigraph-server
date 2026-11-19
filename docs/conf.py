@@ -118,6 +118,7 @@ _SIBLINGS = {
     'EM-blender-tools': 'https://github.com/zalmoxes-laran/EM-blender-tools',
     'stratigraph-catalog': 'https://github.com/StratiGraph-ECCCH/stratigraph-catalog',
     'stratigraph-templates': 'https://github.com/StratiGraph-ECCCH/stratigraph-templates',
+    'stratigraph-stratifield': 'https://github.com/StratiGraph-ECCCH/stratigraph-stratifield',
     'heriverse-ansible': 'https://github.com/StratiGraph-ECCCH/heriverse-ansible',
 }
 
@@ -152,6 +153,14 @@ def _outside_uri(raw, source_file):
             return home
         if not os.path.splitext(rest)[1]:
             rest += '.md'                     # MyST dropped the suffix
+        # Where the sibling IS checked out beside this one (a local build, not
+        # Read the Docs), a link to a file it does not have is a broken link:
+        # left to MyST, which warns, and `-W` stops. The manual's two parts
+        # point into StratiField's docs, and a page moved there must not leave
+        # a link behind that only GitHub would find broken.
+        sibling = os.path.join(parent, name)
+        if os.path.isdir(sibling) and not os.path.exists(os.path.join(sibling, rest)):
+            return None
         return f'{home}/blob/HEAD/{rest}' + (f'#{anchor}' if anchor else '')
     return None
 
