@@ -199,3 +199,48 @@ hr, .rst-content hr { border-color: var(--sg-line); }
 @media screen and (max-width: 768px) {
   .wy-nav-content { padding: var(--sg-space-5) var(--sg-space-4); }
 }
+
+/* ── la tavola dei manuali ───────────────────────────────────────────────────
+   Una `list-table` con `:class: em-manuals` smette di essere una griglia di
+   celle e diventa una fila di schede: niente reticolo, una riga sottile fra una
+   voce e l'altra, il nome che pesa e la colonna «Open» che si legge come un
+   bottone. Resta una tabella nel sorgente, quindi esce intera anche nel PDF e
+   nell'EPUB, dove questo foglio non arriva. */
+.rst-content table.em-manuals,
+.rst-content table.em-manuals.docutils { border: none; }
+.rst-content table.em-manuals thead th {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--sg-line);
+  font-size: var(--sg-text-sm);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--sg-muted);
+}
+.rst-content table.em-manuals td {
+  border: none;
+  border-bottom: 1px solid var(--sg-line);
+  background: transparent !important;
+  padding: var(--sg-space-4) var(--sg-space-3);
+  vertical-align: top;
+}
+.rst-content table.em-manuals tr:last-child td { border-bottom: none; }
+.rst-content table.em-manuals td:first-child { font-size: var(--sg-text-lg); }
+.rst-content table.em-manuals td:first-child strong { font-family: var(--sg-font-display); }
+.rst-content table.em-manuals td:nth-child(2) a {
+  display: inline-block;
+  padding: 2px var(--sg-space-3);
+  border: 1px solid var(--sg-line);
+  border-radius: var(--sg-radius-pill);
+  font-size: var(--sg-text-sm);
+  text-decoration: none;
+}
+.rst-content table.em-manuals td:nth-child(2) a:hover {
+  background: var(--sg-accent);
+  border-color: var(--sg-accent);
+  color: #fff;
+}
+.rst-content table.em-manuals td:last-child { color: var(--sg-muted); }
+@media screen and (max-width: 700px) {
+  .rst-content table.em-manuals td:first-child { font-size: var(--sg-text-base); }
+}
