@@ -159,7 +159,10 @@ a catalogue exists to be found, and it must answer a stranger without leaking
 work in progress. To somebody who has signed in on this node it shows every
 study's card, restricted and under embargo included. A card is the title, the
 authors, the licence, where the thing is; the study itself stays behind the
-room's door.
+room's door — and the catalogue asks that door too: the container, its Turtle,
+its reading page and its "open in" open only to a role in the room the study
+names (`header.room`), which the catalogue asks the node for (`GET /v1/rooms`,
+with your own token). Signing in is not a grant.
 
 ## Invitations
 

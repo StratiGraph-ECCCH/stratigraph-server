@@ -1376,6 +1376,14 @@ services:
       # Missing dist → an honest 501 on /study/{id}/narrative, nothing else
       # breaks.
       EM_CATALOG_READER: "/srv/em-reader-dist"
+      # --- the doorman: WHO HOLDS A ROLE, asked of the node ------------------
+      # The content of a study that is not public (em.json, TTL, reading page,
+      # "open in") opens only to a role in the study's room (`header.room`), and
+      # the catalogue asks the node, with the person's own token, `GET /v1/rooms`
+      # (`stratigraph-catalog/app/doorman.py`). The INTERNAL address, the same
+      # split as `EM_CATALOG_INTERNAL` on the node's side. Unset → those answers
+      # are 503 and the door stays shut (E.D. 19 Nov 2026).
+      EM_CATALOG_NODE_INTERNAL: "http://stratigraph-server:8000"
     ports:
       # `127.0.0.1:` DAVANTI. Il nodo di campo, per progetto, FA DA HOTSPOT ai
       # tablet del cantiere: «siamo tutti sulla stessa rete» non e' un

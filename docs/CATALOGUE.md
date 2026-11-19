@@ -88,10 +88,31 @@ curl -s -H "Authorization: Bearer $OUTSIDER" -o /dev/null -w "%{http_code}\n" \
 ```
 
 (`$OUTSIDER` is the account's token, `dev-stack/token.sh --user outsider`; the
-second study is restricted.) So on today's catalogue *restricted* means «not
-for visitors», not «only for the people of the room», and the same goes for a
-study under embargo. For a visitor who has not signed in, the two agree,
-embargo included.
+second study is restricted.) So for the **card** — title, authors, licence,
+where the thing is — *restricted* means «not for visitors»: that is what lets
+somebody find a study and ask for access to it.
+
+The **content** asks for more. The container (`/emjson`), its Turtle (`/ttl`),
+the reading page (`/narrative`) and the "open in" descriptor (`/open`) of a
+study that is not public now open only to somebody with a **role in the
+study's room** — the room the container names in `header.room`. The catalogue
+asks the node, with your own token, which rooms you hold a role in
+(`GET /v1/rooms`), and keeps the answer for 30 seconds. Measured on 19 November
+2026 with the same `outsider`, on the study under embargo:
+
+```bash
+curl -s -H "Authorization: Bearer $OUTSIDER" \
+  https://em.localhost:8443/catalog/study/study:0ac900d3-2610-488d-9ad5-302f4acdc73c/emjson
+```
+
+```json
+{"detail":"this study is not public, and it names no room on this node — so nobody holds the role that would open it. Its owner can name the room (header.room) and grant access there."}
+```
+
+A study that names a room answers `403` to somebody without a role there, with
+the room's name so they know whom to ask, and `200` to its members. A study
+that names no room opens to nobody until it does. If the catalogue cannot reach
+the node to ask, it answers `503` and does not open.
 
 ## One monument, many campaigns
 
