@@ -75,6 +75,10 @@ html_css_files = [
     'brand/stratigraph-theme.css',
     'brand/sphinx-rtd-bridge.css',
 ]
+# L'interruttore delle due facce: chiaro, scuro, come il sistema. Senza
+# scelta esplicita vale il sistema di chi legge, che è il modo di serie.
+html_js_files = ['brand/brand-theme-toggle.js']
+
 html_theme_options = {
     'prev_next_buttons_location': 'bottom',
     'collapse_navigation': True,

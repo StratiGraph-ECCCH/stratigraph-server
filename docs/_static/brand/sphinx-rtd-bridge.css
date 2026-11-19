@@ -244,3 +244,26 @@ hr, .rst-content hr { border-color: var(--sg-line); }
 @media screen and (max-width: 700px) {
   .rst-content table.em-manuals td:first-child { font-size: var(--sg-text-base); }
 }
+
+/* ── l'interruttore delle due facce ──────────────────────────────────────────
+   Lo mette `brand-theme-toggle.js` in fondo al riquadro della ricerca, dove la
+   mano lo trova senza cercarlo. Resta un bottone: nessuna scelta salvata vuol
+   dire «come il sistema», che è il modo in cui le pagine escono di serie. */
+.sg-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sg-space-2);
+  margin-top: var(--sg-space-3);
+  padding: 4px var(--sg-space-3);
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, .35);
+  border-radius: var(--sg-radius-pill);
+  font-family: var(--sg-font-sans);
+  font-size: var(--sg-text-sm);
+  line-height: 1.6;
+  cursor: pointer;
+}
+.sg-theme-toggle:hover { background: rgba(255, 255, 255, .26); }
+.sg-theme-toggle:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.sg-theme-toggle svg { flex: none; }
