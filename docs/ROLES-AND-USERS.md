@@ -149,8 +149,17 @@ administrators and owner.
 
 An **embargo** is a date. Until the date, the study behaves as restricted
 whatever its declared visibility; when the date passes, the study goes back to
-what it declares. The room and the Catalog follow the same rule, so the list of
-published studies and the door of the room always agree.
+what it declares.
+
+The room and the Catalog ask the question at different depths, and it is worth
+knowing which. **The door of a room asks for a role**: without one you do not
+read the study, embargo or no embargo. **The catalogue asks whether you have
+signed in at all**: to somebody who has not, it shows the public studies only —
+a catalogue exists to be found, and it must answer a stranger without leaking
+work in progress. To somebody who has signed in on this node it shows every
+study's card, restricted and under embargo included. A card is the title, the
+authors, the licence, where the thing is; the study itself stays behind the
+room's door.
 
 ## Invitations
 
