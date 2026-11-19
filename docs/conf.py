@@ -54,7 +54,13 @@ myst_heading_anchors = 3
 # The ARCHITECTURE page shows a placeholder (`{ … }`) inside a ```json block:
 # Pygments highlights it in relaxed mode and says so. That is the only warning
 # silenced here, and it is not about a broken page.
-suppress_warnings = ['misc.highlighting_failure']
+# EPUB non conosce il tipo di un .woff2 e, con -W, la sua lamentela
+# («unknown mimetype … ignoring») ferma la pubblicazione: i caratteri del
+# marchio servono alla pagina web, non al libro.
+suppress_warnings = [
+    'epub.unknown_project_files',  # i woff2 del marchio
+    'misc.highlighting_failure',
+]
 
 # -- HTML -------------------------------------------------------------------
 html_theme = 'sphinx_rtd_theme'
