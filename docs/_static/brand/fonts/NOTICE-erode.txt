@@ -1,0 +1,11 @@
+Erode — Indian Type Foundry (ITF), distributed through Fontshare.
+
+The three weights in this directory (erode-latin-400/500/600-normal.woff2) are
+Latin subsets of the Erode family published on https://www.fontshare.com/fonts/erode
+and are covered by the ITF Free Font License, which Fontshare states allows
+personal and commercial use.
+
+This file is a notice, not the licence itself: the authoritative text lives with
+the foundry, at https://www.fontshare.com/licenses/itf-ffl , and is the version
+that governs. The other families here carry their full licence text beside them:
+OFL-comfortaa.txt, OFL-sora.txt, OFL-ibm-plex.txt (SIL Open Font License 1.1).

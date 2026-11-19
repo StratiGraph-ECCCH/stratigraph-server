@@ -1,0 +1,201 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   THE BRIDGE — the brand, said in the words of the Read the Docs Sphinx theme.
+
+   `stratigraph-theme.css` says what a colour is FOR (`--sg-bg`, `--sg-accent`,
+   `--sg-text`). `sphinx_rtd_theme` says it in its own hard-coded hexes. This
+   file is the translation between the two, and nothing else: it invents no
+   colour and no font of its own, so a change in the guidebook travels here by
+   itself.
+
+   Load it LAST, after the theme and (for the Extended Matrix manuals) the
+   skins:
+
+       html_css_files = [
+           "brand/stratigraph-theme.css",
+           "brand/skins.css",              # EM manuals only
+           "brand/sphinx-rtd-bridge.css",
+       ]
+
+   A manual that ships `skins.css` wears the EM look, because that is the skins
+   file's own default. A manual that leaves it out wears the StratiGraph
+   guidebook. One line decides, in `conf.py`.
+
+   Light and dark: the theme already answers the reader's system setting
+   through `prefers-color-scheme`, with the contrast of each face measured in
+   `skins.css`. Nothing here repeats those values; the rules below simply use
+   the roles, so both faces come out right.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the page ───────────────────────────────────────────────────────────── */
+body,
+.wy-body-for-nav {
+  background: var(--sg-surface-sunk);
+  font-family: var(--sg-font-sans);
+  color: var(--sg-text);
+}
+.wy-nav-content-wrap { background: var(--sg-surface-sunk); }
+.wy-nav-content {
+  background: var(--sg-bg);
+  color: var(--sg-text);
+  max-width: 56rem;
+}
+.rst-content { color: var(--sg-text); }
+
+/* ── the voice of the headings ──────────────────────────────────────────── */
+h1, h2, h3, h4, h5, h6,
+.rst-content .toctree-wrapper > p.caption,
+legend {
+  font-family: var(--sg-font-display);
+  color: var(--sg-text);
+  font-weight: var(--sg-weight-headline);
+}
+h3, h4, h5, h6 { font-weight: var(--sg-weight-subtitle); }
+.rst-content h1 { letter-spacing: -0.01em; }
+.rst-content .section > h2,
+.rst-content section > h2 {
+  border-bottom: 1px solid var(--sg-line);
+  padding-bottom: var(--sg-space-2);
+}
+
+/* ── links ──────────────────────────────────────────────────────────────── */
+a, a:visited { color: var(--sg-accent); }
+a:hover, a:focus { color: var(--sg-accent-quiet); }
+.rst-content a:not(.headerlink):hover { text-decoration: underline; }
+.rst-content .headerlink { color: var(--sg-muted); }
+
+/* ── the side column ────────────────────────────────────────────────────── */
+.wy-nav-side {
+  background: var(--sg-deep-charcoal);
+  font-family: var(--sg-font-sans);
+}
+.wy-side-nav-search,
+.wy-side-nav-search.shift-up,
+.wy-nav-top {
+  background: var(--sg-accent);
+}
+.wy-side-nav-search > a,
+.wy-side-nav-search > a:hover,
+.wy-side-nav-search .wy-dropdown > a,
+.wy-nav-top a {
+  font-family: var(--sg-font-display);
+  color: #fff;
+}
+.wy-side-nav-search > div.version { color: rgba(255, 255, 255, .8); }
+.wy-side-nav-search input[type="text"] {
+  background: var(--sg-surface);
+  color: var(--sg-text);
+  border-color: var(--sg-line);
+  border-radius: var(--sg-radius-pill);
+}
+.wy-menu-vertical header,
+.wy-menu-vertical p.caption {
+  font-family: var(--sg-font-display);
+  color: var(--sg-quiet);
+}
+.wy-menu-vertical a { color: var(--sg-soft-dust); }
+.wy-menu-vertical a:hover { background: var(--sg-deep-gray); color: #fff; }
+.wy-menu-vertical li.current { background: var(--sg-surface-sunk); }
+.wy-menu-vertical li.current > a,
+.wy-menu-vertical li.on a {
+  background: var(--sg-bg);
+  color: var(--sg-text);
+  border-color: var(--sg-line);
+}
+.wy-menu-vertical li.current a { color: var(--sg-muted); border-right: none; }
+.wy-menu-vertical li.current a:hover { background: var(--sg-surface-sunk); color: var(--sg-text); }
+.wy-menu-vertical li.toctree-l2.current > a,
+.wy-menu-vertical li.toctree-l3.current > a { background: var(--sg-surface-sunk); }
+
+/* ── code, identifiers, numbers ─────────────────────────────────────────── */
+code, .rst-content code, .rst-content tt, kbd, pre, .rst-content pre.literal-block {
+  font-family: var(--sg-font-mono);
+}
+.rst-content code.literal, .rst-content tt.literal {
+  background: var(--sg-surface-sunk);
+  border: 1px solid var(--sg-line);
+  border-radius: var(--sg-radius-sm);
+  color: var(--sg-accent-quiet);
+}
+.highlight, div[class^="highlight"] {
+  background: var(--sg-surface-sunk);
+  border: 1px solid var(--sg-line);
+  border-radius: var(--sg-radius-sm);
+}
+.rst-content .highlight > pre, .rst-content pre.literal-block {
+  background: transparent;
+  color: var(--sg-text);
+  border: none;
+}
+
+/* ── the boxes that say «careful» and «by the way» ──────────────────────── */
+.rst-content .admonition, .rst-content .note, .rst-content .warning,
+.rst-content .tip, .rst-content .important, .rst-content .seealso,
+.rst-content .hint, .rst-content .caution, .rst-content .danger,
+.rst-content .error, .rst-content .attention {
+  background: var(--sg-surface);
+  color: var(--sg-text);
+  border-radius: var(--sg-radius-sm);
+  box-shadow: var(--sg-shadow);
+  overflow: hidden;
+}
+.rst-content .admonition-title {
+  font-family: var(--sg-font-display);
+  background: var(--sg-info);
+  color: #fff;
+}
+.rst-content .warning .admonition-title,
+.rst-content .caution .admonition-title,
+.rst-content .attention .admonition-title { background: var(--sg-warn); }
+.rst-content .danger .admonition-title,
+.rst-content .error .admonition-title { background: var(--sg-accent); }
+.rst-content .tip .admonition-title,
+.rst-content .hint .admonition-title { background: var(--sg-ok-ink); }
+.rst-content blockquote {
+  border-left: 3px solid var(--sg-quiet);
+  color: var(--sg-muted);
+  margin-left: 0;
+  padding-left: var(--sg-space-4);
+}
+
+/* ── tables ─────────────────────────────────────────────────────────────── */
+.wy-table-responsive table td, .wy-table-responsive table th,
+.rst-content table.docutils td, .rst-content table.docutils th {
+  border-color: var(--sg-line);
+  color: var(--sg-text);
+  white-space: normal;
+}
+.rst-content table.docutils thead th,
+.wy-table thead th {
+  font-family: var(--sg-font-display);
+  background: var(--sg-surface-sunk);
+  color: var(--sg-text);
+  border-color: var(--sg-line);
+}
+.wy-table-odd td, .wy-table-striped tr:nth-child(2n-1) td,
+.rst-content table.docutils:not(.field-list) tr:nth-child(2n-1) td {
+  background: var(--sg-surface-sunk);
+}
+.rst-content table.docutils, .wy-table-bordered-all { border-color: var(--sg-line); }
+
+/* ── the strip at the bottom of a page, and the foot of the site ────────── */
+.rst-footer-buttons .btn,
+.btn-neutral, .btn-neutral:visited {
+  font-family: var(--sg-font-sans);
+  background: var(--sg-surface) !important;
+  color: var(--sg-text) !important;
+  border: 1px solid var(--sg-line);
+  box-shadow: none;
+  border-radius: var(--sg-radius-sm);
+}
+.btn-neutral:hover { background: var(--sg-surface-sunk) !important; }
+footer, footer p, .rst-content div[role="contentinfo"] { color: var(--sg-muted); }
+hr, .rst-content hr { border-color: var(--sg-line); }
+
+/* ── the search page and the small print ────────────────────────────────── */
+.wy-text-light, .rst-content .linenodiv pre { color: var(--sg-muted); }
+.ai-usage-notice { color: var(--sg-muted); font-size: var(--sg-text-sm); }
+
+/* ── the phone ──────────────────────────────────────────────────────────── */
+@media screen and (max-width: 768px) {
+  .wy-nav-content { padding: var(--sg-space-5) var(--sg-space-4); }
+}
