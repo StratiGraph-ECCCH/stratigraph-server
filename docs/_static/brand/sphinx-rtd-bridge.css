@@ -285,6 +285,10 @@ hr, .rst-content hr { border-color: var(--sg-line); }
   line-height: 1.65;
   color: var(--sg-muted);
   text-align: left;
+  /* Il riquadro delle versioni di Read the Docs sta fisso in basso a destra:
+     questo spazio lascia che l'ultima riga gli scorra sopra invece di finirci
+     sotto. */
+  padding-bottom: 3.5rem;
 }
 .sg-provenance-emblem {
   flex: none;
