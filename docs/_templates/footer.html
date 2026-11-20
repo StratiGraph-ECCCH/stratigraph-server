@@ -1,0 +1,28 @@
+{% extends "!footer.html" %}
+{#
+   The provenance of a StratiGraph manual, in the one place a reader always
+   reaches: the foot of every page. Vendored from stratigraph-brand by
+   sync-brand-docs.sh — change it there, never here.
+#}
+{% block extrafooter %}
+{{ super() }}
+<div class="sg-provenance" role="complementary" aria-label="Funding and rights">
+  <img class="sg-provenance-emblem" src="{{ pathto('_static/brand/eu-emblem.svg', 1) }}"
+       alt="Flag of the European Union">
+  <div class="sg-provenance-text">
+    <p><strong>Funded by the European Union.</strong> Views and opinions expressed are
+    however those of the author(s) only and do not necessarily reflect those of the
+    European Union or the European Research Executive Agency (REA). Neither the European
+    Union nor the granting authority can be held responsible for them.</p>
+    <p>This manual belongs to
+    <a href="https://stratigraph-eccch.eu">StratiGraph — Knowledge Graphs for Stratigraphy</a>,
+    a Horizon Europe Innovation Action
+    (<a href="https://cordis.europa.eu/project/id/101232855">grant agreement 101232855</a>,
+    2025–2029), which contributes its tools to the European Collaborative Cloud for
+    Cultural Heritage.</p>
+    <p class="sg-provenance-rights">Text and images:
+    <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. The software
+    described here carries its own licence.</p>
+  </div>
+</div>
+{% endblock %}

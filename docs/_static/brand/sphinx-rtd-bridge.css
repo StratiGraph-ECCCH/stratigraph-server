@@ -267,3 +267,40 @@ hr, .rst-content hr { border-color: var(--sg-line); }
 .sg-theme-toggle:hover { background: rgba(255, 255, 255, .26); }
 .sg-theme-toggle:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .sg-theme-toggle svg { flex: none; }
+
+/* ── la provenienza, in fondo a ogni pagina ──────────────────────────────────
+   Chi arriva da una ricerca atterra in mezzo a un manuale, non sull'indice:
+   il finanziamento, il progetto e la licenza stanno dove la pagina finisce,
+   qualunque pagina sia. Il blocco lo mette `footer.html`, vendorizzato da
+   sync-brand-docs.sh; l'emblema è un SVG, quindi non pesa e non sgrana. */
+.sg-provenance {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sg-space-4);
+  margin-top: var(--sg-space-5);
+  padding-top: var(--sg-space-4);
+  border-top: 1px solid var(--sg-line);
+  font-family: var(--sg-font-sans);
+  font-size: var(--sg-text-sm);
+  line-height: 1.65;
+  color: var(--sg-muted);
+  text-align: left;
+}
+.sg-provenance-emblem {
+  flex: none;
+  width: 81px;
+  height: 54px;
+  margin-top: 2px;
+  border-radius: 2px;
+}
+.sg-provenance-text { max-width: 62ch; }
+.sg-provenance p { margin: 0 0 var(--sg-space-2); }
+.sg-provenance p:last-child { margin-bottom: 0; }
+.sg-provenance strong { color: var(--sg-text); font-weight: var(--sg-weight-subtitle); }
+.sg-provenance a { color: var(--sg-accent); text-decoration: underline; }
+.sg-provenance-rights { color: var(--sg-quiet); }
+.sg-provenance--rights-only { border-top: 1px solid var(--sg-line); }
+
+@media (max-width: 600px) {
+  .sg-provenance { flex-direction: column; gap: var(--sg-space-3); }
+}
