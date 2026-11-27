@@ -392,6 +392,87 @@ else is `403`; and if, while the room was in the trash, another room took its
 graph, the answer is `409` (not run here). The node's view of the whole trash,
 rooms and files, is `GET /v1/admin/trash`, in `docs/NODE-ADMIN-API.md`.
 
+## Depositing an object with its story
+
+Decision of E.D., 27 November 2026. Until today putting a file into a room's
+bucket took five acts: a PUT of the bytes, a PUT of the stamp, and three acts on
+the corpus. Any of them could be forgotten, and the gap between the first and
+the last is the window in which a node holds bytes nobody can account for.
+
+`POST /v1/rooms/{room_id}/objects` closes it. One request carries the file and
+the record that says where it comes from, in the profile **`em-bucket-dtc/1`** —
+the one EMStudio already writes, so every tool of the ecosystem describes a
+deposit the same way. **Editor or above**; the depositor is the token's, never a
+field of the body.
+
+The body is `multipart/form-data` with the part `dtc` FIRST and the part `file`
+after it. The order is required, and the server says so if it is wrong: the
+record is read before the bytes, so that a deposit that cannot be described
+costs nothing. A record alone, as `application/json` with `object.sha256`,
+describes bytes the node already holds.
+
+```
+POST /v1/rooms/scavo/objects
+Content-Type: multipart/form-data
+
+--- part `dtc` (application/json) ---
+{"profile": "em-bucket-dtc/1", "formalism": "dtc",
+ "object": {"name": "nord.png", "media_type": "image/png"},
+ "who": {"author": "Anna Rossi", "author_orcid": "0000-0002-1825-0097"},
+ "when": {"made_at": "2026-09-14"},
+ "source": {"dtc_kind": "photo", "family": "capture",
+            "campaign": "Templum Mare 2026"},
+ "transformation": {"technique": "fotografia digitale",
+                    "software": "Metashape 2.1"},
+ "rights": {"license": "CC-BY-4.0"},
+ "target": {"room": "scavo", "lot_name": "Consegna del 27 novembre"}}
+--- part `file` ---
+the bytes
+```
+
+and the answer, really run on 27 November 2026:
+
+```json
+{"ref": "sha256:37f1ed70391043aeb39434da2601a7f09db279a8705f377f9d1bafa8f944ff73",
+ "created": true, "size": 33, "media_type": "image/png", "home": "scavo",
+ "acquisition_id": "65aef688-d4c8-572d-aec2-17ec590fdd95",
+ "responsible": "0000-0003-1415-9265",
+ "acts": {"resource": {"resource_id": "5491c005-…", "created": true,
+                       "name": "nord.png"},
+          "attribution": {"attributor": "0000-0003-1415-9265", "at": "2026-09-14",
+                          "changed": {"author": "declared", "license": "declared"}},
+          "acquisition": {"acquisition_id": "65aef688-…", "created": true,
+                          "count": 1, "missing": [], "warnings": []}}}
+```
+
+`acts` is what the register did, act by act, passed through rather than
+summarised: a client that is told "done" cannot see that its file joined a lot
+it did not mean. Note the attribution's `at`: for a capture it is the day the
+photograph was taken, not the day it was deposited.
+
+**What is refused, and why.** Every refusal names the field. A record without
+`rights.license` is `422 "rights.license is missing: bytes nobody may use are
+bytes nobody will"`, and the bytes do not reach the store. A `dtc_kind` outside
+the datamodel's acquisition axis is refused with the list of the kinds there
+are. A technique or a software declared on a *retrieval* is refused, because
+they say how the bytes were made and a download did not make them. A deposit
+over 64 MiB in one piece is refused with the door that resumes
+(`POST /v1/rooms/{room_id}/uploads`) named in the sentence.
+
+**Who answers for publishing.** `who.responsible` is an ORCID iD **accredited on
+this node** (`dev-stack/accredited.yaml`, `GET /v1/whoami`): a name the node does
+not know is refused rather than written down. Left out, the depositor answers.
+
+**The shape, machine-readable**: `GET /v1/dtc/profile/em-bucket-dtc/1`, whose
+list of acquisition kinds is read from the datamodel, so a kind added to the
+vocabulary is offered the same day.
+
+**The old door is deprecated.** `PUT /v1/rooms/{room_id}/asset` still works and
+still takes bytes alone from anybody with a token, and now says so in its own
+answer: `Deprecation: true`, a `Link` naming this route as its successor, and
+`X-EM-Removed-In: 1.8`. Measured in versions and not in months, because a date
+is a promise about calendars and a version is a promise about this software.
+
 ## Every route
 
 Grouped as `/docs` groups them; `token` says whether a bearer token is needed.
@@ -430,6 +511,8 @@ is the complete one. The node console's own routes are told in
 | `DELETE /v1/rooms/{room_id}/invites/{token_id}` | Revoke an invitation link *(rooms)* | yes |
 | `POST /v1/join` | Accept an invitation link and enter the room *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/open` | How to open this room in a tool, without typing anything *(rooms)* | yes |
+| `POST /v1/rooms/{room_id}/objects` | Deposit an object and the record that says where it comes from *(assets)* | yes |
+| `GET /v1/dtc/profile/em-bucket-dtc/1` | The shape of a deposit's record, with its vocabulary inside *(assets)* | yes |
 | `PUT /v1/rooms/{room_id}/asset` | Store a file in a room, addressed by its content *(assets)* | yes |
 | `POST /v1/rooms/{room_id}/asset-reference` | On a personal node, put a project's file in the room by reference *(assets)* | yes |
 | `GET /v1/rooms/{room_id}/asset-home/{ref}` | Where a file lives, which rooms cite it, and what you may do *(assets)* | yes |

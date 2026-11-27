@@ -52,6 +52,13 @@ dependencies = [
     # brings the RSA/EC backend — without it PyJWT can only do HMAC, which is
     # exactly the algorithm we refuse.
     "PyJWT[crypto]>=2.8",
+    # The deposit door takes the record and the bytes in ONE request
+    # (`app/objects.py`), and a multipart body is the only shape that
+    # carries both without a second call. Starlette parses it only with
+    # this package installed, so it is a HARD dependency: a build without
+    # it would answer 500 to every deposit, which is the kind of failure
+    # that looks like the client's fault. 40 KB, no dependencies of its own.
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

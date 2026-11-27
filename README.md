@@ -153,6 +153,8 @@ Two operations depend on optional libraries: `POST /v1/export-ttl` needs
 | `DELETE /v1/rooms/{room_id}/invites/{token_id}` | Revoke an invitation link *(rooms)* | yes |
 | `POST /v1/join` | Accept an invitation link and enter the room *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/open` | How to open this room in a tool, without typing anything *(rooms)* | yes |
+| `POST /v1/rooms/{room_id}/objects` | Deposit an object and the record that says where it comes from *(assets)* | yes |
+| `GET /v1/dtc/profile/em-bucket-dtc/1` | The shape of a deposit's record, with its vocabulary inside *(assets)* | yes |
 | `PUT /v1/rooms/{room_id}/asset` | Store a file in a room, addressed by its content *(assets)* | yes |
 | `POST /v1/rooms/{room_id}/asset-reference` | On a personal node, put a project's file in the room by reference *(assets)* | yes |
 | `GET /v1/rooms/{room_id}/asset-home/{ref}` | Where a file lives, which rooms cite it, and what you may do *(assets)* | yes |

@@ -1160,7 +1160,7 @@ class AssetInfo(BaseModel):
 
 
 @v1.put("/rooms/{room_id}/asset", summary="Store a file in a room, addressed by its content", response_model=AssetInfo, tags=["assets"])
-async def put_asset(room_id: str, request: Request,
+async def put_asset(room_id: str, request: Request, response: Response,
                     media_type: str = Query(default="application/octet-stream",
                                             description="the MIME type of the bytes"),
                     expected_sha256: Optional[str] = Query(
@@ -1193,6 +1193,17 @@ async def put_asset(room_id: str, request: Request,
     already has these bytes and nothing needs sending.
     """
     from . import uploads
+
+    # DEPRECATED, and said in the answer rather than only in a manual.
+    # Its successor takes the bytes AND the record that describes them
+    # (`app/objects.py`); this one takes bytes alone, from anybody with a
+    # token. Measured in VERSIONS, not in months: announced in 1.6, gone
+    # in 1.8 — a date would be a promise about calendars, a version is a
+    # promise about this software.
+    response.headers["Deprecation"] = "true"
+    response.headers["Link"] = (
+        f'</v1/rooms/{room_id}/objects>; rel="successor-version"')
+    response.headers["X-EM-Removed-In"] = "1.8"
 
     # The token BEFORE the body: a refused caller must not cost a disk write.
     principal = authenticator.require_token(request)
@@ -7380,6 +7391,12 @@ def entrances(public_base: str) -> List[Dict[str, str]]:
 #: is made to travel, tier C never leaves —, the bridge's writes inside `v1` and
 #: behind the operator capability. `app/vocabularies.py`.
 vocabularies_module.mount(v1_public, v1)
+#: The one door an object comes in through with its story (`app/objects.py`,
+#: decision of E.D. 27 Nov 2026). Its own router, mounted here rather than
+#: written into this module: the deposit is a protocol of its own, and the
+#: day it grows a resumable door and a stamp route they belong beside it.
+from . import objects as objects_module  # noqa: E402
+objects_module.mount(v1)
 app.include_router(v1_public)
 app.include_router(v1)
 
