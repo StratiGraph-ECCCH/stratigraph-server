@@ -153,7 +153,7 @@ What **does** exist, and should not be rebuilt:
 |---|---|---|
 | batch operation ingress | `POST /v1/rooms/{id}/ops` | authenticated, idempotent, up to 1000 ops per call; a stale or already-applied op comes back inside `refused` on a **200**, because for a convergent system the refusal *is* the answer |
 | live operation ingress | `WS /v1/rooms/{id}/ws` | the same verbs, WIRE 2 envelope |
-| asset ingress | `PUT /v1/rooms/{id}/asset` | content-addressed |
+| asset ingress | `POST /v1/rooms/{id}/objects` | content-addressed, and the record that describes the file travels with it (profile `em-bucket-dtc/1`); `PUT /v1/rooms/{id}/asset` still takes bytes alone and is deprecated |
 | rights ingress | `POST /v1/corpus/merge` | additive, keyed by UUID, idempotent |
 | the wire format | WIRE 2 | versioned; a mismatched speaker is refused with a sentence, not half-understood |
 | a durable offline queue on the field side | the field assistant's bridge | append-only, `fsync`ed, **unbounded**, delivered in order and stopping at the first failure rather than reordering |
