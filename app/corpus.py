@@ -675,7 +675,13 @@ def _register_resource(graph: Any, checksum: str, payload: Dict[str, Any], *,
         data = {}
         node.data = data
     data.setdefault("checksum", f"sha256:{digest}")
-    for key in ("media_type", "residency", "url", "url_type", "scope", "size"):
+    # `dtc_stamp` is here from 28 November 2026 (D5): the LINK from an object to
+    # the stamp that speaks for it, written by `POST …/objects/{sha}/stamp`.
+    # It obeys the same rule as the rest — filled in, never replaced — so a
+    # second, different stamp does not quietly take the first one's place; the
+    # door refuses that case by name instead.
+    for key in ("media_type", "residency", "url", "url_type", "scope", "size",
+                "dtc_stamp"):
         value = payload.get(key)
         if value not in (None, "") and data.get(key) in (None, ""):
             data[key] = value

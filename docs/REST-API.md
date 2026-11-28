@@ -477,6 +477,21 @@ is not a `404`: it is an answer that says `held: false` and a walk that starts
 nowhere, because «I do not know this file» and «this file has no story» are
 different things. `stamp_ref` is null until a stamp is bound to the object.
 
+**The stamp that speaks for an object**: `POST /v1/rooms/{room_id}/objects/{sha}/stamp`
+takes a `.stamp.json` somebody else emitted — EM Tools, 3DSC, the EMStudio
+bridge — keeps its bytes as an object of its own, and writes the link, so that
+one read of the story carries the stamp with it. The node does not emit a
+stamp: emitting is the tool's act. Accepted **by digest**: a stamp whose
+`self.digest` is not the object in the path is refused, so a typo in a URL
+cannot file a statement against the wrong file. Binding the same stamp twice is
+one binding (`bound: false` the second time); a DIFFERENT stamp on an object
+that already has one is `409`, because a stamp is a dated statement and an
+erratum is a new stamp, not a quiet replacement. Editor or above.
+
+A story the node cannot read is `503` and says so: «I cannot read the register»
+is not «there is nothing in the register», and a provenance panel that confuses
+the two lies once a day.
+
 **The shape, machine-readable**: `GET /v1/dtc/profile/em-bucket-dtc/1`, whose
 list of acquisition kinds is read from the datamodel, so a kind added to the
 vocabulary is offered the same day.
@@ -526,6 +541,7 @@ is the complete one. The node console's own routes are told in
 | `POST /v1/join` | Accept an invitation link and enter the room *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/open` | How to open this room in a tool, without typing anything *(rooms)* | yes |
 | `POST /v1/rooms/{room_id}/objects` | Deposit an object and the record that says where it comes from *(assets)* | yes |
+| `POST /v1/rooms/{room_id}/objects/{sha}/stamp` | Bind an already-emitted stamp to the object it speaks for *(assets)* | yes |
 | `GET /v1/rooms/{room_id}/objects/{sha}/dtc` | Everything this node can say about one object, in one read *(assets)* | yes |
 | `GET /v1/dtc/profile/em-bucket-dtc/1` | The shape of a deposit's record, with its vocabulary inside *(assets)* | yes |
 | `PUT /v1/rooms/{room_id}/asset` | Store a file in a room, addressed by its content *(assets)* | yes |

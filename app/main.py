@@ -2468,6 +2468,8 @@ class CorpusAct(BaseModel):
     url_type: Optional[str] = None
     scope: Optional[str] = None
     size: Optional[int] = None
+    #: resource: the stamp bound to this object (D5), `sha256:<hex>`
+    dtc_stamp: Optional[str] = None
     #: attribution: whose file this is and what may be done with it
     checksum: Optional[str] = None
     author: Optional[str] = None

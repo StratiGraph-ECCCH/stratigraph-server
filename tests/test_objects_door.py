@@ -390,3 +390,109 @@ def test_the_story_is_told_to_the_people_of_the_room(client, node, whoever):
     refused = client.get(f"/v1/rooms/scavo/objects/sha256:{'0' * 64}/dtc",
                          headers=HEAD)
     assert refused.status_code == 403, refused.text
+
+
+# ── the stamp that speaks for an object ──────────────────────────────────────
+
+def _stamp_for(ref: str, **over) -> dict:
+    """The shape s3Dgraphy emits: a `self` block that says which object."""
+    stamp = {"stamp_version": 1,
+             "self": {"resource_id": "r-1", "digest": ref, "label": "nord.png"},
+             "how": {"dtc_kind": "photo", "technique": "fotografia digitale"},
+             "declared": {"license": "CC-BY-4.0", "as_of": "2026-11-28"}}
+    stamp.update(over)
+    return stamp
+
+
+def test_a_stamp_is_bound_to_its_object_and_the_story_then_carries_it(
+        client, node, whoever):
+    whoever(CARLA)
+    made = deposit(client, record())
+    ref = made.json()["ref"]
+
+    bound = client.post(f"/v1/rooms/scavo/objects/{ref}/stamp", headers=HEAD,
+                        json=_stamp_for(ref))
+    assert bound.status_code == 200, bound.text
+    assert bound.json()["bound"] is True
+    stamp_ref = bound.json()["stamp_ref"]
+    assert stamp_ref.startswith("sha256:") and stamp_ref != ref
+
+    told = client.get(f"/v1/rooms/scavo/objects/{ref}/dtc", headers=HEAD)
+    assert told.json()["stamp_ref"] == stamp_ref, \
+        "one read of the story carries the stamp, which is the whole point"
+    assert node["assets"].head(stamp_ref) is not None, "the stamp's bytes are kept"
+
+
+def test_binding_the_same_stamp_twice_is_one_binding(client, node, whoever):
+    whoever(CARLA)
+    ref = deposit(client, record()).json()["ref"]
+    first = client.post(f"/v1/rooms/scavo/objects/{ref}/stamp", headers=HEAD,
+                        json=_stamp_for(ref))
+    second = client.post(f"/v1/rooms/scavo/objects/{ref}/stamp", headers=HEAD,
+                         json=_stamp_for(ref))
+    assert first.status_code == 200 and second.status_code == 200, second.text
+    assert second.json()["bound"] is False
+    assert second.json()["stamp_ref"] == first.json()["stamp_ref"]
+
+
+def test_another_stamp_over_one_already_there_is_refused(client, node, whoever):
+    """A stamp is a dated statement: replacing one in silence would make the
+    register say the first was never made."""
+    whoever(CARLA)
+    ref = deposit(client, record()).json()["ref"]
+    client.post(f"/v1/rooms/scavo/objects/{ref}/stamp", headers=HEAD,
+                json=_stamp_for(ref))
+    other = client.post(f"/v1/rooms/scavo/objects/{ref}/stamp", headers=HEAD,
+                        json=_stamp_for(ref, how={"dtc_kind": "download"}))
+    assert other.status_code == 409, other.text
+    assert "erratum" in other.json()["detail"]
+
+
+def test_a_stamp_that_speaks_for_another_file_is_refused(client, node, whoever):
+    whoever(CARLA)
+    ref = deposit(client, record()).json()["ref"]
+    wrong = client.post(f"/v1/rooms/scavo/objects/{ref}/stamp", headers=HEAD,
+                        json=_stamp_for("sha256:" + "9" * 64))
+    assert wrong.status_code == 422, wrong.text
+    assert "9" * 8 in wrong.json()["detail"], "the refusal names the file it speaks for"
+    assert client.get(f"/v1/rooms/scavo/objects/{ref}/dtc",
+                      headers=HEAD).json()["stamp_ref"] is None
+
+
+def test_a_stamp_for_bytes_this_node_does_not_hold_is_refused(client, node, whoever):
+    whoever(CARLA)
+    absent = "sha256:" + "0" * 64
+    answer = client.post(f"/v1/rooms/scavo/objects/{absent}/stamp", headers=HEAD,
+                         json=_stamp_for(absent))
+    assert answer.status_code == 404
+    assert "the object comes first" in answer.json()["detail"]
+
+
+def test_binding_a_stamp_takes_editor_or_above(client, node, whoever):
+    whoever(CARLA)
+    ref = deposit(client, record()).json()["ref"]
+    whoever(BRUNO)
+    refused = client.post(f"/v1/rooms/scavo/objects/{ref}/stamp", headers=HEAD,
+                          json=_stamp_for(ref))
+    assert refused.status_code == 403, refused.text
+
+
+def test_a_register_that_will_not_read_is_not_an_empty_story(client, node,
+                                                             whoever, monkeypatch):
+    """503, not 200 with nothing in it: a provenance panel that shows «no
+    story» for a store that is down is a panel that lies once a day."""
+    from app import main as main_module
+
+    class Rotto:
+        def graph(self):
+            raise OSError("the corpus store is not answering")
+
+        def read_slice(self, digests):
+            raise OSError("the corpus store is not answering")
+
+    whoever(CARLA)
+    ref = deposit(client, record()).json()["ref"]
+    monkeypatch.setattr(main_module, "RESIDENT", Rotto())
+    told = client.get(f"/v1/rooms/scavo/objects/{ref}/dtc", headers=HEAD)
+    assert told.status_code == 503, told.text
+    assert "not the same as" in told.json()["detail"]

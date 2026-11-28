@@ -502,9 +502,21 @@ async def get_object_story(room_id: str, sha: str, request: Request) -> ObjectSt
     digest = ref.split(":", 1)[1]
 
     held = main_module.ASSET_STORE.head(ref)
-    graph, version = main_module.RESIDENT.graph()
-    walk = neighbourhood_of_digest(graph, digest, hops=DEFAULT_HOPS)
-    slice_ = main_module.RESIDENT.read_slice([digest])
+    # «I cannot read the register» is not «there is nothing in the register»,
+    # and a client that cannot tell them apart will show an empty provenance
+    # panel for a store that is down (asked for by EMStudio, 28 Nov 2026).
+    try:
+        graph, version = main_module.RESIDENT.graph()
+        walk = neighbourhood_of_digest(graph, digest, hops=DEFAULT_HOPS)
+        slice_ = main_module.RESIDENT.read_slice([digest])
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — whatever a store fails with
+        raise HTTPException(
+            status_code=503,
+            detail=(f"this node cannot read its register right now ({exc}): "
+                    f"the story of {ref} is unknown, which is not the same as "
+                    f"empty")) from None
 
     from . import asset_homes as homes_module
 
@@ -516,6 +528,130 @@ async def get_object_story(room_id: str, sha: str, request: Request) -> ObjectSt
         size=(held or {}).get("size") if isinstance(held, dict) else None,
         home=home, stamp_ref=_stamp_of(told),
         corpus=told, neighbourhood=walk, version=version)
+
+
+class StampBound(BaseModel):
+    """What the node answers once a stamp speaks for an object."""
+
+    ref: str = Field(description="the object the stamp is about")
+    stamp_ref: str = Field(description="the stamp, stored as an object of its own")
+    created: bool = Field(description="false when this node already held the stamp's bytes")
+    bound: bool = Field(description="false when the link was already there: binding twice is not an error")
+
+
+async def post_object_stamp(room_id: str, sha: str, request: Request) -> StampBound:
+    """Bind an already-emitted stamp to the object it speaks for.
+
+    The stamp is a `.stamp.json` somebody else emitted — EM Tools, 3DSC, the
+    EMStudio bridge — and the node does not make one: emitting is the tool's
+    act, and a server that re-emitted would be signing a statement it did not
+    witness. What the node does is keep the bytes and write the LINK, so that
+    one read of the object's story carries the stamp with it instead of leaving
+    a client to guess which file in the store speaks for which object.
+
+    **Accepted by digest.** The stamp says which object it is about
+    (`self.digest`); if that is not the object in the path, it is refused. A
+    stamp cannot be filed against the wrong file by a typo in a URL.
+
+    **Idempotent, and it does not overwrite.** The same stamp twice is one
+    binding and `bound: false` the second time. A DIFFERENT stamp on an object
+    that already has one is `409`: a stamp is a dated statement, and replacing
+    one in silence would make the register say that the first was never made.
+    An erratum is a new stamp on a new object, which is what dtcstamp says too.
+
+    **Who may**: editor or above in the room, as for a deposit.
+    """
+    import hashlib
+    import json as _json
+
+    from . import main as main_module
+    from .main import CorpusAct, _acting_role, _record_home
+
+    _acl, _room, role, who = await _acting_role(room_id, request)
+    if role is None or not getattr(role, "can_write", False):
+        raise HTTPException(
+            status_code=403,
+            detail=f"binding a stamp in {room_id} takes editor or above")
+
+    ref = sha if str(sha).startswith("sha256:") else f"sha256:{sha}"
+    if not asset_ref_valid(ref):
+        raise HTTPException(status_code=400,
+                            detail=f"not an asset reference: {ref!r} "
+                                   f"(expected 'sha256:<hex>')")
+    digest = ref.split(":", 1)[1]
+    if main_module.ASSET_STORE.head(ref) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(f"this node holds no {ref}: a stamp speaks for an object, "
+                    f"so the object comes first"))
+
+    raw = await request.body()
+    if not raw:
+        raise HTTPException(status_code=400, detail="the body is the stamp, and it is empty")
+    try:
+        stamp = _json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400,
+                            detail=f"the stamp is not JSON: {exc}") from None
+    if not isinstance(stamp, dict) or not isinstance(stamp.get("self"), dict):
+        raise HTTPException(
+            status_code=422,
+            detail="a stamp has a `self` block saying which object it is about")
+    said = str((stamp.get("self") or {}).get("digest") or "").strip()
+    said_hex = said.split(":", 1)[1] if said.startswith("sha256:") else said
+    if not said_hex:
+        raise HTTPException(
+            status_code=422,
+            detail="the stamp's `self.digest` is empty: a stamp that does not "
+                   "say which object it is about cannot be bound to one")
+    if said_hex.lower() != digest.lower():
+        raise HTTPException(
+            status_code=422,
+            detail=(f"this stamp speaks for sha256:{said_hex} and the object in "
+                    f"the path is {ref}: a stamp is filed against the file it "
+                    f"names, never against the one a URL names"))
+
+    # THE LINK FIRST, as a question: a stamp already bound and different is a
+    # refusal, and a refusal must not leave new bytes behind.
+    story = main_module.RESIDENT.read_slice([digest])
+    already = _stamp_of(story if isinstance(story, dict) else {})
+
+    body = _json.dumps(stamp, ensure_ascii=False, sort_keys=True,
+                       separators=(",", ":")).encode("utf-8")
+    stamp_digest = hashlib.sha256(body).hexdigest()
+    stamp_ref = f"sha256:{stamp_digest}"
+    if already and already != stamp_ref:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"{ref} already has a stamp ({already}) and this is another "
+                    f"one ({stamp_ref}): a stamp is a dated statement, so an "
+                    f"erratum is a new stamp on a new object, not a quiet "
+                    f"replacement"))
+
+    kept = main_module.ASSET_STORE.put(body, "application/json")
+    _record_home(str(kept.get("ref") or stamp_ref), room_id, who)
+
+    def act(**fields: Any) -> Dict[str, Any]:
+        one = CorpusAct(**fields)
+        try:
+            report, _version = main_module.RESIDENT.append(
+                one.act, one.model_dump(exclude_none=True), author=who)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        return report or {}
+
+    # the stamp is a file of this node too: the register knows it exists…
+    act(act="resource", checksum=stamp_ref, media_type="application/json",
+        residency="resident", size=len(body), scope="stamp",
+        name=f"stamp of {digest[:12]}…")
+    # …and the object carries the link to it
+    act(act="resource", checksum=ref, dtc_stamp=stamp_ref)
+
+    return StampBound(ref=ref, stamp_ref=stamp_ref,
+                      created=bool(kept.get("created", True)),
+                      bound=already != stamp_ref)
 
 
 def _stamp_of(slice_: Dict[str, Any]) -> Optional[str]:
@@ -579,6 +715,10 @@ def mount(token_router: APIRouter) -> None:
         "/rooms/{room_id}/objects", post_object, methods=["POST"],
         response_model=ObjectDeposit, tags=["assets"],
         summary="Deposit an object and the record that says where it comes from")
+    token_router.add_api_route(
+        "/rooms/{room_id}/objects/{sha}/stamp", post_object_stamp, methods=["POST"],
+        response_model=StampBound, tags=["assets"],
+        summary="Bind an already-emitted stamp to the object it speaks for")
     token_router.add_api_route(
         "/rooms/{room_id}/objects/{sha}/dtc", get_object_story, methods=["GET"],
         response_model=ObjectStory, tags=["assets"],

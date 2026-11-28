@@ -154,6 +154,7 @@ Two operations depend on optional libraries: `POST /v1/export-ttl` needs
 | `POST /v1/join` | Accept an invitation link and enter the room *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/open` | How to open this room in a tool, without typing anything *(rooms)* | yes |
 | `POST /v1/rooms/{room_id}/objects` | Deposit an object and the record that says where it comes from *(assets)* | yes |
+| `POST /v1/rooms/{room_id}/objects/{sha}/stamp` | Bind an already-emitted stamp to the object it speaks for *(assets)* | yes |
 | `GET /v1/rooms/{room_id}/objects/{sha}/dtc` | Everything this node can say about one object, in one read *(assets)* | yes |
 | `GET /v1/dtc/profile/em-bucket-dtc/1` | The shape of a deposit's record, with its vocabulary inside *(assets)* | yes |
 | `PUT /v1/rooms/{room_id}/asset` | Store a file in a room, addressed by its content *(assets)* | yes |
