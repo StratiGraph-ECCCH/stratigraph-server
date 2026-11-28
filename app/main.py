@@ -5865,8 +5865,14 @@ def node_kind_report(request: Request) -> Dict[str, Any]:
     an institutional node refuses test people (`app/node_kind.py`)."""
     _require_operator(request)
     from . import handoff as ho
+    # Measured, not assumed: the console is where an operator looks when
+    # nothing works, and «configured» there used to mean «the settings exist».
+    admin = keycloak_admin.admin()
+    kc_configured = admin.configured()
+    kc_alive, kc_why = admin.alive() if kc_configured else (None, "")
     return node_kind_module.describe(
-        public_base=ho.public_base(), kc_configured=keycloak_admin.admin().configured(),
+        public_base=ho.public_base(), kc_configured=kc_configured,
+        kc_alive=kc_alive, kc_why=kc_why,
         trusted_nodes=len(transfer_module.trusted()),
         test_people_on=people_module.test_people_switch(), node_name=node_name())
 

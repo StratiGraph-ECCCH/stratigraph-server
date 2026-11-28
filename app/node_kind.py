@@ -72,7 +72,8 @@ def _public_name_is_local(base: str) -> bool:
 
 
 def checks(environ: Optional[Dict[str, str]] = None, *, public_base: str = "",
-           kc_configured: bool = False, trusted_nodes: int = 0,
+           kc_configured: bool = False, kc_alive: Optional[bool] = None,
+           kc_why: str = "", trusted_nodes: int = 0,
            test_people_on: bool = False, node_name: str = "") -> List[Dict[str, str]]:
     """What this node lacks for its kind, as sentences. Levels: `bad` (a rule
     the server enforces, or a real risk), `warn` (it works, but not as the kind
@@ -100,6 +101,21 @@ def checks(environ: Optional[Dict[str, str]] = None, *, public_base: str = "",
                           "credenziali): le password locali si danno solo con gli script del nodo.",
                           "The server cannot manage Keycloak accounts (EM_KC_ADMIN_URL and credentials are "
                           "missing): local passwords can only be given with the node's scripts."))
+    elif kc_alive is False:
+        # CONFIGURED AND NOT ANSWERING is the state that cost a day on 26
+        # November 2026: the settings were all there, so nothing warned, and
+        # the node quietly created nobody until the first sign-in failed with
+        # `user_not_found`. `bad`, not `warn`: a node that cannot create people
+        # cannot do what an institutional node is for.
+        out.append(_check("bad", "kc-admin-refused",
+                          f"Le credenziali di Keycloak ci sono ma Keycloak non le accetta ({kc_why}): "
+                          f"il nodo non può creare nessuno, e il primo accesso con ORCID fallirà. "
+                          f"Di solito la password dell'amministratore è cambiata e EM_KC_ADMIN_PASSWORD no; "
+                          f"ricrea il contenitore, perché un restart riusa le variabili vecchie.",
+                          f"The Keycloak credentials are there but Keycloak refuses them ({kc_why}): "
+                          f"this node can create nobody, and the first ORCID sign-in will fail. "
+                          f"Usually the admin password changed and EM_KC_ADMIN_PASSWORD did not; "
+                          f"recreate the container, because a restart reuses the old variables."))
     if k == "institutional":
         if test_people_on:
             out.append(_check("bad", "test-people-refused",

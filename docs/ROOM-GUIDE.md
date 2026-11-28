@@ -115,6 +115,42 @@ Click a room's name, or *People and sharing*, and the room opens on the right:
 A reader or an editor sees the first three as they are, with a sentence saying
 who can change them.
 
+## Putting a file into a room
+
+A room keeps the study's files — photographs, point clouds, drawings, the
+models — and an editor is who may add them. Since the end of November 2026 a
+file and the few lines that say where it comes from travel **together**: the
+tool you are depositing from asks you for them before it sends anything, and a
+node will not take a file that arrives without them.
+
+What it asks for is short, and it is all things you know:
+
+* **the licence** — what others may do with the file. Without it the node
+  refuses the deposit, and it is right to: a file nobody may use is a file
+  nobody will;
+* **where it comes from** — the kind of act that produced it. Either you made
+  it here (a photograph, a laser scan, a survey, a drawing, a recording sheet)
+  or you brought it from somewhere else (a download, an import, a reference).
+  If it is a download, the node also wants the address or the DOI it came from;
+* **when**, for something made here: the day the photograph was taken, not the
+  day you are depositing it;
+* **how**, again only for something made here: the technique and the software.
+  On a file you downloaded the node refuses these, because they would be a
+  claim about an act that somebody else performed;
+* **who answers for publishing it**, when that is not you: an ORCID iD the node
+  has accredited. A name typed by hand is not enough, and the node says so with
+  the iD in the sentence.
+
+A refusal always names the thing that is missing, and nothing is stored until
+the record holds: a file you got wrong leaves nothing behind to clean up.
+
+Why the insistence. A file in a bucket with no story is a file that, in two
+years, nobody can publish, cite or hand to an archive — and the moment when
+somebody still knows where it came from is the moment it is deposited, not the
+moment somebody needs it. The same record is what lets the room tell you later,
+in one answer, who made a file, under which licence it sits, what it was made
+from and what was made out of it.
+
 ## Sharing a room — for administrators and owners
 
 The room's panel (*People and sharing*) is where the people of the room are

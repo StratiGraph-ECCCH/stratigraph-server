@@ -123,6 +123,32 @@ class KeycloakAdmin:
         self._token = token
         return token
 
+    def alive(self) -> Tuple[bool, str]:
+        """Does Keycloak actually ANSWER these credentials? `(ok, why)`.
+
+        `configured()` tests the presence of the settings, which is not the
+        same question and was measured to be the expensive difference: on 26
+        November 2026 a node ran for a day with an admin password that had been
+        changed in Keycloak and not in the environment. Everything said
+        «configured», no user was ever created, and the first ORCID sign-in
+        failed with `user_not_found` — a day lost looking in the wrong place.
+
+        So this asks for a token, with the cache cleared: the answer is about
+        now, not about the last time it worked. A refusal is reported with the
+        status, because «401» and «cannot reach the host» send an operator to
+        two different places.
+        """
+        if not self.configured():
+            return False, "not configured"
+        self._token = None
+        try:
+            self._login()
+        except KeycloakError as exc:
+            return False, str(exc)
+        except Exception as exc:  # noqa: BLE001 — a network says many things
+            return False, f"Keycloak did not answer ({exc})"
+        return True, "answers"
+
     def _api(self, method: str, path: str, body: Any = None) -> Tuple[int, Any]:
         url = f"{self.base}/admin/realms/{self.realm}{path}"
         return self._request(method, url, body=body, token=self._login())

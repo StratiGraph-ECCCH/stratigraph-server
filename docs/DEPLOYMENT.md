@@ -1,12 +1,43 @@
 # Running a node
 
-A node is switched on in one of two places, and this page tells both: **on your
-computer**, from the `dev-stack` folder of this repository — the development
-node, and the same scripts that prepare a field node — and **on a host**, the
-whole system behind one name, with the playbook. The two roads a node's
-services come by (built from the code, or downloaded as published images) are
-told once, in the first half, because they belong to the scripts that switch a
-node on and not to the place it runs.
+A node is switched on in one of three places. This page tells two of them in
+full: **on your computer**, from the `dev-stack` folder of this repository — the
+development node, and the same scripts that prepare a field node — and **on a
+host**, the whole system behind one name, with the playbook. The third, **in an
+institution's cluster**, is [`deploy/openshift/`](../deploy/openshift/README.md),
+where the manifests are and where that road is told; what this page says about
+the kind of node and about Keycloak's credentials holds there too. The two roads
+a node's services come by (built from the code, or downloaded as published
+images) are told once, in the first half, because they belong to the scripts
+that switch a node on and not to the place it runs.
+
+## The one setting that is the same everywhere — `EM_NODE_KIND`
+
+Whichever road you take, a node **declares what kind it is**, and is then held to
+that kind's safe defaults (`app/node_kind.py`). It is one setting with three
+words, and it is a decision of the deployment: the console verifies it, it never
+decides it.
+
+| `EM_NODE_KIND` | what it is | what the server does with it |
+|---|---|---|
+| `personal` | one person's computer (also `EM_NODE_PROFILE=personal`) | the quietest defaults; nothing to manage |
+| `field` | the Field Computing Node, often offline | warns while the trust list is empty (the team cannot arrive) and while test people are on |
+| `institutional` | an institution's node, public name, ORCID sign-in | **refuses test people** whatever else says so |
+| *(unset)* | `node` | works, and the console asks for the kind to be declared |
+
+Where each road sets it:
+
+* **on your computer** — `dev-stack/.env.dev` (the dev stack declares itself
+  `field`);
+* **on a host** — an Ansible variable, written into the service's environment by
+  the playbook;
+* **in a cluster** — the kustomize overlay patches it
+  (`deploy/openshift/overlays/*/kustomization.yaml`, the path
+  `/data/EM_NODE_KIND`).
+
+The kind shows in `/v1/node`, `/v1/health`, the console's bar and its *Node
+health* panel; `GET /v1/admin/node-kind` lists what this node still lacks for
+the kind it declares, in sentences rather than codes.
 
 ## On your computer — the development node
 
@@ -254,19 +285,11 @@ decides what has to be true about the network.
 
 #### The node says which kind it is — `EM_NODE_KIND`
 
-Same server everywhere; the node **declares** its kind and is held to that
-kind's safe defaults (`app/node_kind.py`):
-
-| `EM_NODE_KIND` | what it is | what the server does with it |
-|---|---|---|
-| `institutional` | an institution's node, public name, ORCID sign-in | **refuses test people** even if `EM_ALLOW_TEST_PEOPLE` is on; warns when the public name is local or not https, or Keycloak cannot be managed from the server |
-| `field` | the Field Computing Node, often offline | warns while the trust list is empty (the team cannot arrive) and while test people are on |
-| `personal` | one person's computer (also `EM_NODE_PROFILE=personal`) | nothing to manage |
-| *(unset)* | `node` | works as before; the console asks to declare the kind |
-
-The kind shows in `/v1/node`, `/v1/health`, the console's bar and its *Node
-health* panel (`GET /v1/admin/node-kind` lists what is missing, in sentences).
-The dev stack declares itself `field`.
+The setting and its three words are at the top of this page, because they
+are the same on every road — your computer, a host, a cluster. On a host it
+is an Ansible variable, written into the service's environment by the
+playbook; the two shapes below are what an `institutional` node has to be
+true about its network.
 
 #### The institutional node — a public name
 
@@ -500,6 +523,46 @@ change that cannot be verified in a token is not verified at all: decode one and
 look.
 
 ---
+
+### Keycloak's admin credentials — the setting that fails in silence
+
+A node that signs people in with ORCID also has to be able to **create** them in
+Keycloak: the first time somebody arrives with their iD, the node makes their
+account. For that it needs an administrator of its own, and it reads it from
+four variables:
+
+| variable | what it is |
+|---|---|
+| `EM_KC_ADMIN_URL` | where Keycloak is, as the server reaches it (`http://keycloak:8080` inside the compose network, not the public name) |
+| `EM_KC_REALM` | the realm the people live in (`em-dev` on the dev stack) |
+| `EM_KC_ADMIN_CLIENT_ID` + `EM_KC_ADMIN_CLIENT_SECRET` | a confidential client with a service account — **the production shape** |
+| `EM_KC_ADMIN_USER` + `EM_KC_ADMIN_PASSWORD` | an admin of the `master` realm through `admin-cli` — the dev stack's shape |
+
+Either pair will do; the service account is the one to use on an institutional
+node, because it is scoped to the realm and it is not a person's password.
+
+**The trap, measured on 26 November 2026.** Keycloak's own admin variables
+(`KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`, which belong to the Keycloak
+container) and the server's (`EM_KC_ADMIN_*`) are two different settings.
+Changing the password in Keycloak without changing it in the server's
+environment leaves a node that looks perfectly well: it starts, it answers, the
+console says the administrator is *configured* — and it creates nobody. The
+first ORCID sign-in then fails with `user_not_found`, which sends whoever is
+looking into the realm's import, the redirect URIs and the identity provider:
+everywhere except the place where the fault is. A day was lost there.
+
+Two things follow, and the second is the one to remember:
+
+* **A `restart` is not enough.** A container keeps the environment it was
+  created with, so changing a variable and restarting changes nothing. Recreate
+  it (`docker compose up -d --force-recreate stratigraph-server`, or the
+  playbook, or a rollout in the cluster).
+* **Ask the node, do not assume.** `GET /v1/admin/node-kind` — the console's
+  *Node health* panel — now **tries** the credentials instead of checking that
+  they exist. If Keycloak refuses them the answer is a `bad` check,
+  `kc-admin-refused`, which names the status it got back and says to recreate
+  the container. «Configured» and «answering» are two questions, and only the
+  second one is worth asking.
 
 ### What this page does not cover
 
