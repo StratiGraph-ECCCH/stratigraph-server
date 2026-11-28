@@ -82,12 +82,20 @@ COPY pyproject.toml README.md ./
 # all'avvio — che è il modo giusto di fallire, ma solo se l'alternativa esiste.
 # `[binary]` perché il wheel porta libpq dentro: niente `libpq-dev` da
 # installare e niente compilatore in un'immagine che non ne ha uno.
+# `python-multipart` è qui dal 28 novembre 2026, dopo un difetto vero: la
+# porta del deposito (`POST …/objects`) legge un corpo multipart, Starlette
+# lo sa fare solo con quel pacchetto, e l'immagine 1.6.0-dev.93 è uscita
+# senza — ogni deposito moriva con un 500 che il client vedeva come «Failed
+# to fetch». La riga sopra è scritta a mano e NON si legge da pyproject.toml:
+# `tests/test_le_dipendenze_dell_immagine.py` tiene le due liste uguali,
+# perché è precisamente questo scarto che ha prodotto quell'immagine.
 RUN set -eu; \
     : "${S3DGRAPHY_VERSION:?an empty --build-arg; the pin is in pyproject.toml}"; \
     spec="s3dgraphy${S3DGRAPHY_EXTRAS:+[${S3DGRAPHY_EXTRAS}]}==${S3DGRAPHY_VERSION}"; \
     pip install --upgrade pip && \
     pip install "$spec" "fastapi>=0.110" "uvicorn[standard]>=0.27" \
-                "PyJWT[crypto]>=2.8" "boto3>=1.34" "psycopg[binary,pool]>=3.1"
+                "PyJWT[crypto]>=2.8" "boto3>=1.34" "psycopg[binary,pool]>=3.1" \
+                "python-multipart>=0.0.9"
 
 COPY app ./app
 

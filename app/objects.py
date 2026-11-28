@@ -75,6 +75,30 @@ class ObjectDeposit(BaseModel):
     acts: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ObjectStory(BaseModel):
+    """One object's whole story, in one read."""
+
+    ref: str
+    room: str
+    #: whether this node HOLDS the bytes. «I do not know this file» and «this
+    #: file has no story» are different answers, and both are said here.
+    held: bool
+    media_type: Optional[str] = None
+    size: Optional[int] = None
+    #: the room these bytes came in through (F1)
+    home: Optional[str] = None
+    #: the stamp bound to this object, when one has been. Absent until the
+    #: stamp route exists: a field that was always null would be a promise.
+    stamp_ref: Optional[str] = None
+    #: the register's slice about this digest — the shape `GET /v1/corpus` gives
+    corpus: Dict[str, Any] = Field(default_factory=dict)
+    #: what made it and what it went on to make, the walk `GET
+    #: /v1/corpus/neighbourhood` performs
+    neighbourhood: Dict[str, Any] = Field(default_factory=dict)
+    #: the corpus version both of them came out of
+    version: str = ""
+
+
 def _text(block: Any, key: str) -> str:
     value = (block or {}).get(key) if isinstance(block, dict) else None
     return str(value).strip() if isinstance(value, (str, int, float)) else ""
@@ -157,6 +181,24 @@ def _refusal(record: Dict[str, Any], room_id: str, *, bytes_travel: bool) -> Opt
     if room and room != room_id:
         return (f"`target.room` says {room!r} and the call was made on {room_id!r}: "
                 f"one of the two is a mistake, and the server will not choose")
+    return None
+
+
+def _lot_already_is(graph_doc: Dict[str, Any], lot_id: str) -> Optional[str]:
+    """The kind of act the register already records for this lot, or None.
+
+    Measured on 28 November 2026: appending an acquisition with an id that
+    exists and a DIFFERENT `dtc_kind` is merged in silence — the lot keeps the
+    first kind and the new file joins it, with no warning in the answer. So a
+    survey and a download deposited under one lot become, in the register, one
+    survey. The library is right not to guess which of the two is wrong; the
+    door is the place to refuse.
+    """
+    for node in (graph_doc or {}).get("nodes") or []:
+        if str(node.get("id")) != lot_id:
+            continue
+        kind = (node.get("data") or {}).get("dtc_kind")
+        return str(kind) if isinstance(kind, str) and kind.strip() else None
     return None
 
 
@@ -383,6 +425,19 @@ async def post_object(room_id: str, request: Request) -> ObjectDeposit:
     kind = _text(source, "dtc_kind")
     made_at = _text(record.get("when"), "made_at")
 
+    # A LOT IS ONE ACT. Joining a lot whose kind is not this deposit's would be
+    # taken in silence by the register (measured), and the file would end up
+    # described by somebody else's act.
+    lot_id = _text(target, "lot_id")
+    if lot_id:
+        was = _lot_already_is(main_module.RESIDENT.read(), lot_id)
+        if was and was != kind:
+            raise HTTPException(
+                status_code=409,
+                detail=(f"the lot {lot_id!r} is a {was!r} and this deposit is a "
+                        f"{kind!r}: a lot is one act, so either send this file "
+                        f"under a lot of its own or say the same kind"))
+
     acts: Dict[str, Any] = {}
     acts["resource"] = act(act="resource", checksum=ref, media_type=media_type,
                            name=_text(obj, "name") or None,
@@ -407,6 +462,74 @@ async def post_object(room_id: str, request: Request) -> ObjectDeposit:
                          media_type=media_type, home=home,
                          acquisition_id=lot if isinstance(lot, str) else None,
                          responsible=responsible, acts=acts)
+
+
+async def get_object_story(room_id: str, sha: str, request: Request) -> ObjectStory:
+    """Everything the node can say about one object, in one request.
+
+    Written on 28 November 2026 because EMStudio had to ask three times — the
+    register's slice, the walk, and the store — to show one file's provenance,
+    and a client that must join three answers is a client that will join them
+    differently from the next one.
+
+    **Who may**: somebody who has a role in the room. The bytes are not here,
+    only what is said about them, but what is said about them names people and
+    licences, and a room is where that belongs.
+
+    `stamp_ref` is null until a stamp has been bound to the object: the binding
+    arrives with `POST …/objects/{sha}/stamp`, and until then EMStudio keeps
+    sending the stamp as a file of its own — which is honest, and which this
+    field will make unnecessary rather than pretend to have done.
+    """
+    from s3dgraphy.dtc import neighbourhood_of_digest
+    from s3dgraphy.dtc.neighbourhood import DEFAULT_HOPS
+
+    from . import main as main_module
+    from .main import _acting_role
+
+    _acl, _room, role, _who = await _acting_role(room_id, request)
+    if role is None:
+        raise HTTPException(
+            status_code=403,
+            detail=f"the story of a file in {room_id} is told to the people of "
+                   f"that room")
+
+    ref = sha if str(sha).startswith("sha256:") else f"sha256:{sha}"
+    if not asset_ref_valid(ref):
+        raise HTTPException(status_code=400,
+                            detail=f"not an asset reference: {ref!r} "
+                                   f"(expected 'sha256:<hex>')")
+    digest = ref.split(":", 1)[1]
+
+    held = main_module.ASSET_STORE.head(ref)
+    graph, version = main_module.RESIDENT.graph()
+    walk = neighbourhood_of_digest(graph, digest, hops=DEFAULT_HOPS)
+    slice_ = main_module.RESIDENT.read_slice([digest])
+
+    from . import asset_homes as homes_module
+
+    home = homes_module.ASSET_HOMES.home(ref)
+    told = {"graph": slice_} if not isinstance(slice_, dict) else slice_
+    return ObjectStory(
+        ref=ref, room=room_id, held=held is not None,
+        media_type=(held or {}).get("media_type") if isinstance(held, dict) else None,
+        size=(held or {}).get("size") if isinstance(held, dict) else None,
+        home=home, stamp_ref=_stamp_of(told),
+        corpus=told, neighbourhood=walk, version=version)
+
+
+def _stamp_of(slice_: Dict[str, Any]) -> Optional[str]:
+    """The stamp bound to the object in the register, when one is.
+
+    Reads `data.dtc_stamp` off the resource node — the key D5 names. Nothing
+    writes it yet; it is read here so that the day the stamp route does, this
+    answer carries it without a second deployment.
+    """
+    for node in (slice_ or {}).get("nodes") or []:
+        value = (node.get("data") or {}).get("dtc_stamp")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def dtc_profile() -> Dict[str, Any]:
@@ -456,6 +579,10 @@ def mount(token_router: APIRouter) -> None:
         "/rooms/{room_id}/objects", post_object, methods=["POST"],
         response_model=ObjectDeposit, tags=["assets"],
         summary="Deposit an object and the record that says where it comes from")
+    token_router.add_api_route(
+        "/rooms/{room_id}/objects/{sha}/dtc", get_object_story, methods=["GET"],
+        response_model=ObjectStory, tags=["assets"],
+        summary="Everything this node can say about one object, in one read")
     token_router.add_api_route(
         "/dtc/profile/" + PROFILE, dtc_profile, methods=["GET"],
         response_model=Dict[str, Any], tags=["assets"],

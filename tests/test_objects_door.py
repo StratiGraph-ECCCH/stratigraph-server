@@ -315,3 +315,78 @@ def test_the_profile_lists_the_kinds_the_datamodel_declares(client, node, whoeve
     kinds = {k["kind"]: k["family"] for k in answer.json()["acquisition_kinds"]}
     assert kinds.get("photo") == "capture" and kinds.get("download") == "retrieval"
     assert "the token's identity" in answer.json()["the_depositor"]
+
+
+# ── a lot is one act ─────────────────────────────────────────────────────────
+
+def test_a_lot_that_already_is_another_kind_of_act_is_refused(client, node, whoever):
+    """Measured on 28 November 2026: the register merges this in silence, and
+    the file ends up described by somebody else's act."""
+    whoever(CARLA)
+    first = deposit(client, record(source={"dtc_kind": "photo"},
+                                   when={"made_at": "2026-09-14"},
+                                   target={"lot_id": "consegna-27"}))
+    assert first.status_code == 200, first.text
+
+    mixed = deposit(client, record(source={"dtc_kind": "download",
+                                           "retrieved_from": "https://doi.org/10.5281/zenodo.1234567"},
+                                   target={"lot_id": "consegna-27"}),
+                    blob=b"other bytes entirely")
+    assert mixed.status_code == 409, mixed.text
+    detail = mixed.json()["detail"]
+    assert "photo" in detail and "download" in detail and "consegna-27" in detail
+
+
+def test_the_same_kind_joins_the_lot(client, node, whoever):
+    whoever(CARLA)
+    one = deposit(client, record(target={"lot_id": "consegna-27"}))
+    two = deposit(client, record(target={"lot_id": "consegna-27"}),
+                  blob=b"a second file of the same delivery")
+    assert one.status_code == 200 and two.status_code == 200, two.text
+    assert two.json()["acquisition_id"] == "consegna-27"
+
+
+# ── the story of one object, in one read ─────────────────────────────────────
+
+def test_one_read_tells_a_deposited_object_s_whole_story(client, node, whoever):
+    whoever(CARLA)
+    made = deposit(client, record(source={"dtc_kind": "photo",
+                                          "campaign": "Templum Mare 2026"},
+                                  when={"made_at": "2026-09-14"}))
+    assert made.status_code == 200, made.text
+    ref = made.json()["ref"]
+
+    told = client.get(f"/v1/rooms/scavo/objects/{ref}/dtc", headers=HEAD)
+    assert told.status_code == 200, told.text
+    story = told.json()
+    assert story["ref"] == ref and story["held"] is True
+    assert story["room"] == "scavo" and story["home"] == "scavo"
+    assert story["media_type"] == "image/png"
+    assert story["stamp_ref"] is None, "nothing binds a stamp yet, and it says so"
+    assert story["version"], "the answer says which version of the register it came from"
+    whole = json.dumps(story)
+    for said in ("CC-BY-4.0", "photo", "Templum Mare 2026"):
+        assert said in whole, f"the story should tell {said!r}"
+
+
+def test_the_story_of_a_file_this_node_never_saw_says_so_rather_than_404(
+        client, node, whoever):
+    """«I do not know this file» and «this file has no story» are different
+    answers — the same rule the neighbourhood walk already follows."""
+    whoever(CARLA)
+    told = client.get(f"/v1/rooms/scavo/objects/sha256:{'0' * 64}/dtc", headers=HEAD)
+    assert told.status_code == 200, told.text
+    assert told.json()["held"] is False
+    assert told.json()["neighbourhood"].get("start") is None
+
+
+def test_the_story_is_told_to_the_people_of_the_room(client, node, whoever):
+    whoever(BRUNO)                       # viewer: may read
+    made_by_nobody = client.get(f"/v1/rooms/scavo/objects/sha256:{'0' * 64}/dtc",
+                                headers=HEAD)
+    assert made_by_nobody.status_code == 200
+
+    whoever("0000-0002-9999-9999")       # a stranger to this room
+    refused = client.get(f"/v1/rooms/scavo/objects/sha256:{'0' * 64}/dtc",
+                         headers=HEAD)
+    assert refused.status_code == 403, refused.text

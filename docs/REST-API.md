@@ -463,6 +463,20 @@ over 64 MiB in one piece is refused with the door that resumes
 this node** (`dev-stack/accredited.yaml`, `GET /v1/whoami`): a name the node does
 not know is refused rather than written down. Left out, the depositor answers.
 
+**A lot is one act.** `target.lot_id` joins a delivery already in the register,
+and a lot whose kind is not this deposit's is refused with `409`: measured on 28
+November 2026, the register merges that in silence, and a survey and a download
+sent under one lot become, in the register, one survey.
+
+**Reading a story back**: `GET /v1/rooms/{room_id}/objects/{sha}/dtc` answers
+with everything the node can say about one object — whether it holds the bytes,
+their home, the register's slice about that digest, and the walk of what made it
+and what it went on to make — so that a client does not have to join three
+answers of its own. Told to the people of the room. A digest the node never saw
+is not a `404`: it is an answer that says `held: false` and a walk that starts
+nowhere, because «I do not know this file» and «this file has no story» are
+different things. `stamp_ref` is null until a stamp is bound to the object.
+
 **The shape, machine-readable**: `GET /v1/dtc/profile/em-bucket-dtc/1`, whose
 list of acquisition kinds is read from the datamodel, so a kind added to the
 vocabulary is offered the same day.
@@ -512,6 +526,7 @@ is the complete one. The node console's own routes are told in
 | `POST /v1/join` | Accept an invitation link and enter the room *(rooms)* | yes |
 | `GET /v1/rooms/{room_id}/open` | How to open this room in a tool, without typing anything *(rooms)* | yes |
 | `POST /v1/rooms/{room_id}/objects` | Deposit an object and the record that says where it comes from *(assets)* | yes |
+| `GET /v1/rooms/{room_id}/objects/{sha}/dtc` | Everything this node can say about one object, in one read *(assets)* | yes |
 | `GET /v1/dtc/profile/em-bucket-dtc/1` | The shape of a deposit's record, with its vocabulary inside *(assets)* | yes |
 | `PUT /v1/rooms/{room_id}/asset` | Store a file in a room, addressed by its content *(assets)* | yes |
 | `POST /v1/rooms/{room_id}/asset-reference` | On a personal node, put a project's file in the room by reference *(assets)* | yes |
